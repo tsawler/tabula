@@ -98,25 +98,31 @@ Tasks marked 🎯 are **RAG CRITICAL** - they directly impact embedding quality 
 **Coverage**: 75-90% on xref.go, 79.5% overall
 **Performance**: 120K XRef tables/sec, 4.9M FindXRef ops/sec
 
-#### Task 1.6: File Reader (8 hours)
-- [ ] Implement `reader/reader.go`
-- [ ] Parse PDF header (%PDF-x.y)
-- [ ] Load XRef table
-- [ ] Load trailer
-- [ ] Resolve indirect references
-- [ ] Write file reader tests
+#### Task 1.6: File Reader (8 hours) ✅ COMPLETE
+- [x] Implement `reader/reader.go`
+- [x] Parse PDF header (%PDF-x.y)
+- [x] Load XRef table
+- [x] Load trailer
+- [x] Resolve indirect references
+- [x] Write file reader tests
 
-**Deliverable**: Basic PDF file reader
-**Acceptance**: Can open and parse PDF structure
+**Deliverable**: Basic PDF file reader ✅
+**Acceptance**: Can open and parse PDF structure ✅
+**Completed**: November 24, 2024
+**Tests**: 18 test functions, 25+ test cases, all passing
+**Coverage**: 79.1%
 
-#### Task 1.7: Object Resolution (8 hours)
-- [ ] Implement lazy object loading
-- [ ] Cache resolved objects
-- [ ] Handle circular references
-- [ ] Add object resolver tests
+#### Task 1.7: Object Resolution (8 hours) ✅ COMPLETE
+- [x] Implement lazy object loading
+- [x] Cache resolved objects
+- [x] Handle circular references
+- [x] Add object resolver tests
 
-**Deliverable**: Object graph traversal
-**Acceptance**: Can resolve any object in PDF
+**Deliverable**: Object graph traversal ✅
+**Acceptance**: Can resolve any object in PDF ✅
+**Completed**: November 24, 2024
+**Tests**: 16 test functions, 20+ test cases, all passing
+**Coverage**: 86.6%
 
 #### Task 1.8: Catalog & Pages (8 hours)
 - [ ] Parse document catalog
@@ -209,7 +215,7 @@ Tasks marked 🎯 are **RAG CRITICAL** - they directly impact embedding quality 
 
 **Goal**: Advanced text extraction with layout preservation
 
-### Week 5: Font Handling
+### Week 5: Font Handling & International Text
 
 #### Task 2.1: Type1 Font Parser (16 hours)
 - [ ] Implement `font/type1.go`
@@ -226,29 +232,96 @@ Tasks marked 🎯 are **RAG CRITICAL** - they directly impact embedding quality 
 - [ ] Handle Unicode mapping
 - [ ] Write TrueType tests
 
-#### Task 2.3: Encoding Support (8 hours)
+#### Task 2.3: CIDFont/Type0 Support (16 hours) 🎯 RAG CRITICAL
+- [ ] Implement `font/cidfont.go`
+- [ ] Parse Type0 (composite) fonts
+- [ ] Parse CIDFont dictionaries
+- [ ] Support Identity-H encoding (horizontal CJK)
+- [ ] Support Identity-V encoding (vertical CJK)
+- [ ] Handle CJK character collections (Adobe-GB1, Adobe-Japan1, etc.)
+- [ ] Write CIDFont tests with Chinese, Japanese, Korean samples
+
+**RAG Impact**: CJK languages are critical for international RAG applications. Type0/CIDFonts are the standard way PDFs encode Chinese, Japanese, and Korean text.
+
+#### Task 2.4: ToUnicode CMap Parsing (16 hours) 🎯 RAG CRITICAL
+- [ ] Implement `font/tounicode.go`
+- [ ] Parse ToUnicode CMap streams
+- [ ] Handle bfchar and bfrange mappings
+- [ ] Support multi-byte character codes
+- [ ] **Fallback strategies when ToUnicode missing:**
+  - [ ] Use font name heuristics (e.g., "Arial-Unicode")
+  - [ ] Common encoding inference
+  - [ ] Symbol font mapping tables
+- [ ] **Emoji sequence handling:**
+  - [ ] Multi-codepoint emoji (👨‍👩‍👧‍👦)
+  - [ ] Skin tone modifiers (👋🏽)
+  - [ ] ZWJ (Zero Width Joiner) sequences
+- [ ] Write ToUnicode tests
+- [ ] Test with emoji-heavy PDFs
+
+**RAG Impact**: ToUnicode CMaps are essential for correct character mapping. Fallback strategies ensure we extract readable text even from poorly-formed PDFs. Emoji support is critical for modern documents.
+
+#### Task 2.5: Text Encoding/Decoding (12 hours) 🎯 RAG CRITICAL
 - [ ] Implement `text/encoding.go`
-- [ ] WinAnsiEncoding
-- [ ] MacRomanEncoding
-- [ ] PDFDocEncoding
-- [ ] Custom encodings
+- [ ] WinAnsiEncoding (Western European)
+- [ ] MacRomanEncoding (Mac legacy)
+- [ ] PDFDocEncoding (PDF default)
+- [ ] StandardEncoding (Type1 default)
+- [ ] Custom encodings via /Differences
+- [ ] UTF-16BE for PDF string objects
+- [ ] **Unicode normalization to NFC:**
+  - [ ] Use Go's `unicode/norm` package
+  - [ ] Normalize after extraction
+  - [ ] Ensure é (U+00E9) vs e+́ (U+0065+U+0301) → always U+00E9
+- [ ] **Vertical text support:**
+  - [ ] Detect Identity-V encoding
+  - [ ] Handle vertical writing mode
 - [ ] Write encoding tests
+- [ ] Test normalization with accented characters
 
-### Week 6: Advanced Text Extraction
+**RAG Impact**: Unicode normalization (NFC) ensures embedding consistency. Without it, "café" might be encoded two different ways (precomposed vs combining), causing identical text to have different embeddings and breaking semantic search.
 
-#### Task 2.4: Enhanced Text Extractor (12 hours)
+#### Task 2.5b: RTL and Bidirectional Text (8 hours) 🎯 RAG CRITICAL
+- [ ] Implement `text/bidi.go`
+- [ ] Detect RTL text runs (Arabic, Hebrew)
+- [ ] Preserve logical character order (for RAG embedding)
+- [ ] Mark text direction in TextFragment (LTR/RTL/Vertical)
+- [ ] Handle mixed LTR/RTL paragraphs
+- [ ] Reference Unicode BiDi Algorithm (UAX #9) - simplified implementation
+- [ ] Write RTL tests with Arabic and Hebrew samples
+- [ ] Test mixed-direction text
+
+**RAG Impact**: Arabic and Hebrew documents read right-to-left. Preserving logical order ensures embeddings capture correct meaning, and direction markers allow downstream processing to reconstruct proper reading order if needed.
+
+### Week 6: Advanced Text Extraction & Layout
+
+#### Task 2.6: Enhanced Text Extractor (12 hours)
 - [ ] Improve text positioning accuracy
 - [ ] Handle character spacing
 - [ ] Handle word spacing
 - [ ] Handle text rise
 - [ ] Write positioning tests
 
-#### Task 2.5: Text Fragment Ordering (8 hours)
+#### Task 2.7: Text Fragment Ordering (8 hours)
 - [ ] Sort fragments by position
 - [ ] Detect basic reading order
+- [ ] Handle RTL text ordering
+- [ ] Handle vertical text ordering
 - [ ] Write ordering tests
 
-#### Task 2.6: Multi-Column Layout Detection (12 hours) 🎯 RAG CRITICAL
+#### Task 2.8: Symbol and Emoji Font Handling (8 hours) 🎯 RAG CRITICAL
+- [ ] Implement `font/symbol.go`
+- [ ] Symbol font mapping (Wingdings → Unicode, Symbol → Unicode, Dingbats → Unicode)
+- [ ] Emoji font detection and extraction
+- [ ] Font fallback when emoji not embedded
+- [ ] PUA (Private Use Area) character handling
+- [ ] ActualText override support (PDF tagged content)
+- [ ] Write symbol/emoji tests
+- [ ] Test with Wingdings, emoji, and special character PDFs
+
+**RAG Impact**: Modern documents increasingly use emoji and symbol fonts. Without proper mapping, these appear as garbled characters or missing content in embeddings, losing important semantic information.
+
+#### Task 2.9: Multi-Column Layout Detection (12 hours) 🎯 RAG CRITICAL
 - [ ] Implement `layout/columns.go`
 - [ ] Detect column boundaries via X-coordinate clustering
 - [ ] Detect column boundaries via whitespace gaps
@@ -259,7 +332,7 @@ Tasks marked 🎯 are **RAG CRITICAL** - they directly impact embedding quality 
 
 **RAG Impact**: Multi-column PDFs are common in academic papers. Without proper column detection, text extraction jumbles columns together, creating incoherent chunks that destroy RAG quality.
 
-#### Task 2.7: Header/Footer Detection (12 hours) 🎯 RAG CRITICAL
+#### Task 2.10: Header/Footer Detection (12 hours) 🎯 RAG CRITICAL
 - [ ] Implement `layout/header_footer.go`
 - [ ] Detect repeating text at same positions across pages
 - [ ] Detect page numbers (numeric patterns at consistent positions)
@@ -270,49 +343,38 @@ Tasks marked 🎯 are **RAG CRITICAL** - they directly impact embedding quality 
 
 **RAG Impact**: Headers, footers, and page numbers pollute embeddings with repetitive noise. Every chunk containing "Page 1", "Page 2", etc. or the same header text introduces irrelevant data that degrades semantic search quality.
 
-#### Task 2.8: Unicode Support (8 hours)
-- [ ] Implement `text/unicode.go`
-- [ ] ToUnicode CMap parsing
-- [ ] Unicode normalization
-- [ ] Write Unicode tests
-
-#### Task 2.9: CJK Font Support (8 hours)
-- [ ] Implement `font/cmap.go`
-- [ ] CMap parsing for CJK fonts
-- [ ] Character code mapping
-- [ ] Write CJK tests
-
 ### Week 7: Layout Analysis
 
-#### Task 2.10: Block Detection (12 hours)
+#### Task 2.11: Block Detection (12 hours)
 - [ ] Implement `layout/block.go`
 - [ ] Group fragments into blocks
 - [ ] Detect block boundaries
 - [ ] Write block detection tests
 
-#### Task 2.11: Line Detection (8 hours)
+#### Task 2.12: Line Detection (8 hours)
 - [ ] Implement `layout/line.go`
 - [ ] Group fragments into lines
 - [ ] Detect line spacing
 - [ ] Write line detection tests
 
-#### Task 2.12: Paragraph Detection (12 hours)
+#### Task 2.13: Paragraph Detection (12 hours)
 - [ ] Implement `layout/paragraph.go`
 - [ ] Group lines into paragraphs
 - [ ] Detect paragraph breaks
 - [ ] Handle indentation
 - [ ] Write paragraph tests
 
-#### Task 2.13: Reading Order (12 hours)
+#### Task 2.14: Reading Order (12 hours)
 - [ ] Implement `layout/reading_order.go`
 - [ ] Integrate multi-column detection
 - [ ] Z-order sorting within columns
 - [ ] Cross-column ordering
+- [ ] Handle RTL and vertical text ordering
 - [ ] Write reading order tests
 
 ### Week 8: Heading & List Detection
 
-#### Task 2.14: Heading Detection (12 hours) 🎯 RAG IMPORTANT
+#### Task 2.15: Heading Detection (12 hours) 🎯 RAG IMPORTANT
 - [ ] Implement `layout/heading.go`
 - [ ] Detect by font size (larger than body text)
 - [ ] Detect by font weight (bold)
@@ -322,7 +384,7 @@ Tasks marked 🎯 are **RAG CRITICAL** - they directly impact embedding quality 
 
 **RAG Impact**: Headings define semantic sections. Detecting them enables hierarchical chunking where each chunk knows its section context, dramatically improving retrieval relevance.
 
-#### Task 2.15: List Detection (12 hours) 🎯 RAG IMPORTANT
+#### Task 2.16: List Detection (12 hours) 🎯 RAG IMPORTANT
 - [ ] Implement `layout/list.go`
 - [ ] Detect bullet points (•, ◦, ▪, -, *)
 - [ ] Detect numbering (1., a., i., etc.)
@@ -333,14 +395,14 @@ Tasks marked 🎯 are **RAG CRITICAL** - they directly impact embedding quality 
 
 **RAG Impact**: Breaking list items across chunks loses the logical grouping. A bulleted list of features or steps must stay together for context preservation.
 
-#### Task 2.16: Layout Analyzer (16 hours)
+#### Task 2.17: Layout Analyzer (16 hours)
 - [ ] Implement `layout/analyzer.go`
 - [ ] Orchestrate all detection
 - [ ] Build element tree
 - [ ] Assign element types
 - [ ] Write integration tests
 
-#### Task 2.17: Phase 2 Integration (8 hours)
+#### Task 2.18: Phase 2 Integration (8 hours)
 - [ ] Update Document model
 - [ ] Update Page model
 - [ ] Add Elements to pages
@@ -1015,14 +1077,14 @@ Tasks marked 🎯 are **RAG CRITICAL** - they directly impact embedding quality 
 ## Estimated Total Effort
 
 - **Phase 1**: 160 hours (4 weeks @ 40 hrs/week)
-- **Phase 2**: 180 hours (4.5 weeks - expanded for multi-column + header/footer)
+- **Phase 2**: 228 hours (5.5 weeks - expanded for international text support: CJK, RTL, emoji, Unicode normalization)
 - **Phase 2.5**: 100 hours (2.5 weeks - RAG optimization)
 - **Phase 3**: 160 hours (4 weeks)
 - **Phase 4**: 180 hours (4.5 weeks - expanded for figure-caption + math detection)
 - **Phase 5**: 160 hours (4 weeks)
 - **Phase 6**: Ongoing (as needed)
 
-**Total Core Development**: 940 hours (~6 months full-time, or ~5.5 months with RAG focus)
+**Total Core Development**: 988 hours (~6 months full-time with comprehensive international text support)
 
 This assumes one developer working full-time. With multiple developers or part-time work, adjust accordingly.
 
@@ -1046,14 +1108,27 @@ Unlike traditional PDF libraries that focus on text extraction, Tabula is purpos
 
 If you need RAG functionality sooner:
 1. Complete Phase 1 (core parsing)
-2. Implement Phase 2 Tasks 2.6, 2.7, 2.14, 2.15 (multi-column, headers/footers, headings, lists)
-3. Jump to Phase 2.5 (semantic chunking) - **this is the killer feature**
-4. Return to Phase 3 (tables) for structured data extraction
+2. Implement Phase 2 international text support (Tasks 2.3-2.5b: CJK, RTL, emoji, normalization)
+3. Implement Phase 2 RAG-critical tasks (Tasks 2.9, 2.10, 2.15, 2.16: multi-column, headers/footers, headings, lists)
+4. Jump to Phase 2.5 (semantic chunking) - **this is the killer feature**
+5. Return to Phase 3 (tables) for structured data extraction
 
 Follow this plan step-by-step, and you'll build not just a PDF library, but a **RAG-first document intelligence system**.
 
-**Current Progress**: Phase 1, Week 1 - Tasks 1.1 through 1.4 complete ✅
+**Current Progress**: Phase 1, Week 2 - Tasks 1.1 through 1.7 complete ✅
+- ✅ Task 1.1-1.2: Project setup & objects
+- ✅ Task 1.3: Lexer (2.4M ops/sec)
+- ✅ Task 1.4: Parser (2.8M ops/sec, 82.4% coverage)
+- ✅ Task 1.5: XRef parsing (120K tables/sec, 79.5% coverage)
+- ✅ Task 1.6: File reader (79.1% coverage)
+- ✅ Task 1.7: Object resolver (86.6% coverage)
 
-**Next Up**: Task 1.5 - XRef Table Parsing
+**Package Coverage**:
+- Core: 79.5%
+- Reader: 79.1%
+- Resolver: 86.6%
+- Overall: ~82%
+
+**Next Up**: Task 1.8 - Catalog & Pages
 
 Good luck! 🚀
