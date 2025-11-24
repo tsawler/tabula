@@ -335,7 +335,7 @@ func (p *Parser) readToken() (string, error) {
 }
 
 func (p *Parser) peekToken() string {
-	pos := p.pos
+	// pos := p.pos
 	token, _ := p.readToken()
 	// Reset position (simplified - in real implementation need to track position)
 	return token
