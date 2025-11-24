@@ -28,6 +28,34 @@ const (
 	ObjIndirect
 )
 
+// String returns the string representation of the object type
+func (t ObjectType) String() string {
+	switch t {
+	case ObjNull:
+		return "Null"
+	case ObjBool:
+		return "Bool"
+	case ObjInt:
+		return "Int"
+	case ObjReal:
+		return "Real"
+	case ObjString:
+		return "String"
+	case ObjName:
+		return "Name"
+	case ObjArray:
+		return "Array"
+	case ObjDict:
+		return "Dict"
+	case ObjStream:
+		return "Stream"
+	case ObjIndirect:
+		return "IndirectRef"
+	default:
+		return "Unknown"
+	}
+}
+
 // Null represents a PDF null object
 type Null struct{}
 
@@ -79,6 +107,49 @@ func (a Array) String() string {
 		parts = append(parts, obj.String())
 	}
 	return "[" + strings.Join(parts, " ") + "]"
+}
+
+// Len returns the length of the array
+func (a Array) Len() int {
+	return len(a)
+}
+
+// Get retrieves an element at the given index
+func (a Array) Get(index int) Object {
+	if index < 0 || index >= len(a) {
+		return nil
+	}
+	return a[index]
+}
+
+// GetInt retrieves an integer at the given index
+func (a Array) GetInt(index int) (Int, bool) {
+	obj := a.Get(index)
+	if obj == nil {
+		return 0, false
+	}
+	i, ok := obj.(Int)
+	return i, ok
+}
+
+// GetReal retrieves a real number at the given index
+func (a Array) GetReal(index int) (Real, bool) {
+	obj := a.Get(index)
+	if obj == nil {
+		return 0, false
+	}
+	r, ok := obj.(Real)
+	return r, ok
+}
+
+// GetName retrieves a name at the given index
+func (a Array) GetName(index int) (Name, bool) {
+	obj := a.Get(index)
+	if obj == nil {
+		return "", false
+	}
+	n, ok := obj.(Name)
+	return n, ok
 }
 
 // Dict represents a PDF dictionary
@@ -136,6 +207,81 @@ func (d Dict) GetArray(key string) (Array, bool) {
 	}
 	arr, ok := obj.(Array)
 	return arr, ok
+}
+
+// GetReal retrieves a real number value
+func (d Dict) GetReal(key string) (Real, bool) {
+	obj, ok := d[key]
+	if !ok {
+		return 0, false
+	}
+	r, ok := obj.(Real)
+	return r, ok
+}
+
+// GetString retrieves a string value
+func (d Dict) GetString(key string) (String, bool) {
+	obj, ok := d[key]
+	if !ok {
+		return "", false
+	}
+	s, ok := obj.(String)
+	return s, ok
+}
+
+// GetBool retrieves a boolean value
+func (d Dict) GetBool(key string) (Bool, bool) {
+	obj, ok := d[key]
+	if !ok {
+		return false, false
+	}
+	b, ok := obj.(Bool)
+	return b, ok
+}
+
+// GetStream retrieves a stream value
+func (d Dict) GetStream(key string) (*Stream, bool) {
+	obj, ok := d[key]
+	if !ok {
+		return nil, false
+	}
+	s, ok := obj.(*Stream)
+	return s, ok
+}
+
+// GetIndirectRef retrieves an indirect reference
+func (d Dict) GetIndirectRef(key string) (IndirectRef, bool) {
+	obj, ok := d[key]
+	if !ok {
+		return IndirectRef{}, false
+	}
+	ref, ok := obj.(IndirectRef)
+	return ref, ok
+}
+
+// Has checks if a key exists in the dictionary
+func (d Dict) Has(key string) bool {
+	_, ok := d[key]
+	return ok
+}
+
+// Set sets a value in the dictionary
+func (d Dict) Set(key string, value Object) {
+	d[key] = value
+}
+
+// Delete removes a key from the dictionary
+func (d Dict) Delete(key string) {
+	delete(d, key)
+}
+
+// Keys returns all keys in the dictionary
+func (d Dict) Keys() []string {
+	keys := make([]string, 0, len(d))
+	for k := range d {
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 // Stream represents a PDF stream object
