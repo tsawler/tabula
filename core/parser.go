@@ -1,253 +1,206 @@
 package core
 
 import (
-	"bufio"
-	"bytes"
 	"fmt"
 	"io"
 	"strconv"
 )
 
-// Parser parses PDF syntax
+// Parser parses PDF objects using the Lexer
 type Parser struct {
-	reader *bufio.Reader
-	pos    int64
+	lexer        *Lexer
+	currentToken *Token
+	peekToken    *Token
 }
 
 // NewParser creates a new PDF parser
 func NewParser(r io.Reader) *Parser {
-	return &Parser{
-		reader: bufio.NewReader(r),
+	p := &Parser{
+		lexer: NewLexer(r),
 	}
+	// Load first two tokens
+	p.nextToken()
+	p.nextToken()
+	return p
+}
+
+// nextToken advances to the next token
+func (p *Parser) nextToken() error {
+	p.currentToken = p.peekToken
+	token, err := p.lexer.NextToken()
+	if err != nil {
+		return err
+	}
+	p.peekToken = token
+	return nil
+}
+
+// skipComments skips any comment tokens
+func (p *Parser) skipComments() error {
+	for p.currentToken != nil && p.currentToken.Type == TokenComment {
+		if err := p.nextToken(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ParseObject parses a PDF object
 func (p *Parser) ParseObject() (Object, error) {
-	p.skipWhitespace()
-
-	// Peek at next character to determine object type
-	b, err := p.reader.ReadByte()
-	if err != nil {
+	// Skip any comments
+	if err := p.skipComments(); err != nil {
 		return nil, err
 	}
-	p.reader.UnreadByte()
 
-	switch {
-	case b == 'n':
-		return p.parseNull()
-	case b == 't' || b == 'f':
-		return p.parseBool()
-	case b == '(':
-		return p.parseString()
-	case b == '/':
-		return p.parseName()
-	case b == '[':
-		return p.parseArray()
-	case b == '<':
-		// Could be dict or hex string
-		next, err := p.peekByte(1)
-		if err != nil {
-			return nil, err
+	if p.currentToken == nil {
+		return nil, fmt.Errorf("unexpected end of input")
+	}
+
+	switch p.currentToken.Type {
+	case TokenEOF:
+		return nil, io.EOF
+
+	case TokenKeyword:
+		keyword := string(p.currentToken.Value)
+		switch keyword {
+		case "null":
+			p.nextToken()
+			return Null{}, nil
+		case "true":
+			p.nextToken()
+			return Bool(true), nil
+		case "false":
+			p.nextToken()
+			return Bool(false), nil
+		default:
+			return nil, fmt.Errorf("unexpected keyword: %s", keyword)
 		}
-		if next == '<' {
-			return p.parseDict()
-		}
-		return p.parseHexString()
-	case isDigit(b) || b == '-' || b == '+' || b == '.':
+
+	case TokenInteger:
+		// Could be integer, real, or start of indirect reference
 		return p.parseNumber()
-	default:
-		return nil, fmt.Errorf("unexpected character: %c", b)
-	}
-}
 
-// parseNull parses a null object
-func (p *Parser) parseNull() (Object, error) {
-	token, err := p.readToken()
-	if err != nil {
-		return nil, err
-	}
-	if token != "null" {
-		return nil, fmt.Errorf("expected 'null', got '%s'", token)
-	}
-	return Null{}, nil
-}
-
-// parseBool parses a boolean object
-func (p *Parser) parseBool() (Object, error) {
-	token, err := p.readToken()
-	if err != nil {
-		return nil, err
-	}
-	switch token {
-	case "true":
-		return Bool(true), nil
-	case "false":
-		return Bool(false), nil
-	default:
-		return nil, fmt.Errorf("expected 'true' or 'false', got '%s'", token)
-	}
-}
-
-// parseNumber parses an integer or real number
-func (p *Parser) parseNumber() (Object, error) {
-	token, err := p.readToken()
-	if err != nil {
-		return nil, err
-	}
-
-	// Check if it's an indirect reference (num gen R)
-	if p.peekToken() != "" {
-		gen, genErr := strconv.ParseInt(p.peekToken(), 10, 64)
-		if genErr == nil {
-			p.readToken() // consume generation
-			if p.peekToken() == "R" {
-				p.readToken() // consume R
-				num, _ := strconv.ParseInt(token, 10, 64)
-				return IndirectRef{Number: int(num), Generation: int(gen)}, nil
-			}
+	case TokenReal:
+		val, err := strconv.ParseFloat(string(p.currentToken.Value), 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid real number: %w", err)
 		}
-	}
+		p.nextToken()
+		return Real(val), nil
 
-	// Try parsing as integer
-	if i, err := strconv.ParseInt(token, 10, 64); err == nil {
-		return Int(i), nil
-	}
+	case TokenString:
+		val := string(p.currentToken.Value)
+		p.nextToken()
+		return String(val), nil
 
-	// Try parsing as real
-	if f, err := strconv.ParseFloat(token, 64); err == nil {
+	case TokenHexString:
+		// Convert hex string to bytes
+		hexStr := string(p.currentToken.Value)
+		if len(hexStr)%2 != 0 {
+			hexStr += "0" // Pad if odd length
+		}
+		result := make([]byte, len(hexStr)/2)
+		for i := 0; i < len(hexStr); i += 2 {
+			b, err := strconv.ParseUint(hexStr[i:i+2], 16, 8)
+			if err != nil {
+				return nil, fmt.Errorf("invalid hex string: %w", err)
+			}
+			result[i/2] = byte(b)
+		}
+		p.nextToken()
+		return String(result), nil
+
+	case TokenName:
+		val := string(p.currentToken.Value)
+		p.nextToken()
+		return Name(val), nil
+
+	case TokenArrayStart:
+		return p.parseArray()
+
+	case TokenDictStart:
+		return p.parseDict()
+
+	default:
+		return nil, fmt.Errorf("unexpected token type: %v at position %d", p.currentToken.Type, p.currentToken.Pos)
+	}
+}
+
+// parseNumber parses an integer, real, or indirect reference
+func (p *Parser) parseNumber() (Object, error) {
+	firstToken := string(p.currentToken.Value)
+
+	// Try to parse as integer first
+	firstInt, err := strconv.ParseInt(firstToken, 10, 64)
+	if err != nil {
+		// If it's not a valid integer, try as float
+		f, err := strconv.ParseFloat(firstToken, 64)
+		if err != nil {
+			return nil, fmt.Errorf("invalid number: %s", firstToken)
+		}
+		p.nextToken()
 		return Real(f), nil
 	}
 
-	return nil, fmt.Errorf("invalid number: %s", token)
-}
-
-// parseString parses a literal string
-func (p *Parser) parseString() (Object, error) {
-	// Read opening (
-	if b, err := p.reader.ReadByte(); err != nil || b != '(' {
-		return nil, fmt.Errorf("expected '('")
-	}
-
-	var buf bytes.Buffer
-	depth := 1
-
-	for depth > 0 {
-		b, err := p.reader.ReadByte()
-		if err != nil {
-			return nil, err
-		}
-
-		switch b {
-		case '(':
-			depth++
-			buf.WriteByte(b)
-		case ')':
-			depth--
-			if depth > 0 {
-				buf.WriteByte(b)
+	// Use lookahead to check if this is an indirect reference (num gen R)
+	// Don't consume tokens yet - just peek
+	if p.peekToken != nil && p.peekToken.Type == TokenInteger {
+		secondToken := string(p.peekToken.Value)
+		secondInt, err := strconv.ParseInt(secondToken, 10, 64)
+		if err == nil {
+			// Peek ahead two tokens to see if there's an R
+			// We need to temporarily consume to peek further
+			p.nextToken() // Move to second integer
+			if p.peekToken != nil && p.peekToken.Type == TokenIndirectRef {
+				// It's an indirect reference - consume both tokens
+				p.nextToken() // Move to R
+				p.nextToken() // Move past R
+				return IndirectRef{
+					Number:     int(firstInt),
+					Generation: int(secondInt),
+				}, nil
 			}
-		case '\\':
-			// Escape sequence
-			next, err := p.reader.ReadByte()
-			if err != nil {
-				return nil, err
-			}
-			switch next {
-			case 'n':
-				buf.WriteByte('\n')
-			case 'r':
-				buf.WriteByte('\r')
-			case 't':
-				buf.WriteByte('\t')
-			case '\\', '(', ')':
-				buf.WriteByte(next)
-			default:
-				buf.WriteByte(next)
-			}
-		default:
-			buf.WriteByte(b)
+			// Not an indirect ref - we're now at the second integer
+			// Return the first integer as Int
+			return Int(firstInt), nil
 		}
 	}
 
-	return String(buf.String()), nil
-}
-
-// parseHexString parses a hexadecimal string
-func (p *Parser) parseHexString() (Object, error) {
-	// Read opening <
-	if b, err := p.reader.ReadByte(); err != nil || b != '<' {
-		return nil, fmt.Errorf("expected '<'")
-	}
-
-	var buf bytes.Buffer
-	for {
-		b, err := p.reader.ReadByte()
-		if err != nil {
-			return nil, err
-		}
-		if b == '>' {
-			break
-		}
-		if isHexDigit(b) {
-			buf.WriteByte(b)
-		}
-	}
-
-	// Convert hex to bytes
-	hexStr := buf.String()
-	if len(hexStr)%2 != 0 {
-		hexStr += "0"
-	}
-
-	result := make([]byte, len(hexStr)/2)
-	for i := 0; i < len(hexStr); i += 2 {
-		b, _ := strconv.ParseUint(hexStr[i:i+2], 16, 8)
-		result[i/2] = byte(b)
-	}
-
-	return String(result), nil
-}
-
-// parseName parses a name object
-func (p *Parser) parseName() (Object, error) {
-	// Read opening /
-	if b, err := p.reader.ReadByte(); err != nil || b != '/' {
-		return nil, fmt.Errorf("expected '/'")
-	}
-
-	token, err := p.readToken()
-	if err != nil {
-		return nil, err
-	}
-
-	return Name(token), nil
+	// Just a single integer
+	p.nextToken()
+	return Int(firstInt), nil
 }
 
 // parseArray parses an array object
 func (p *Parser) parseArray() (Object, error) {
-	// Read opening [
-	if b, err := p.reader.ReadByte(); err != nil || b != '[' {
-		return nil, fmt.Errorf("expected '['")
+	if p.currentToken.Type != TokenArrayStart {
+		return nil, fmt.Errorf("expected '[', got %v", p.currentToken.Type)
 	}
+	p.nextToken()
 
 	var arr Array
 	for {
-		p.skipWhitespace()
-
-		// Check for closing ]
-		b, err := p.reader.ReadByte()
-		if err != nil {
+		// Skip comments
+		if err := p.skipComments(); err != nil {
 			return nil, err
 		}
-		if b == ']' {
+
+		// Check for end of array
+		if p.currentToken == nil {
+			return nil, fmt.Errorf("unexpected end of input in array")
+		}
+		if p.currentToken.Type == TokenArrayEnd {
+			p.nextToken()
 			break
 		}
-		p.reader.UnreadByte()
+		if p.currentToken.Type == TokenEOF {
+			return nil, fmt.Errorf("unexpected EOF in array")
+		}
 
-		// Parse next object
+		// Parse element
 		obj, err := p.ParseObject()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error parsing array element: %w", err)
 		}
 		arr = append(arr, obj)
 	}
@@ -257,111 +210,152 @@ func (p *Parser) parseArray() (Object, error) {
 
 // parseDict parses a dictionary object
 func (p *Parser) parseDict() (Object, error) {
-	// Read opening <<
-	if b1, err := p.reader.ReadByte(); err != nil || b1 != '<' {
-		return nil, fmt.Errorf("expected '<<'")
+	if p.currentToken.Type != TokenDictStart {
+		return nil, fmt.Errorf("expected '<<', got %v", p.currentToken.Type)
 	}
-	if b2, err := p.reader.ReadByte(); err != nil || b2 != '<' {
-		return nil, fmt.Errorf("expected '<<'")
-	}
+	p.nextToken()
 
 	dict := make(Dict)
 	for {
-		p.skipWhitespace()
-
-		// Check for closing >>
-		b, err := p.reader.ReadByte()
-		if err != nil {
+		// Skip comments
+		if err := p.skipComments(); err != nil {
 			return nil, err
 		}
-		if b == '>' {
-			if next, err := p.reader.ReadByte(); err == nil && next == '>' {
-				break
-			}
-		}
-		p.reader.UnreadByte()
 
-		// Parse key (must be name)
-		keyObj, err := p.parseName()
-		if err != nil {
-			return nil, err
+		// Check for end of dict
+		if p.currentToken == nil {
+			return nil, fmt.Errorf("unexpected end of input in dictionary")
 		}
-		key := string(keyObj.(Name))
+		if p.currentToken.Type == TokenDictEnd {
+			p.nextToken()
+			break
+		}
+		if p.currentToken.Type == TokenEOF {
+			return nil, fmt.Errorf("unexpected EOF in dictionary")
+		}
+
+		// Parse key (must be a name)
+		if p.currentToken.Type != TokenName {
+			return nil, fmt.Errorf("expected name for dictionary key, got %v", p.currentToken.Type)
+		}
+		key := string(p.currentToken.Value)
+		p.nextToken()
 
 		// Parse value
-		val, err := p.ParseObject()
+		value, err := p.ParseObject()
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("error parsing dictionary value for key '%s': %w", key, err)
 		}
 
-		dict[key] = val
+		dict[key] = value
 	}
 
 	return dict, nil
 }
 
-// Helper functions
-
-func (p *Parser) skipWhitespace() {
-	for {
-		b, err := p.reader.ReadByte()
-		if err != nil {
-			return
-		}
-		if !isWhitespace(b) {
-			p.reader.UnreadByte()
-			return
-		}
+// ParseIndirectObject parses an indirect object (num gen obj ... endobj)
+func (p *Parser) ParseIndirectObject() (*IndirectObject, error) {
+	// Skip comments
+	if err := p.skipComments(); err != nil {
+		return nil, err
 	}
-}
 
-func (p *Parser) readToken() (string, error) {
-	var buf bytes.Buffer
-	for {
-		b, err := p.reader.ReadByte()
-		if err != nil {
-			if err == io.EOF && buf.Len() > 0 {
-				return buf.String(), nil
-			}
-			return "", err
-		}
-		if isWhitespace(b) || isDelimiter(b) {
-			p.reader.UnreadByte()
-			break
-		}
-		buf.WriteByte(b)
+	// Parse object number
+	if p.currentToken.Type != TokenInteger {
+		return nil, fmt.Errorf("expected object number, got %v", p.currentToken.Type)
 	}
-	return buf.String(), nil
-}
-
-func (p *Parser) peekToken() string {
-	// pos := p.pos
-	token, _ := p.readToken()
-	// Reset position (simplified - in real implementation need to track position)
-	return token
-}
-
-func (p *Parser) peekByte(offset int) (byte, error) {
-	bytes, err := p.reader.Peek(offset + 1)
+	numStr := string(p.currentToken.Value)
+	num, err := strconv.ParseInt(numStr, 10, 64)
 	if err != nil {
-		return 0, err
+		return nil, fmt.Errorf("invalid object number: %w", err)
 	}
-	return bytes[offset], nil
+	p.nextToken()
+
+	// Parse generation number
+	if p.currentToken.Type != TokenInteger {
+		return nil, fmt.Errorf("expected generation number, got %v", p.currentToken.Type)
+	}
+	genStr := string(p.currentToken.Value)
+	gen, err := strconv.ParseInt(genStr, 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("invalid generation number: %w", err)
+	}
+	p.nextToken()
+
+	// Parse 'obj' keyword
+	if p.currentToken.Type != TokenKeyword || string(p.currentToken.Value) != "obj" {
+		return nil, fmt.Errorf("expected 'obj' keyword, got %v", p.currentToken)
+	}
+	p.nextToken()
+
+	// Parse the object value
+	obj, err := p.ParseObject()
+	if err != nil {
+		return nil, fmt.Errorf("error parsing indirect object value: %w", err)
+	}
+
+	// Check for stream
+	if p.currentToken.Type == TokenKeyword && string(p.currentToken.Value) == "stream" {
+		// This is a stream object
+		if dict, ok := obj.(Dict); ok {
+			stream, err := p.parseStream(dict)
+			if err != nil {
+				return nil, fmt.Errorf("error parsing stream: %w", err)
+			}
+			obj = stream
+		} else {
+			return nil, fmt.Errorf("stream must follow a dictionary")
+		}
+	}
+
+	// Parse 'endobj' keyword
+	if p.currentToken.Type != TokenKeyword || string(p.currentToken.Value) != "endobj" {
+		return nil, fmt.Errorf("expected 'endobj' keyword, got %v", p.currentToken)
+	}
+	p.nextToken()
+
+	return &IndirectObject{
+		Ref: IndirectRef{
+			Number:     int(num),
+			Generation: int(gen),
+		},
+		Object: obj,
+	}, nil
 }
 
-func isWhitespace(b byte) bool {
-	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == 0
-}
+// parseStream parses a stream object (after the stream keyword)
+func (p *Parser) parseStream(dict Dict) (*Stream, error) {
+	// We're at the 'stream' keyword
+	if p.currentToken.Type != TokenKeyword || string(p.currentToken.Value) != "stream" {
+		return nil, fmt.Errorf("expected 'stream' keyword")
+	}
+	p.nextToken()
 
-func isDelimiter(b byte) bool {
-	return b == '(' || b == ')' || b == '<' || b == '>' || b == '[' || b == ']' ||
-		b == '{' || b == '}' || b == '/' || b == '%'
-}
+	// Get the length from the dictionary
+	lengthObj := dict.Get("Length")
+	if lengthObj == nil {
+		return nil, fmt.Errorf("stream dictionary missing 'Length' entry")
+	}
 
-func isDigit(b byte) bool {
-	return b >= '0' && b <= '9'
-}
+	var length int
+	switch v := lengthObj.(type) {
+	case Int:
+		length = int(v)
+	case IndirectRef:
+		// Length is an indirect reference - we can't resolve it here
+		// For now, we'll need to handle this differently
+		return nil, fmt.Errorf("indirect reference for stream length not yet supported in parser")
+	default:
+		return nil, fmt.Errorf("invalid type for stream length: %T", lengthObj)
+	}
 
-func isHexDigit(b byte) bool {
-	return isDigit(b) || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
+	if length < 0 {
+		return nil, fmt.Errorf("invalid stream length: %d", length)
+	}
+
+	// Read the stream data
+	// Note: The lexer doesn't handle binary stream data, we need to read directly
+	// TODO: This is a limitation - we need access to the underlying reader
+	// For now, we'll return an error
+	return nil, fmt.Errorf("stream parsing not fully implemented - requires direct reader access")
 }

@@ -1,4 +1,4 @@
-# Go PDF Library - Advanced Parsing & Table Extraction
+# Tabula - Advanced PDF Parsing & Table Extraction
 
 A comprehensive, pure-Go PDF library designed for **advanced document parsing**, **table extraction**, and **RAG (Retrieval-Augmented Generation)** workflows. Unlike lightweight libraries, this provides deep structural analysis including table detection, layout preservation, and semantic element extraction.
 
