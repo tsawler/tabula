@@ -1,0 +1,44 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+bin/
+dist/
+
+# Test binaries
+*.test
+
+# Coverage files
+*.out
+coverage.html
+
+# Go workspace file (optional - you may want to commit this)
+# go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Test data
+testdata/corpus/
+*.pdf
+!testdata/*.pdf
+
+# Temporary files
+tmp/
+temp/
+
+# Test applications (add your test app directories here)
+# example-app/
+# benchmarks/
+# pdf-reader/
