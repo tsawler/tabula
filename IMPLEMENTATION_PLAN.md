@@ -124,15 +124,18 @@ Tasks marked 🎯 are **RAG CRITICAL** - they directly impact embedding quality 
 **Tests**: 16 test functions, 20+ test cases, all passing
 **Coverage**: 86.6%
 
-#### Task 1.8: Catalog & Pages (8 hours)
-- [ ] Parse document catalog
-- [ ] Parse pages tree
-- [ ] Implement page enumeration
-- [ ] Get page by number
-- [ ] Write page access tests
+#### Task 1.8: Catalog & Pages (8 hours) ✅ COMPLETE
+- [x] Parse document catalog
+- [x] Parse pages tree
+- [x] Implement page enumeration
+- [x] Get page by number
+- [x] Write page access tests
 
-**Deliverable**: Page access API
-**Acceptance**: Can enumerate all pages
+**Deliverable**: Page access API ✅
+**Acceptance**: Can enumerate all pages ✅
+**Completed**: November 24, 2024
+**Tests**: 18 test functions, 20+ test cases, all passing
+**Coverage**: 72.1%
 
 ### Week 3: Stream Decoding & Content Streams
 
@@ -1115,20 +1118,24 @@ If you need RAG functionality sooner:
 
 Follow this plan step-by-step, and you'll build not just a PDF library, but a **RAG-first document intelligence system**.
 
-**Current Progress**: Phase 1, Week 2 - Tasks 1.1 through 1.7 complete ✅
+**Current Progress**: Phase 1, Week 2 - Tasks 1.1 through 1.8 complete ✅
 - ✅ Task 1.1-1.2: Project setup & objects
 - ✅ Task 1.3: Lexer (2.4M ops/sec)
 - ✅ Task 1.4: Parser (2.8M ops/sec, 82.4% coverage)
 - ✅ Task 1.5: XRef parsing (120K tables/sec, 79.5% coverage)
 - ✅ Task 1.6: File reader (79.1% coverage)
 - ✅ Task 1.7: Object resolver (86.6% coverage)
+- ✅ Task 1.8: Catalog & pages (72.1% coverage)
 
 **Package Coverage**:
 - Core: 79.5%
 - Reader: 79.1%
 - Resolver: 86.6%
-- Overall: ~82%
+- Pages: 72.1%
+- **Average: ~79%**
 
-**Next Up**: Task 1.8 - Catalog & Pages
+**Phase 1 Progress**: 8 of 15 tasks complete (53%)
+
+**Next Up**: Task 1.9 - FlateDecode (Stream Decompression)
 
 Good luck! 🚀
