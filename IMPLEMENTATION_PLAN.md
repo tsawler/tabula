@@ -296,12 +296,12 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - [x] Character width calculation
 - [x] Write Type1 tests
 
-#### Task 2.2: TrueType Font Parser (16 hours)
-- [ ] Implement `font/truetype.go`
-- [ ] Parse TrueType font program
-- [ ] Extract glyph metrics
-- [ ] Handle Unicode mapping
-- [ ] Write TrueType tests
+#### Task 2.2: TrueType Font Parser (16 hours) ✅
+- [x] Implement `font/truetype.go`
+- [x] Parse TrueType font program
+- [x] Extract glyph metrics
+- [x] Handle Unicode mapping
+- [x] Write TrueType tests
 
 #### Task 2.3: CIDFont/Type0 Support (16 hours) 🎯 RAG CRITICAL
 - [ ] Implement `font/cidfont.go`
