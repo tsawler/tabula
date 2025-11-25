@@ -198,3 +198,8 @@ func Rotate(angle float64) Matrix {
 	sin := math.Sin(angle)
 	return Matrix{cos, sin, -sin, cos, 0, 0}
 }
+
+// IsIdentity returns true if the matrix is an identity matrix
+func (m Matrix) IsIdentity() bool {
+	return m[0] == 1 && m[1] == 0 && m[2] == 0 && m[3] == 1 && m[4] == 0 && m[5] == 0
+}
