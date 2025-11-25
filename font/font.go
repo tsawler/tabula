@@ -56,15 +56,44 @@ func (f *Font) IsStandardFont() bool {
 }
 
 // DecodeString decodes a string of character codes to Unicode
-// If a ToUnicode CMap is present, it uses that for decoding
-// Otherwise, it returns the string as-is
+// Priority order:
+// 1. Use ToUnicode CMap if present (most accurate)
+// 2. Use font's Encoding property (standard encodings)
+// 3. Fall back to raw bytes as string
+// All decoded strings are normalized to NFC for consistent embeddings
 func (f *Font) DecodeString(data []byte) string {
+	var decoded string
+
+	// Priority 1: ToUnicode CMap (most accurate)
 	if f.ToUnicodeCMap != nil {
-		return f.ToUnicodeCMap.LookupString(data)
+		decoded = f.ToUnicodeCMap.LookupString(data)
+		return NormalizeUnicode(decoded)
 	}
 
-	// No CMap - return as-is
-	return string(data)
+	// Priority 2: Use font's Encoding property
+	if f.Encoding != "" {
+		enc := GetEncoding(f.Encoding)
+		decoded = enc.DecodeString(data)
+		return NormalizeUnicode(decoded)
+	}
+
+	// Priority 3: Fall back to raw bytes as string
+	decoded = string(data)
+	return NormalizeUnicode(decoded)
+}
+
+// IsVertical returns true if this font uses vertical writing mode
+// Vertical writing is indicated by the Identity-V encoding, commonly used for
+// East Asian languages (Chinese, Japanese, Korean) where text flows top-to-bottom
+func (f *Font) IsVertical() bool {
+	return IsVerticalEncoding(f.Encoding)
+}
+
+// IsVerticalEncoding checks if an encoding name indicates vertical writing mode
+// Identity-V is used for vertical text in CJK fonts
+// Identity-H (or any other encoding) is horizontal
+func IsVerticalEncoding(encoding string) bool {
+	return encoding == "Identity-V"
 }
 
 // loadStandardWidths loads default widths for Standard 14 fonts
