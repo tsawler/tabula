@@ -279,7 +279,36 @@ func (gs *GraphicsState) GetFontSize() float64 {
 	return gs.Text.FontSize
 }
 
+// GetEffectiveFontSize returns the font size accounting for text matrix transformations
+// The text matrix can scale the font even when the Tf operator uses size=1
+func (gs *GraphicsState) GetEffectiveFontSize() float64 {
+	baseFontSize := gs.Text.FontSize
+
+	// The text matrix is [a b c d e f]
+	// For vertical scaling (typical font size), we use element d (index 3)
+	// For horizontal scaling, we use element a (index 0)
+	// We take the maximum to handle both cases
+	verticalScale := abs(gs.Text.TextMatrix[3]) // d component
+	horizontalScale := abs(gs.Text.TextMatrix[0]) // a component
+
+	// Use the larger of the two scales
+	scale := verticalScale
+	if horizontalScale > verticalScale {
+		scale = horizontalScale
+	}
+
+	return baseFontSize * scale
+}
+
 // GetFontName returns the current font name
 func (gs *GraphicsState) GetFontName() string {
 	return gs.Text.FontName
+}
+
+// abs returns the absolute value
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }

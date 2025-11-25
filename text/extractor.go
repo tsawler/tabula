@@ -14,12 +14,13 @@ import (
 
 // TextFragment represents a piece of extracted text with position
 type TextFragment struct {
-	Text     string
-	X, Y     float64
-	Width    float64
-	Height   float64
-	FontName string
-	FontSize float64
+	Text      string
+	X, Y      float64
+	Width     float64
+	Height    float64
+	FontName  string
+	FontSize  float64
+	Direction Direction // Text direction (LTR, RTL, Neutral)
 }
 
 // Extractor extracts text from content streams
@@ -327,7 +328,7 @@ func (e *Extractor) processOperation(op contentstream.Operation) error {
 // showText processes text showing operation
 func (e *Extractor) showText(data []byte) {
 	x, y := e.gs.GetTextPosition()
-	fontSize := e.gs.GetFontSize()
+	fontSize := e.gs.GetEffectiveFontSize() // Use effective size (accounts for text matrix)
 	fontName := e.gs.GetFontName()
 
 	// Decode text using font's ToUnicode CMap if available
@@ -348,14 +349,18 @@ func (e *Extractor) showText(data []byte) {
 		width = float64(len(decodedText)) * fontSize * 0.5
 	}
 
+	// Detect text direction based on Unicode properties
+	direction := DetectDirection(decodedText)
+
 	fragment := TextFragment{
-		Text:     decodedText,
-		X:        x,
-		Y:        y,
-		Width:    width,
-		Height:   fontSize,
-		FontName: fontName,
-		FontSize: fontSize,
+		Text:      decodedText,
+		X:         x,
+		Y:         y,
+		Width:     width,
+		Height:    fontSize,
+		FontName:  fontName,
+		FontSize:  fontSize,
+		Direction: direction,
 	}
 
 	e.fragments = append(e.fragments, fragment)
@@ -384,44 +389,201 @@ func (e *Extractor) showTextArray(arr core.Array) {
 	}
 }
 
-// GetText returns all extracted text concatenated with smart spacing
+// GetText returns all extracted text concatenated with smart spacing and RTL support
 func (e *Extractor) GetText() string {
 	if len(e.fragments) == 0 {
 		return ""
 	}
 
+	// Group fragments by lines (same Y coordinate within tolerance)
+	lines := e.groupFragmentsByLine()
+
 	var sb strings.Builder
 
-	for i, frag := range e.fragments {
-		sb.WriteString(frag.Text)
+	for lineIdx, line := range lines {
+		// Determine line direction
+		lineDir := e.detectLineDirection(line)
 
-		// Determine spacing to next fragment
-		if i < len(e.fragments)-1 {
-			nextFrag := e.fragments[i+1]
+		// Reorder fragments in reading order based on direction
+		orderedFrags := e.reorderFragmentsForReading(line, lineDir)
 
-			// Calculate vertical distance
-			verticalDist := abs(nextFrag.Y - frag.Y)
+		// Assemble line text
+		for i, frag := range orderedFrags {
+			sb.WriteString(frag.Text)
 
-			// Calculate horizontal distance
-			horizontalDist := nextFrag.X - (frag.X + frag.Width)
+			// Add space between fragments if needed
+			if i < len(orderedFrags)-1 {
+				nextFrag := orderedFrags[i+1]
+				horizontalDist := calculateHorizontalDistance(frag, nextFrag, lineDir)
 
-			// Detect line break (significant vertical movement)
-			if verticalDist > frag.Height*0.5 {
-				// Check if it's a paragraph break (extra vertical space)
-				if verticalDist > frag.Height*1.5 {
-					sb.WriteString("\n\n")
-				} else {
-					sb.WriteString("\n")
+				if e.shouldInsertSpace(frag, nextFrag, horizontalDist) {
+					sb.WriteString(" ")
 				}
-			} else if horizontalDist > frag.Height*0.2 {
-				// Horizontal gap suggests a space
-				sb.WriteString(" ")
 			}
-			// If fragments are adjacent, don't add anything
+		}
+
+		// Add line break between lines
+		if lineIdx < len(lines)-1 {
+			nextLine := lines[lineIdx+1]
+			currentY := line[0].Y
+			nextY := nextLine[0].Y
+			verticalDist := abs(nextY - currentY)
+
+			// Check if it's a paragraph break (extra vertical space)
+			if verticalDist > line[0].Height*1.5 {
+				sb.WriteString("\n\n")
+			} else {
+				sb.WriteString("\n")
+			}
 		}
 	}
 
 	return sb.String()
+}
+
+// groupFragmentsByLine groups fragments into lines based on Y coordinate
+func (e *Extractor) groupFragmentsByLine() [][]TextFragment {
+	if len(e.fragments) == 0 {
+		return nil
+	}
+
+	lines := make([][]TextFragment, 0)
+	currentLine := []TextFragment{e.fragments[0]}
+
+	for i := 1; i < len(e.fragments); i++ {
+		frag := e.fragments[i]
+		prevFrag := e.fragments[i-1]
+
+		// Check if this fragment is on the same line (Y within tolerance)
+		verticalDist := abs(frag.Y - prevFrag.Y)
+		if verticalDist <= prevFrag.Height*0.5 {
+			// Same line
+			currentLine = append(currentLine, frag)
+		} else {
+			// New line - save current line and start new one
+			lines = append(lines, currentLine)
+			currentLine = []TextFragment{frag}
+		}
+	}
+
+	// Don't forget the last line
+	if len(currentLine) > 0 {
+		lines = append(lines, currentLine)
+	}
+
+	return lines
+}
+
+// detectLineDirection determines the dominant direction of a line
+func (e *Extractor) detectLineDirection(fragments []TextFragment) Direction {
+	ltrCount := 0
+	rtlCount := 0
+
+	for _, frag := range fragments {
+		switch frag.Direction {
+		case LTR:
+			ltrCount++
+		case RTL:
+			rtlCount++
+		}
+	}
+
+	// If no strong directional fragments, default to LTR
+	if ltrCount == 0 && rtlCount == 0 {
+		return LTR
+	}
+
+	// Return dominant direction
+	if rtlCount > ltrCount {
+		return RTL
+	}
+	return LTR
+}
+
+// reorderFragmentsForReading reorders fragments based on reading direction
+func (e *Extractor) reorderFragmentsForReading(fragments []TextFragment, lineDir Direction) []TextFragment {
+	if len(fragments) <= 1 {
+		return fragments
+	}
+
+	// Make a copy to avoid modifying original
+	ordered := make([]TextFragment, len(fragments))
+	copy(ordered, fragments)
+
+	// Sort by X coordinate
+	// For LTR: left to right (ascending X)
+	// For RTL: right to left (descending X)
+	for i := 0; i < len(ordered)-1; i++ {
+		for j := i + 1; j < len(ordered); j++ {
+			shouldSwap := false
+			if lineDir == RTL {
+				// RTL: higher X comes first
+				shouldSwap = ordered[i].X < ordered[j].X
+			} else {
+				// LTR: lower X comes first
+				shouldSwap = ordered[i].X > ordered[j].X
+			}
+
+			if shouldSwap {
+				ordered[i], ordered[j] = ordered[j], ordered[i]
+			}
+		}
+	}
+
+	return ordered
+}
+
+// calculateHorizontalDistance calculates the gap between two fragments
+// accounting for text direction
+func calculateHorizontalDistance(frag, nextFrag TextFragment, lineDir Direction) float64 {
+	if lineDir == RTL {
+		// For RTL, distance is from end of next fragment to start of current
+		// (reading right-to-left)
+		return frag.X - (nextFrag.X + nextFrag.Width)
+	}
+	// For LTR, distance is from end of current to start of next
+	return nextFrag.X - (frag.X + frag.Width)
+}
+
+// shouldInsertSpace determines if a space should be inserted between two fragments
+// based on the horizontal gap and font metrics
+func (e *Extractor) shouldInsertSpace(frag, nextFrag TextFragment, horizontalDist float64) bool {
+	// If fragments overlap or are very close, no space
+	if horizontalDist < 0 || horizontalDist < frag.FontSize*0.05 {
+		return false
+	}
+
+	// Get the expected space width from font metrics
+	spaceWidth := e.getSpaceWidth(frag.FontName, frag.FontSize)
+
+	// Insert space if gap is >= 50% of a space character width
+	// This threshold accounts for kerning and tight spacing while still detecting word boundaries
+	threshold := spaceWidth * 0.5
+
+	// DEBUG: Uncomment to see spacing decisions
+	// fmt.Printf("DEBUG: '%s' -> '%s': gap=%.2f, spaceWidth=%.2f, threshold=%.2f, insert=%v\n",
+	//     frag.Text, nextFrag.Text, horizontalDist, spaceWidth, threshold, horizontalDist >= threshold)
+
+	return horizontalDist >= threshold
+}
+
+// getSpaceWidth returns the expected width of a space character for the given font and size
+func (e *Extractor) getSpaceWidth(fontName string, fontSize float64) float64 {
+	// Get font from registered fonts
+	if f, ok := e.fonts[fontName]; ok {
+		// Get space character width (character code 0x20)
+		spaceCharWidth := f.GetWidth(' ') // Width in 1000ths of em
+
+		// Convert from font units to actual width
+		// Font width is in 1000ths of em, fontSize is in points
+		actualWidth := (spaceCharWidth * fontSize) / 1000.0
+
+		return actualWidth
+	}
+
+	// Fallback: estimate space width as 25% of font size
+	// This is a reasonable default for most proportional fonts
+	return fontSize * 0.25
 }
 
 // abs returns the absolute value of a float64
