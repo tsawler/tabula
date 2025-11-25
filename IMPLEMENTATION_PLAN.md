@@ -288,13 +288,13 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 
 ### Week 5: Font Handling & International Text
 
-#### Task 2.1: Type1 Font Parser (16 hours)
-- [ ] Implement `font/type1.go`
-- [ ] Parse Type1 font dictionary
-- [ ] Load font metrics
-- [ ] Handle font encoding
-- [ ] Character width calculation
-- [ ] Write Type1 tests
+#### Task 2.1: Type1 Font Parser (16 hours) ✅
+- [x] Implement `font/type1.go`
+- [x] Parse Type1 font dictionary
+- [x] Load font metrics
+- [x] Handle font encoding
+- [x] Character width calculation
+- [x] Write Type1 tests
 
 #### Task 2.2: TrueType Font Parser (16 hours)
 - [ ] Implement `font/truetype.go`
