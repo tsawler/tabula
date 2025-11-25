@@ -469,3 +469,9 @@ func operandsToMatrix(operands []core.Object) model.Matrix {
 
 	return model.Matrix(vals)
 }
+
+// GetFonts returns the fonts registered in this extractor
+// Useful for debugging font loading and ToUnicode CMap issues
+func (e *Extractor) GetFonts() map[string]*font.Font {
+	return e.fonts
+}

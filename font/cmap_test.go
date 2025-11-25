@@ -410,3 +410,46 @@ end
 		t.Errorf("Lookup(0x00A9) = %q, want %q", result, "©")
 	}
 }
+
+func TestCMapWithEmojiSurrogatePair(t *testing.T) {
+	cmapData := `/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo <<
+  /Registry (Adobe)
+  /Ordering (UCS)
+  /Supplement 0
+>> def
+/CMapName /Adobe-Identity-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<00><FF>
+endcodespacerange
+1 beginbfchar
+<21><d83d dc4b>
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+`
+
+	cmap, err := parseCMapData([]byte(cmapData))
+	if err != nil {
+		t.Fatalf("parseCMapData failed: %v", err)
+	}
+
+	// Test character code 0x21 should map to emoji U+1F44B (👋)
+	result := cmap.Lookup(0x21)
+	runes := []rune(result)
+
+	if len(runes) == 0 {
+		t.Fatalf("Expected emoji, got empty string")
+	}
+
+	if runes[0] != 0x1F44B {
+		t.Errorf("Lookup(0x21) = U+%04X %q, want U+1F44B 👋", runes[0], result)
+	} else {
+		t.Logf("✅ Correctly parsed emoji: U+%04X %q", runes[0], result)
+	}
+}

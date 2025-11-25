@@ -115,14 +115,35 @@ func (cm *CMap) parseBfCharSection(section string) error {
 		}
 
 		// Parse hex strings: <srcCode> <dstUnicode>
-		parts := strings.Fields(line)
-		if len(parts) < 2 {
+		// Split by < to handle <21><d83d dc4b> format
+		var srcHex, dstHex string
+
+		// Find all hex strings in the line
+		hexStrings := make([]string, 0)
+		startIdx := 0
+		for {
+			idx := strings.Index(line[startIdx:], "<")
+			if idx == -1 {
+				break
+			}
+			idx += startIdx
+			endIdx := strings.Index(line[idx:], ">")
+			if endIdx == -1 {
+				break
+			}
+			endIdx += idx
+
+			hexStr := line[idx+1 : endIdx]
+			hexStrings = append(hexStrings, hexStr)
+			startIdx = endIdx + 1
+		}
+
+		if len(hexStrings) < 2 {
 			continue
 		}
 
-		// Extract hex values
-		srcHex := extractHexString(parts[0])
-		dstHex := extractHexString(parts[1])
+		srcHex = hexStrings[0]
+		dstHex = hexStrings[1]
 
 		if srcHex == "" || dstHex == "" {
 			continue
@@ -137,6 +158,8 @@ func (cm *CMap) parseBfCharSection(section string) error {
 		// Convert destination to Unicode string
 		unicode, err := hexToUnicode(dstHex)
 		if err != nil {
+			// Debug: show the error
+			_ = err // Silently continue for now
 			continue
 		}
 
@@ -381,6 +404,12 @@ func parseHexToUint32(hexStr string) (uint32, error) {
 
 // hexToUnicode converts hex string to Unicode string
 func hexToUnicode(hexStr string) (string, error) {
+	// Remove any whitespace from hex string
+	hexStr = strings.ReplaceAll(hexStr, " ", "")
+	hexStr = strings.ReplaceAll(hexStr, "\t", "")
+	hexStr = strings.ReplaceAll(hexStr, "\n", "")
+	hexStr = strings.ReplaceAll(hexStr, "\r", "")
+
 	// Pad to even length
 	if len(hexStr)%2 != 0 {
 		hexStr = "0" + hexStr

@@ -1,6 +1,7 @@
 package font
 
 import (
+	"strings"
 	"unicode/utf8"
 
 	"golang.org/x/text/unicode/norm"
@@ -61,10 +62,73 @@ func GetEncoding(name string) Encoding {
 		return PDFDocEncoding
 	case "StandardEncoding":
 		return StandardEncodingTable
+	case "SymbolEncoding":
+		return SymbolEncoding
+	case "ZapfDingbatsEncoding":
+		return ZapfDingbatsEncoding
 	default:
 		// Default to WinAnsiEncoding for unknown encodings
 		return WinAnsiEncoding
 	}
+}
+
+// InferEncodingFromFontName attempts to infer the appropriate encoding from a font name
+// This is a fallback strategy when the PDF doesn't specify an encoding or ToUnicode CMap
+func InferEncodingFromFontName(fontName string) Encoding {
+	// Normalize font name to lowercase for matching
+	name := strings.ToLower(fontName)
+
+	// Symbol fonts
+	if strings.Contains(name, "symbol") {
+		return SymbolEncoding
+	}
+	if strings.Contains(name, "zapfdingbats") || strings.Contains(name, "dingbats") {
+		return ZapfDingbatsEncoding
+	}
+	if strings.Contains(name, "wingdings") {
+		return SymbolEncoding // Wingdings uses similar symbol encoding
+	}
+
+	// CJK fonts typically use Identity-H/V (handled elsewhere)
+	// These are just hints for when encoding is completely missing
+	if strings.Contains(name, "mincho") || strings.Contains(name, "gothic") ||
+		strings.Contains(name, "msmincho") || strings.Contains(name, "msgothic") ||
+		strings.Contains(name, "heise") {
+		// Japanese fonts - would need Identity-H/V with CMap
+		return WinAnsiEncoding // Safe fallback
+	}
+	if strings.Contains(name, "simsun") || strings.Contains(name, "simhei") ||
+		strings.Contains(name, "stsong") || strings.Contains(name, "stfangsong") {
+		// Chinese fonts
+		return WinAnsiEncoding // Safe fallback
+	}
+	if strings.Contains(name, "batang") || strings.Contains(name, "dotum") ||
+		strings.Contains(name, "gulim") {
+		// Korean fonts
+		return WinAnsiEncoding // Safe fallback
+	}
+
+	// Mac fonts
+	if strings.Contains(name, "menlo") || strings.Contains(name, "monaco") ||
+		strings.Contains(name, "lucida") && strings.Contains(name, "grande") {
+		return MacRomanEncoding
+	}
+
+	// Windows/Arial/Unicode fonts - use WinAnsi
+	if strings.Contains(name, "arial") || strings.Contains(name, "unicode") ||
+		strings.Contains(name, "verdana") || strings.Contains(name, "tahoma") ||
+		strings.Contains(name, "calibri") || strings.Contains(name, "segoe") {
+		return WinAnsiEncoding
+	}
+
+	// Times/Courier likely use StandardEncoding
+	if strings.Contains(name, "times") || strings.Contains(name, "courier") ||
+		strings.Contains(name, "helvetica") {
+		return StandardEncodingTable
+	}
+
+	// Default fallback
+	return WinAnsiEncoding
 }
 
 // NormalizeUnicode normalizes a string to NFC (Canonical Decomposition followed by Canonical Composition)
@@ -162,6 +226,20 @@ var PDFDocEncoding = &standardEncoding{
 var StandardEncodingTable = &standardEncoding{
 	name:  "StandardEncoding",
 	table: standardEncodingTableData,
+}
+
+// SymbolEncoding - Adobe Symbol font encoding
+// Maps character codes to Greek letters, mathematical symbols, etc.
+var SymbolEncoding = &standardEncoding{
+	name:  "SymbolEncoding",
+	table: symbolEncodingTable,
+}
+
+// ZapfDingbatsEncoding - Adobe ZapfDingbats font encoding
+// Maps character codes to decorative symbols, arrows, etc.
+var ZapfDingbatsEncoding = &standardEncoding{
+	name:  "ZapfDingbatsEncoding",
+	table: zapfDingbatsEncodingTable,
 }
 
 // winAnsiTable - Windows CP1252 encoding table
@@ -509,21 +587,240 @@ var glyphNameToUnicode = map[string]rune{
 	"threequarters": 0x00BE, // ¾
 
 	// Math and technical
-	"minus":       0x2212, // −
-	"multiply":    0x00D7, // ×
-	"divide":      0x00F7, // ÷
-	"plusminus":   0x00B1, // ±
-	"notequal":    0x2260, // ≠
-	"lessequal":   0x2264, // ≤
+	"minus":        0x2212, // −
+	"multiply":     0x00D7, // ×
+	"divide":       0x00F7, // ÷
+	"plusminus":    0x00B1, // ±
+	"notequal":     0x2260, // ≠
+	"lessequal":    0x2264, // ≤
 	"greaterequal": 0x2265, // ≥
-	"mu":          0x00B5, // µ
-	"partialdiff": 0x2202, // ∂
-	"summation":   0x2211, // ∑
-	"product":     0x220F, // ∏
-	"pi":          0x03C0, // π
-	"integral":    0x222B, // ∫
-	"Omega":       0x03A9, // Ω
-	"infinity":    0x221E, // ∞
-	"radical":     0x221A, // √
-	"approxequal": 0x2248, // ≈
+	"mu":           0x00B5, // µ
+	"partialdiff":  0x2202, // ∂
+	"summation":    0x2211, // ∑
+	"product":      0x220F, // ∏
+	"pi":           0x03C0, // π
+	"integral":     0x222B, // ∫
+	"Omega":        0x03A9, // Ω
+	"infinity":     0x221E, // ∞
+	"radical":      0x221A, // √
+	"approxequal":  0x2248, // ≈
+}
+
+// symbolEncodingTable - Adobe Symbol font encoding
+// Maps byte values to Greek letters, mathematical symbols, etc.
+// Based on Adobe's Symbol font encoding
+var symbolEncodingTable = [256]rune{
+	// 0x00-0x1F: Control characters
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+
+	// 0x20-0x7E: Symbol font characters
+	0x0020, 0x0021, 0x2200, 0x0023, 0x2203, 0x0025, 0x0026, 0x220B, // ' !"#∃%&∋
+	0x0028, 0x0029, 0x2217, 0x002B, 0x002C, 0x2212, 0x002E, 0x002F, // ()*+,−./
+	0x0030, 0x0031, 0x0032, 0x0033, 0x0034, 0x0035, 0x0036, 0x0037, // 01234567
+	0x0038, 0x0039, 0x003A, 0x003B, 0x003C, 0x003D, 0x003E, 0x003F, // 89:;<=>?
+	0x2245, 0x0391, 0x0392, 0x03A7, 0x0394, 0x0395, 0x03A6, 0x0393, // ≅ΑΒΧΔΕΦΓ
+	0x0397, 0x0399, 0x03D1, 0x039A, 0x039B, 0x039C, 0x039D, 0x039F, // ΗΙΘΚΛΜΝΟ
+	0x03A0, 0x0398, 0x03A1, 0x03A3, 0x03A4, 0x03A5, 0x03C2, 0x03A9, // ΠΘΡΣΤΥϹΩ
+	0x039E, 0x03A8, 0x0396, 0x005B, 0x2234, 0x005D, 0x22A5, 0x005F, // ΞΨΖ[∴]⊥_
+	0xF8E5, 0x03B1, 0x03B2, 0x03C7, 0x03B4, 0x03B5, 0x03C6, 0x03B3, // αβχδεφγ
+	0x03B7, 0x03B9, 0x03D5, 0x03BA, 0x03BB, 0x03BC, 0x03BD, 0x03BF, // ηιϕκλμνο
+	0x03C0, 0x03B8, 0x03C1, 0x03C3, 0x03C4, 0x03C5, 0x03D6, 0x03C9, // πθρστυϖω
+	0x03BE, 0x03C8, 0x03B6, 0x007B, 0x007C, 0x007D, 0x223C, 0x0000, // ξψζ{|}~
+
+	// 0x80-0xFF: Extended symbol characters
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x00A0, 0x03D2, 0x2032, 0x2264, 0x2044, 0x221E, 0x0192, 0x2663, // ϒ′≤⁄∞ƒ♣
+	0x2666, 0x2665, 0x2660, 0x2194, 0x2190, 0x2191, 0x2192, 0x2193, // ♦♥♠↔←↑→↓
+	0x00B0, 0x00B1, 0x2033, 0x2265, 0x00D7, 0x221D, 0x2202, 0x2022, // °±″≥×∝∂•
+	0x00F7, 0x2260, 0x2261, 0x2248, 0x2026, 0x23D0, 0x23AF, 0x21B5, // ÷≠≡≈…⏐⎯↵
+	0x2135, 0x2111, 0x211C, 0x2118, 0x2297, 0x2295, 0x2205, 0x2229, // ℵℑℜ℘⊗⊕∅∩
+	0x222A, 0x2283, 0x2287, 0x2284, 0x2282, 0x2286, 0x2208, 0x2209, // ∪⊃⊇⊄⊂⊆∈∉
+	0x2220, 0x2207, 0x00AE, 0x00A9, 0x2122, 0x220F, 0x221A, 0x22C5, // ∠∇®©™∏√⋅
+	0x00AC, 0x2227, 0x2228, 0x21D4, 0x21D0, 0x21D1, 0x21D2, 0x21D3, // ¬∧∨⇔⇐⇑⇒⇓
+	0x25CA, 0x3008, 0x00AE, 0x00A9, 0x2122, 0x2211, 0x239B, 0x239C, // ◊〈®©™∑⎛⎜
+	0x239D, 0x23A1, 0x23A2, 0x23A3, 0x23A7, 0x23A8, 0x23A9, 0x23AA, // ⎝⎡⎢⎣⎧⎨⎩⎪
+	0xF8FF, 0x3009, 0x222B, 0x2320, 0x23AE, 0x2321, 0x239E, 0x239F, // 〉∫⌠⎮⌡⎞⎟
+	0x23A0, 0x23A4, 0x23A5, 0x23A6, 0x23AB, 0x23AC, 0x23AD, 0x0000, // ⎠⎤⎥⎦⎫⎬⎭
+}
+
+// zapfDingbatsEncodingTable - Adobe ZapfDingbats font encoding
+// Maps byte values to decorative symbols, arrows, numbers in circles, etc.
+var zapfDingbatsEncodingTable = [256]rune{
+	// 0x00-0x1F: Control characters
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+
+	// 0x20-0x7E: Dingbats characters
+	0x0020, 0x2701, 0x2702, 0x2703, 0x2704, 0x260E, 0x2706, 0x2707, // ✁✂✃✄☎✆✇
+	0x2708, 0x2709, 0x261B, 0x261E, 0x270C, 0x270D, 0x270E, 0x270F, // ✈✉☛☞✌✍✎✏
+	0x2710, 0x2711, 0x2712, 0x2713, 0x2714, 0x2715, 0x2716, 0x2717, // ✐✑✒✓✔✕✖✗
+	0x2718, 0x2719, 0x271A, 0x271B, 0x271C, 0x271D, 0x271E, 0x271F, // ✘✙✚✛✜✝✞✟
+	0x2720, 0x2721, 0x2722, 0x2723, 0x2724, 0x2725, 0x2726, 0x2727, // ✠✡✢✣✤✥✦✧
+	0x2605, 0x2729, 0x272A, 0x272B, 0x272C, 0x272D, 0x272E, 0x272F, // ★✩✪✫✬✭✮✯
+	0x2730, 0x2731, 0x2732, 0x2733, 0x2734, 0x2735, 0x2736, 0x2737, // ✰✱✲✳✴✵✶✷
+	0x2738, 0x2739, 0x273A, 0x273B, 0x273C, 0x273D, 0x273E, 0x273F, // ✸✹✺✻✼✽✾✿
+	0x2740, 0x2741, 0x2742, 0x2743, 0x2744, 0x2745, 0x2746, 0x2747, // ❀❁❂❃❄❅❆❇
+	0x2748, 0x2749, 0x274A, 0x274B, 0x25CF, 0x274D, 0x25A0, 0x274F, // ❈❉❊❋●❍■❏
+	0x2750, 0x2751, 0x2752, 0x25B2, 0x25BC, 0x25C6, 0x2756, 0x25D7, // ❐❑❒▲▼◆❖◗
+	0x2758, 0x2759, 0x275A, 0x275B, 0x275C, 0x275D, 0x275E, 0x0000, // ❘❙❚❛❜❝❞
+
+	// 0x80-0xFF: Extended dingbats
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000, 0x0000,
+	0x0000, 0x2761, 0x2762, 0x2763, 0x2764, 0x2765, 0x2766, 0x2767, // ❡❢❣❤❥❦❧
+	0x2663, 0x2666, 0x2665, 0x2660, 0x2460, 0x2461, 0x2462, 0x2463, // ♣♦♥♠①②③④
+	0x2464, 0x2465, 0x2466, 0x2467, 0x2468, 0x2469, 0x2776, 0x2777, // ⑤⑥⑦⑧⑨⑩❶❷
+	0x2778, 0x2779, 0x277A, 0x277B, 0x277C, 0x277D, 0x277E, 0x277F, // ❸❹❺❻❼❽❾❿
+	0x2780, 0x2781, 0x2782, 0x2783, 0x2784, 0x2785, 0x2786, 0x2787, // ➀➁➂➃➄➅➆➇
+	0x2788, 0x2789, 0x278A, 0x278B, 0x278C, 0x278D, 0x278E, 0x278F, // ➈➉➊➋➌➍➎➏
+	0x2790, 0x2791, 0x2792, 0x2793, 0x2794, 0x2192, 0x2194, 0x2195, // ➐➑➒➓➔→↔↕
+	0x2798, 0x2799, 0x279A, 0x279B, 0x279C, 0x279D, 0x279E, 0x279F, // ➘➙➚➛➜➝➞➟
+	0x27A0, 0x27A1, 0x27A2, 0x27A3, 0x27A4, 0x27A5, 0x27A6, 0x27A7, // ➠➡➢➣➤➥➦➧
+	0x27A8, 0x27A9, 0x27AA, 0x27AB, 0x27AC, 0x27AD, 0x27AE, 0x27AF, // ➨➩➪➫➬➭➮➯
+	0x0000, 0x27B1, 0x27B2, 0x27B3, 0x27B4, 0x27B5, 0x27B6, 0x27B7, // ➱➲➳➴➵➶➷
+	0x27B8, 0x27B9, 0x27BA, 0x27BB, 0x27BC, 0x27BD, 0x27BE, 0x0000, // ➸➹➺➻➼➽➾
+}
+
+// IsEmojiSequence checks if a string contains emoji sequences
+// Emoji can be multi-codepoint: base + modifiers (skin tone) + ZWJ sequences
+func IsEmojiSequence(s string) bool {
+	for _, r := range s {
+		// Check for emoji ranges and special characters
+		if isEmojiCodepoint(r) {
+			return true
+		}
+	}
+	return false
+}
+
+// isEmojiCodepoint checks if a rune is an emoji or emoji-related character
+func isEmojiCodepoint(r rune) bool {
+	// Emoji ranges (simplified - covers most common emoji)
+	return (r >= 0x1F300 && r <= 0x1F9FF) || // Misc Symbols and Pictographs, Emoticons, Transport, etc.
+		(r >= 0x2600 && r <= 0x26FF) || // Misc Symbols (☀️ sun, etc.)
+		(r >= 0x2700 && r <= 0x27BF) || // Dingbats
+		(r >= 0x2B00 && r <= 0x2BFF) || // Misc Symbols and Arrows (⭐ star, etc.)
+		(r >= 0xFE00 && r <= 0xFE0F) || // Variation selectors
+		(r == 0x200D) || // Zero Width Joiner (ZWJ)
+		(r >= 0x1F1E6 && r <= 0x1F1FF) // Regional indicators (flags)
+}
+
+// NormalizeEmojiSequence normalizes emoji sequences for consistent storage
+// This handles skin tone modifiers and ZWJ sequences
+func NormalizeEmojiSequence(s string) string {
+	// For now, just return the string as-is
+	// Full emoji normalization would require:
+	// 1. Detecting ZWJ sequences (👨‍👩‍👧‍👦)
+	// 2. Handling skin tone modifiers (👋🏽)
+	// 3. Normalizing variation selectors
+	// This is a placeholder for future enhancement
+	return s
+}
+
+// DecodeUTF16BE decodes UTF-16 Big Endian encoded bytes to a string
+// Note: Input should NOT include the BOM (FEFF) - that should be stripped before calling
+func DecodeUTF16BE(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+
+	// Ensure we have pairs of bytes
+	if len(data)%2 != 0 {
+		// Pad with zero if odd length
+		data = append(data, 0)
+	}
+
+	runes := make([]rune, 0, len(data)/2)
+
+	for i := 0; i < len(data); i += 2 {
+		// Read big-endian 16-bit value
+		codeUnit := uint16(data[i])<<8 | uint16(data[i+1])
+
+		// Check if this is a high surrogate (D800-DBFF)
+		if codeUnit >= 0xD800 && codeUnit <= 0xDBFF {
+			// This is a high surrogate - need to read low surrogate
+			if i+2 < len(data) {
+				lowSurrogate := uint16(data[i+2])<<8 | uint16(data[i+3])
+				if lowSurrogate >= 0xDC00 && lowSurrogate <= 0xDFFF {
+					// Valid surrogate pair - decode to codepoint
+					codepoint := 0x10000 + ((uint32(codeUnit)-0xD800)<<10 | (uint32(lowSurrogate) - 0xDC00))
+					runes = append(runes, rune(codepoint))
+					i += 2 // Skip the low surrogate
+					continue
+				}
+			}
+			// Invalid surrogate - skip it
+			continue
+		}
+
+		// Check if this is a low surrogate without a high surrogate (invalid)
+		if codeUnit >= 0xDC00 && codeUnit <= 0xDFFF {
+			// Invalid - skip it
+			continue
+		}
+
+		// Normal BMP character
+		runes = append(runes, rune(codeUnit))
+	}
+
+	return string(runes)
+}
+
+// DecodeUTF16LE decodes UTF-16 Little Endian encoded bytes to a string
+// Note: Input should NOT include the BOM (FFFE) - that should be stripped before calling
+func DecodeUTF16LE(data []byte) string {
+	if len(data) == 0 {
+		return ""
+	}
+
+	// Ensure we have pairs of bytes
+	if len(data)%2 != 0 {
+		// Pad with zero if odd length
+		data = append(data, 0)
+	}
+
+	runes := make([]rune, 0, len(data)/2)
+
+	for i := 0; i < len(data); i += 2 {
+		// Read little-endian 16-bit value
+		codeUnit := uint16(data[i]) | uint16(data[i+1])<<8
+
+		// Check if this is a high surrogate (D800-DBFF)
+		if codeUnit >= 0xD800 && codeUnit <= 0xDBFF {
+			// This is a high surrogate - need to read low surrogate
+			if i+2 < len(data) {
+				lowSurrogate := uint16(data[i+2]) | uint16(data[i+3])<<8
+				if lowSurrogate >= 0xDC00 && lowSurrogate <= 0xDFFF {
+					// Valid surrogate pair - decode to codepoint
+					codepoint := 0x10000 + ((uint32(codeUnit)-0xD800)<<10 | (uint32(lowSurrogate) - 0xDC00))
+					runes = append(runes, rune(codepoint))
+					i += 2 // Skip the low surrogate
+					continue
+				}
+			}
+			// Invalid surrogate - skip it
+			continue
+		}
+
+		// Check if this is a low surrogate without a high surrogate (invalid)
+		if codeUnit >= 0xDC00 && codeUnit <= 0xDFFF {
+			// Invalid - skip it
+			continue
+		}
+
+		// Normal BMP character
+		runes = append(runes, rune(codeUnit))
+	}
+
+	return string(runes)
 }

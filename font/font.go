@@ -58,8 +58,9 @@ func (f *Font) IsStandardFont() bool {
 // DecodeString decodes a string of character codes to Unicode
 // Priority order:
 // 1. Use ToUnicode CMap if present (most accurate)
-// 2. Use font's Encoding property (standard encodings)
-// 3. Fall back to raw bytes as string
+// 2. Check for UTF-16 Byte Order Mark (BOM) - FEFF or FFFE
+// 3. Use font's Encoding property (standard encodings)
+// 4. Fall back to raw bytes as string
 // All decoded strings are normalized to NFC for consistent embeddings
 func (f *Font) DecodeString(data []byte) string {
 	var decoded string
@@ -70,14 +71,28 @@ func (f *Font) DecodeString(data []byte) string {
 		return NormalizeUnicode(decoded)
 	}
 
-	// Priority 2: Use font's Encoding property
+	// Priority 2: Check for UTF-16 Byte Order Mark (BOM)
+	// PDF hex strings starting with FEFF or FFFE are UTF-16 encoded
+	if len(data) >= 2 {
+		if data[0] == 0xFE && data[1] == 0xFF {
+			// UTF-16BE (Big Endian)
+			decoded = DecodeUTF16BE(data[2:])
+			return NormalizeUnicode(decoded)
+		} else if data[0] == 0xFF && data[1] == 0xFE {
+			// UTF-16LE (Little Endian)
+			decoded = DecodeUTF16LE(data[2:])
+			return NormalizeUnicode(decoded)
+		}
+	}
+
+	// Priority 3: Use font's Encoding property
 	if f.Encoding != "" {
 		enc := GetEncoding(f.Encoding)
 		decoded = enc.DecodeString(data)
 		return NormalizeUnicode(decoded)
 	}
 
-	// Priority 3: Fall back to raw bytes as string
+	// Priority 4: Fall back to raw bytes as string
 	decoded = string(data)
 	return NormalizeUnicode(decoded)
 }
