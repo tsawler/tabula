@@ -6,6 +6,13 @@ import (
 	"strconv"
 )
 
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
 // Parser parses PDF objects using the Lexer
 type Parser struct {
 	lexer        *Lexer
@@ -329,7 +336,7 @@ func (p *Parser) parseStream(dict Dict) (*Stream, error) {
 	if p.currentToken.Type != TokenKeyword || string(p.currentToken.Value) != "stream" {
 		return nil, fmt.Errorf("expected 'stream' keyword")
 	}
-	p.nextToken()
+
 
 	// Get the length from the dictionary
 	lengthObj := dict.Get("Length")
@@ -343,7 +350,7 @@ func (p *Parser) parseStream(dict Dict) (*Stream, error) {
 		length = int(v)
 	case IndirectRef:
 		// Length is an indirect reference - we can't resolve it here
-		// For now, we'll need to handle this differently
+		// The caller will need to resolve it and create the stream manually
 		return nil, fmt.Errorf("indirect reference for stream length not yet supported in parser")
 	default:
 		return nil, fmt.Errorf("invalid type for stream length: %T", lengthObj)
@@ -353,9 +360,57 @@ func (p *Parser) parseStream(dict Dict) (*Stream, error) {
 		return nil, fmt.Errorf("invalid stream length: %d", length)
 	}
 
-	// Read the stream data
-	// Note: The lexer doesn't handle binary stream data, we need to read directly
-	// TODO: This is a limitation - we need access to the underlying reader
-	// For now, we'll return an error
-	return nil, fmt.Errorf("stream parsing not fully implemented - requires direct reader access")
+	// IMPORTANT: The parser pre-fetches tokens, so when currentToken is 'stream',
+	// peekToken has already been loaded. Loading peekToken caused the lexer to:
+	// 1. Skip whitespace after 'stream' (including the EOL)
+	// 2. Start tokenizing the stream data!
+	//
+	// For binary stream data, the lexer might tokenize the first few bytes as a token.
+	// We need to "recover" these bytes from peekToken and include them in the stream data.
+
+	var data []byte
+
+	// If peekToken has data, it consumed some bytes from the stream
+	// Add those bytes back to our stream data
+	if p.peekToken != nil && len(p.peekToken.Value) > 0 {
+		// peekToken consumed some bytes - add them to stream data
+		data = append(data, p.peekToken.Value...)
+	}
+
+	// Read the remaining bytes (length - bytes already consumed)
+	remainingBytes := length - len(data)
+	if remainingBytes > 0 {
+		moreData, err := p.lexer.ReadBytes(remainingBytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read stream data: %w", err)
+		}
+		data = append(data, moreData...)
+	}
+
+
+	// After the stream data, there should be an 'endstream' keyword
+	// The lexer is now positioned right after the binary data
+	// We need to get the next token which should be 'endstream'
+
+	// Reset token state and get next token
+	token, err := p.lexer.NextToken()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read token after stream data: %w", err)
+	}
+
+	if token.Type != TokenKeyword || string(token.Value) != "endstream" {
+		return nil, fmt.Errorf("expected 'endstream' keyword, got %v (%s)", token.Type, string(token.Value))
+	}
+
+	// Now reload the parser's current and peek tokens
+	// This ensures ParseIndirectObject can continue normally
+	p.currentToken = nil
+	p.peekToken = nil
+	p.nextToken()
+	p.nextToken()
+
+	return &Stream{
+		Dict: dict,
+		Data: data,
+	}, nil
 }

@@ -515,3 +515,49 @@ func hexValue(b byte) byte {
 	}
 	return 0
 }
+
+// ReadBytes reads exactly n bytes from the underlying reader
+// This is used for reading binary stream data
+func (l *Lexer) ReadBytes(n int) ([]byte, error) {
+	data := make([]byte, n)
+	totalRead := 0
+
+	for totalRead < n {
+		bytesRead, err := l.reader.Read(data[totalRead:])
+		totalRead += bytesRead
+		l.pos += int64(bytesRead)
+
+		if err == io.EOF && totalRead < n {
+			return data[:totalRead], fmt.Errorf("unexpected EOF: expected %d bytes, got %d", n, totalRead)
+		}
+		if err != nil && err != io.EOF {
+			return data[:totalRead], err
+		}
+		if err == io.EOF {
+			break
+		}
+	}
+
+	return data, nil
+}
+
+// SkipBytes skips exactly n bytes from the underlying reader
+func (l *Lexer) SkipBytes(n int) error {
+	for i := 0; i < n; i++ {
+		_, err := l.readByte()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Peek returns the next byte without consuming it (public wrapper for peek)
+func (l *Lexer) Peek() (byte, error) {
+	return l.peek()
+}
+
+// ReadByte reads and returns a single byte (public wrapper for readByte)
+func (l *Lexer) ReadByte() (byte, error) {
+	return l.readByte()
+}
