@@ -1,0 +1,10 @@
+# https://taskfile.dev
+
+version: '3'
+
+tasks:
+  
+  test:
+    cmds:
+      - go test ./...
+    silent: true
