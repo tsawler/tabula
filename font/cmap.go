@@ -17,6 +17,11 @@ type CMap struct {
 
 	// Range mappings for efficiency
 	rangeMappings []CMapRange
+
+	// Code space byte width (1, 2, 3, or 4 bytes per character code)
+	// Determined from begincodespacerange/endcodespacerange
+	// 0 means not specified (will try multiple widths)
+	byteWidth int
 }
 
 // CMapRange represents a range of character code to Unicode mappings
@@ -56,6 +61,12 @@ func parseCMapData(data []byte) (*CMap, error) {
 	// Convert to string for easier parsing
 	content := string(data)
 
+	// Parse begincodespacerange/endcodespacerange to determine byte width
+	if err := cmap.parseCodeSpaceRange(content); err != nil {
+		// Non-fatal - just log and continue
+		_ = err
+	}
+
 	// Parse beginbfchar/endbfchar sections
 	if err := cmap.parseBfChar(content); err != nil {
 		// Non-fatal - just log and continue
@@ -69,6 +80,69 @@ func parseCMapData(data []byte) (*CMap, error) {
 	}
 
 	return cmap, nil
+}
+
+// parseCodeSpaceRange parses begincodespacerange/endcodespacerange sections
+// to determine the byte width of character codes
+func (cm *CMap) parseCodeSpaceRange(content string) error {
+	// Find first begincodespacerange/endcodespacerange section
+	beginIdx := strings.Index(content, "begincodespacerange")
+	if beginIdx == -1 {
+		return nil // No codespacerange section
+	}
+
+	endIdx := strings.Index(content[beginIdx:], "endcodespacerange")
+	if endIdx == -1 {
+		return nil
+	}
+	endIdx += beginIdx
+
+	// Extract section content
+	section := content[beginIdx+len("begincodespacerange") : endIdx]
+
+	// Parse the first code range to determine byte width
+	// Format: <low> <high>
+	// Example: <0000> <FFFF> means 2-byte codes (4 hex digits = 2 bytes)
+	lines := strings.Split(section, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+
+		// Find hex strings
+		var hexStrings []string
+		startIdx := 0
+		for {
+			idx := strings.Index(line[startIdx:], "<")
+			if idx == -1 {
+				break
+			}
+			idx += startIdx
+			endIdx := strings.Index(line[idx:], ">")
+			if endIdx == -1 {
+				break
+			}
+			endIdx += idx
+
+			hexStr := line[idx+1 : endIdx]
+			hexStrings = append(hexStrings, hexStr)
+			startIdx = endIdx + 1
+		}
+
+		if len(hexStrings) >= 2 {
+			// Determine byte width from first hex string length
+			hexLen := len(hexStrings[0])
+			// Each 2 hex digits = 1 byte
+			cm.byteWidth = hexLen / 2
+			if hexLen%2 != 0 {
+				cm.byteWidth = (hexLen + 1) / 2
+			}
+			break // We got what we needed
+		}
+	}
+
+	return nil
 }
 
 // parseBfChar parses beginbfchar/endbfchar sections
@@ -313,6 +387,7 @@ func (cm *CMap) parseBfRangeArray(line string) {
 }
 
 // Lookup looks up a character code and returns the Unicode string
+// Returns empty string if no mapping is found (caller should handle fallback)
 func (cm *CMap) Lookup(charCode uint32) string {
 	// Check direct mappings first
 	if unicode, ok := cm.charMappings[charCode]; ok {
@@ -329,11 +404,8 @@ func (cm *CMap) Lookup(charCode uint32) string {
 		}
 	}
 
-	// No mapping found - return the character code as-is (best effort)
-	if charCode < 0x110000 { // Valid Unicode range
-		return string(rune(charCode))
-	}
-
+	// No mapping found - return empty string
+	// Let the caller decide how to handle unmapped codes
 	return ""
 }
 
@@ -345,29 +417,80 @@ func (cm *CMap) LookupString(data []byte) string {
 
 	var result strings.Builder
 
-	// Process bytes - need to handle both single-byte and multi-byte codes
+	// If byteWidth is specified from codespacerange, use it
+	if cm.byteWidth > 0 {
+		return cm.lookupStringWithWidth(data, cm.byteWidth)
+	}
+
+	// Otherwise, try different widths (fallback for CMaps without codespacerange)
 	i := 0
 	for i < len(data) {
-		// Try 2-byte code first (common for CJK)
+		// Try 1-byte code first (most common for Latin and subset fonts)
+		code1 := uint32(data[i])
+		if unicode := cm.Lookup(code1); unicode != "" {
+			result.WriteString(unicode)
+			i++
+			continue
+		}
+
+		// Try 2-byte code (common for CJK and some complex fonts)
 		if i+1 < len(data) {
-			code := uint32(data[i])<<8 | uint32(data[i+1])
-			if unicode := cm.Lookup(code); unicode != "" {
+			code2 := uint32(data[i])<<8 | uint32(data[i+1])
+			if unicode := cm.Lookup(code2); unicode != "" {
 				result.WriteString(unicode)
 				i += 2
 				continue
 			}
 		}
 
-		// Try 1-byte code
-		code := uint32(data[i])
+		// No mapping found - try to interpret as direct Unicode (fallback)
+		// This handles cases where the PDF uses character codes as Unicode
+		if code1 < 0x110000 { // Valid Unicode range
+			result.WriteRune(rune(code1))
+		}
+		i++
+	}
+
+	return result.String()
+}
+
+// lookupStringWithWidth decodes using a specific byte width
+func (cm *CMap) lookupStringWithWidth(data []byte, width int) string {
+	var result strings.Builder
+
+	i := 0
+	for i < len(data) {
+		// Check if we have enough bytes
+		if i+width > len(data) {
+			// Not enough bytes for a complete code
+			// Handle remaining bytes as 1-byte codes
+			for i < len(data) {
+				code := uint32(data[i])
+				if unicode := cm.Lookup(code); unicode != "" {
+					result.WriteString(unicode)
+				} else if code < 0x110000 {
+					result.WriteRune(rune(code))
+				}
+				i++
+			}
+			break
+		}
+
+		// Build multi-byte code
+		var code uint32
+		for j := 0; j < width; j++ {
+			code = (code << 8) | uint32(data[i+j])
+		}
+
+		// Lookup the code
 		if unicode := cm.Lookup(code); unicode != "" {
 			result.WriteString(unicode)
-			i++
-		} else {
-			// Fallback - output as-is
-			result.WriteByte(data[i])
-			i++
+		} else if code < 0x110000 {
+			// Fallback to direct Unicode interpretation
+			result.WriteRune(rune(code))
 		}
+
+		i += width
 	}
 
 	return result.String()

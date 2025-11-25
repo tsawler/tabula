@@ -42,7 +42,7 @@ end
 		{0x0004, "A"},      // A
 		{0x0005, "B"},      // B
 		{0x0006, "C"},      // C
-		{0x0007, string(rune(0x0007))}, // Not mapped, should return code as-is
+		{0x0007, ""},       // Not mapped, should return empty (caller handles fallback)
 	}
 
 	for _, tt := range tests {
@@ -89,7 +89,7 @@ end
 		{0x00A0, string(rune(0x00A0))}, // Non-breaking space
 		{0x00A1, string(rune(0x00A1))}, // ¡
 		{0x00A2, string(rune(0x00A2))}, // ¢
-		{0x00A3, string(rune(0x00A3))}, // Not in range
+		{0x00A3, ""},                   // Not in range, returns empty
 	}
 
 	for _, tt := range tests {
@@ -133,7 +133,7 @@ end
 		{0x0011, "B"},
 		{0x0012, "C"},
 		{0x0013, "D"},
-		{0x0014, string(rune(0x0014))}, // Not in range
+		{0x0014, ""}, // Not in range, returns empty
 	}
 
 	for _, tt := range tests {
@@ -268,12 +268,21 @@ func TestCMapEmpty(t *testing.T) {
 	// Test with empty CMap
 	cmap := NewCMap()
 
-	// Should return code as-is for unmapped character
+	// Should return empty string for unmapped character
 	result := cmap.Lookup(0x0041)
-	expected := "A" // 0x0041 is 'A' in Unicode
+	expected := "" // Empty CMap returns empty (caller handles fallback)
 
 	if result != expected {
 		t.Errorf("Lookup(0x0041) = %q, want %q", result, expected)
+	}
+
+	// But LookupString should handle fallback
+	input := []byte{0x41} // 'A'
+	stringResult := cmap.LookupString(input)
+	expectedString := "A" // Fallback to Unicode interpretation
+
+	if stringResult != expectedString {
+		t.Errorf("LookupString([0x41]) = %q, want %q", stringResult, expectedString)
 	}
 }
 
