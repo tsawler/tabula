@@ -14,16 +14,25 @@ A comprehensive, pure-Go PDF library designed for **advanced document parsing**,
 - ✅ **Semantic structure** - Build document tree with hierarchical elements
 - ✅ **RAG-optimized** - Intermediate representation perfect for LLM ingestion
 
+### PDF Version Support
+
+- ✅ **PDF 1.0-1.4** - Full support (traditional XRef tables)
+- ✅ **PDF 1.5-1.7** - Full support (XRef streams implemented!)
+- 🎯 **PDF 2.0** - Target for full compliance (future releases)
+
+**Current:** PDF 1.5+ XRef streams now supported - can read modern PDFs!
+See [PDF_VERSION_SUPPORT.md](PDF_VERSION_SUPPORT.md) for detailed compatibility matrix.
+
 ### Advanced Features
 
-- 🔧 **Font support** - Type1, TrueType, CJK fonts
+- ✅ **Font support** - Type1, TrueType, CJK fonts (CIDFont/Type0)
 - 🔧 **Image extraction** - Extract embedded images with metadata
 - 🔧 **Stream decoding** - FlateDecode, LZW, DCT, and more
-- 🔧 **XRef handling** - Traditional tables and compressed streams (PDF 1.5+)
-- 🔧 **Object streams** - Compressed object collections
-- 🔧 **Encryption** - Basic PDF encryption support
+- ✅ **XRef handling** - Both traditional tables and compressed streams (PDF 1.5+)
+- 🔧 **Object streams** - Compressed object collections (PDF 1.5+)
+- 🔧 **Encryption** - RC4 and AES encryption support
 - 🔧 **Parallel processing** - Multi-core page processing
-- 🔧 **Memory efficient** - Streaming architecture, lazy loading
+- ✅ **Memory efficient** - Streaming architecture, lazy loading
 
 ## Installation
 

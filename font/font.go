@@ -9,6 +9,9 @@ type Font struct {
 
 	// Character width information
 	widths map[rune]float64
+
+	// ToUnicode CMap for character code to Unicode mapping
+	ToUnicodeCMap *CMap
 }
 
 // NewFont creates a new font
@@ -50,6 +53,18 @@ func (f *Font) GetStringWidth(s string) float64 {
 func (f *Font) IsStandardFont() bool {
 	_, ok := standardFonts[f.BaseFont]
 	return ok
+}
+
+// DecodeString decodes a string of character codes to Unicode
+// If a ToUnicode CMap is present, it uses that for decoding
+// Otherwise, it returns the string as-is
+func (f *Font) DecodeString(data []byte) string {
+	if f.ToUnicodeCMap != nil {
+		return f.ToUnicodeCMap.LookupString(data)
+	}
+
+	// No CMap - return as-is
+	return string(data)
 }
 
 // loadStandardWidths loads default widths for Standard 14 fonts

@@ -78,15 +78,27 @@ func NewType1Font(fontDict core.Dict, resolver func(core.IndirectRef) (core.Obje
 
 	// Parse ToUnicode CMap if present
 	if toUnicodeObj := fontDict.Get("ToUnicode"); toUnicodeObj != nil {
+		var stream *core.Stream
+
 		if ref, ok := toUnicodeObj.(core.IndirectRef); ok {
 			obj, err := resolver(ref)
 			if err == nil {
-				if stream, ok := obj.(*core.Stream); ok {
-					t1.ToUnicode = stream
+				if s, ok := obj.(*core.Stream); ok {
+					stream = s
 				}
 			}
-		} else if stream, ok := toUnicodeObj.(*core.Stream); ok {
+		} else if s, ok := toUnicodeObj.(*core.Stream); ok {
+			stream = s
+		}
+
+		// Store stream and parse CMap
+		if stream != nil {
 			t1.ToUnicode = stream
+
+			// Parse the ToUnicode CMap
+			if cmap, err := ParseToUnicodeCMap(stream); err == nil {
+				t1.Font.ToUnicodeCMap = cmap
+			}
 		}
 	}
 

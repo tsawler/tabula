@@ -80,15 +80,27 @@ func NewTrueTypeFont(fontDict core.Dict, resolver func(core.IndirectRef) (core.O
 
 	// Parse ToUnicode CMap if present
 	if toUnicodeObj := fontDict.Get("ToUnicode"); toUnicodeObj != nil {
+		var stream *core.Stream
+
 		if ref, ok := toUnicodeObj.(core.IndirectRef); ok {
 			obj, err := resolver(ref)
 			if err == nil {
-				if stream, ok := obj.(*core.Stream); ok {
-					tt.ToUnicode = stream
+				if s, ok := obj.(*core.Stream); ok {
+					stream = s
 				}
 			}
-		} else if stream, ok := toUnicodeObj.(*core.Stream); ok {
+		} else if s, ok := toUnicodeObj.(*core.Stream); ok {
+			stream = s
+		}
+
+		// Store stream and parse CMap
+		if stream != nil {
 			tt.ToUnicode = stream
+
+			// Parse the ToUnicode CMap
+			if cmap, err := ParseToUnicodeCMap(stream); err == nil {
+				tt.Font.ToUnicodeCMap = cmap
+			}
 		}
 	}
 

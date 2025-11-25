@@ -60,6 +60,13 @@ func (r *ObjectResolver) ResolveDeep(obj core.Object) (core.Object, error) {
 
 // resolve is the internal resolution method
 func (r *ObjectResolver) resolve(obj core.Object, deep bool) (core.Object, error) {
+	// Reset visited map at top level (depth 0)
+	// This allows the same objects to be resolved in different top-level calls
+	// while still detecting circular references within a single resolution tree
+	if r.currentDepth == 0 {
+		r.visited = make(map[int]bool)
+	}
+
 	// Check depth limit
 	if r.currentDepth >= r.maxDepth {
 		return nil, fmt.Errorf("maximum recursion depth (%d) exceeded", r.maxDepth)
@@ -74,6 +81,10 @@ func (r *ObjectResolver) resolve(obj core.Object, deep bool) (core.Object, error
 
 		// Mark as visited
 		r.visited[v.Number] = true
+		// Unmark after we're done (allows the same object to be visited in different branches)
+		defer func() {
+			delete(r.visited, v.Number)
+		}()
 
 		// Resolve the reference
 		resolved, err := r.reader.ResolveReference(v)

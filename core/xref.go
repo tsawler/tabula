@@ -17,8 +17,9 @@ type XRefEntry struct {
 
 // XRefTable represents a PDF cross-reference table
 type XRefTable struct {
-	Entries map[int]*XRefEntry // Map from object number to XRef entry
-	Trailer Dict               // Trailer dictionary
+	Entries  map[int]*XRefEntry // Map from object number to XRef entry
+	Trailer  Dict               // Trailer dictionary
+	IsStream bool               // true if this XRef came from a stream (PDF 1.5+)
 }
 
 // NewXRefTable creates a new empty XRef table
@@ -110,6 +111,7 @@ func (x *XRefParser) FindXRef() (int64, error) {
 }
 
 // ParseXRef parses the XRef table at the given byte offset
+// Handles both traditional XRef tables (PDF 1.0-1.4) and XRef streams (PDF 1.5+)
 func (x *XRefParser) ParseXRef(offset int64) (*XRefTable, error) {
 	// Seek to the XRef table
 	_, err := x.reader.Seek(offset, io.SeekStart)
@@ -119,6 +121,49 @@ func (x *XRefParser) ParseXRef(offset int64) (*XRefTable, error) {
 
 	x.startPos = offset
 
+	// Determine if this is a traditional XRef table or XRef stream
+	isStream, err := x.isXRefStream()
+	if err != nil {
+		return nil, fmt.Errorf("failed to detect xref type: %w", err)
+	}
+
+	// Reset to start position
+	_, err = x.reader.Seek(offset, io.SeekStart)
+	if err != nil {
+		return nil, fmt.Errorf("failed to seek back to xref: %w", err)
+	}
+
+	if isStream {
+		return x.parseXRefStream()
+	}
+	return x.parseTraditionalXRef()
+}
+
+// isXRefStream checks if the XRef at current position is a stream (PDF 1.5+) vs traditional table
+func (x *XRefParser) isXRefStream() (bool, error) {
+	scanner := bufio.NewScanner(x.reader)
+	if !scanner.Scan() {
+		return false, fmt.Errorf("failed to read first line")
+	}
+	line := strings.TrimSpace(scanner.Text())
+
+	// Traditional XRef starts with "xref" keyword
+	if line == "xref" {
+		return false, nil
+	}
+
+	// XRef stream starts with an object definition: "num gen obj"
+	// e.g., "5 0 obj"
+	parts := strings.Fields(line)
+	if len(parts) == 3 && parts[2] == "obj" {
+		return true, nil
+	}
+
+	return false, fmt.Errorf("unrecognized xref format: %s", line)
+}
+
+// parseTraditionalXRef parses a traditional XRef table (PDF 1.0-1.4)
+func (x *XRefParser) parseTraditionalXRef() (*XRefTable, error) {
 	scanner := bufio.NewScanner(x.reader)
 
 	// Read "xref" keyword
@@ -193,7 +238,194 @@ func (x *XRefParser) ParseXRef(offset int64) (*XRefTable, error) {
 		return nil, fmt.Errorf("xref table missing trailer")
 	}
 
+	table.IsStream = false
 	return table, nil
+}
+
+// parseXRefStream parses an XRef stream (PDF 1.5+)
+func (x *XRefParser) parseXRefStream() (*XRefTable, error) {
+	// Skip past the "num gen obj" line
+	scanner := bufio.NewScanner(x.reader)
+	if !scanner.Scan() {
+		return nil, fmt.Errorf("failed to read object header")
+	}
+	// The line should be "num gen obj", we just skip it
+
+	// Parse the stream object using the object parser
+	parser := NewParser(x.reader)
+	obj, err := parser.ParseObject()
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse xref stream object: %w", err)
+	}
+
+	stream, ok := obj.(*Stream)
+	if !ok {
+		return nil, fmt.Errorf("xref is not a stream object, got %T", obj)
+	}
+
+	// Verify this is an XRef stream
+	typeObj := stream.Dict.Get("Type")
+	if typeObj == nil {
+		return nil, fmt.Errorf("xref stream missing /Type")
+	}
+	typeName, ok := typeObj.(Name)
+	if !ok || string(typeName) != "XRef" {
+		return nil, fmt.Errorf("stream is not an XRef stream, got type: %v", typeObj)
+	}
+
+	// Decode the stream data
+	data, err := stream.Decode()
+	if err != nil {
+		return nil, fmt.Errorf("failed to decode xref stream: %w", err)
+	}
+
+	// Parse /Size - total number of entries
+	sizeObj := stream.Dict.Get("Size")
+	if sizeObj == nil {
+		return nil, fmt.Errorf("xref stream missing /Size")
+	}
+	size, ok := sizeObj.(Int)
+	if !ok {
+		return nil, fmt.Errorf("invalid /Size type: %T", sizeObj)
+	}
+
+	// Parse /Index array (optional, default is [0 Size])
+	index := []int{0, int(size)}
+	if indexObj := stream.Dict.Get("Index"); indexObj != nil {
+		indexArr, ok := indexObj.(Array)
+		if !ok {
+			return nil, fmt.Errorf("invalid /Index type: %T", indexObj)
+		}
+		index = make([]int, len(indexArr))
+		for i, val := range indexArr {
+			intVal, ok := val.(Int)
+			if !ok {
+				return nil, fmt.Errorf("invalid /Index element type: %T", val)
+			}
+			index[i] = int(intVal)
+		}
+	}
+
+	// Parse /W array - field widths [type field1 field2]
+	wObj := stream.Dict.Get("W")
+	if wObj == nil {
+		return nil, fmt.Errorf("xref stream missing /W")
+	}
+	wArr, ok := wObj.(Array)
+	if !ok {
+		return nil, fmt.Errorf("invalid /W type: %T", wObj)
+	}
+	if len(wArr) != 3 {
+		return nil, fmt.Errorf("invalid /W array length: %d (expected 3)", len(wArr))
+	}
+
+	w := make([]int, 3)
+	for i, val := range wArr {
+		intVal, ok := val.(Int)
+		if !ok {
+			return nil, fmt.Errorf("invalid /W element type: %T", val)
+		}
+		w[i] = int(intVal)
+	}
+
+	// Parse entries from binary data
+	table := NewXRefTable()
+	table.IsStream = true
+
+	// The stream dictionary itself serves as the trailer
+	table.Trailer = stream.Dict
+
+	// Process subsections defined by /Index
+	dataOffset := 0
+	for i := 0; i < len(index); i += 2 {
+		firstObjNum := index[i]
+		count := index[i+1]
+
+		for j := 0; j < count; j++ {
+			objNum := firstObjNum + j
+
+			// Read fields according to /W array
+			entry, bytesRead, err := x.parseXRefStreamEntry(data[dataOffset:], w)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse xref stream entry %d: %w", objNum, err)
+			}
+			dataOffset += bytesRead
+
+			table.Set(objNum, entry)
+		}
+	}
+
+	return table, nil
+}
+
+// parseXRefStreamEntry parses a single entry from XRef stream binary data
+// Returns the entry, number of bytes consumed, and error
+func (x *XRefParser) parseXRefStreamEntry(data []byte, w []int) (*XRefEntry, int, error) {
+	totalWidth := w[0] + w[1] + w[2]
+	if len(data) < totalWidth {
+		return nil, 0, fmt.Errorf("insufficient data for xref entry (need %d, have %d)", totalWidth, len(data))
+	}
+
+	// Read fields as big-endian integers
+	offset := 0
+
+	// Field 0: Type (0=free, 1=in-use uncompressed, 2=in object stream)
+	// Default to 1 if width is 0
+	entryType := int64(1)
+	if w[0] > 0 {
+		entryType = readBigEndianInt(data[offset:offset+w[0]], w[0])
+		offset += w[0]
+	}
+
+	// Field 1: For type 1: byte offset; for type 2: object stream number
+	field1 := readBigEndianInt(data[offset:offset+w[1]], w[1])
+	offset += w[1]
+
+	// Field 2: For type 1: generation; for type 2: index within object stream
+	field2 := readBigEndianInt(data[offset:offset+w[2]], w[2])
+
+	// Create entry based on type
+	entry := &XRefEntry{}
+
+	switch entryType {
+	case 0:
+		// Free entry
+		entry.InUse = false
+		entry.Offset = field1      // Next free object number
+		entry.Generation = int(field2) // Generation if reused
+	case 1:
+		// In-use uncompressed entry
+		entry.InUse = true
+		entry.Offset = field1
+		entry.Generation = int(field2)
+	case 2:
+		// Object in object stream (PDF 1.5+)
+		// For now, treat as in-use with special offset encoding
+		// TODO: Full object stream support in a future task
+		entry.InUse = true
+		entry.Offset = field1      // Object stream number
+		entry.Generation = int(field2) // Index within stream
+	default:
+		return nil, 0, fmt.Errorf("invalid xref entry type: %d", entryType)
+	}
+
+	return entry, totalWidth, nil
+}
+
+// readBigEndianInt reads a big-endian integer from data
+func readBigEndianInt(data []byte, width int) int64 {
+	if width == 0 {
+		return 0
+	}
+	if width > 8 {
+		width = 8 // Limit to 64-bit
+	}
+
+	var result int64
+	for i := 0; i < width; i++ {
+		result = (result << 8) | int64(data[i])
+	}
+	return result
 }
 
 // parseEntry parses a single XRef entry line

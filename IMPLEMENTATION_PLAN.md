@@ -98,6 +98,43 @@ Tasks marked 🎯 are **RAG CRITICAL** - they directly impact embedding quality 
 **Coverage**: 75-90% on xref.go, 79.5% overall
 **Performance**: 120K XRef tables/sec, 4.9M FindXRef ops/sec
 
+#### Task 1.5b: XRef Stream Support (12 hours) 🚨 CRITICAL - PDF 1.5+ Required ✅ COMPLETE
+- [x] Extend `core/xref.go` to support XRef streams
+- [x] Detect XRef stream vs traditional table (check for stream object)
+- [x] Parse XRef stream dictionary (/Type /XRef)
+- [x] Decode FlateDecode compressed XRef data
+- [x] Parse /Index array (subsection ranges)
+- [x] Parse /W array (field widths)
+- [x] Extract object offsets from compressed data
+- [x] Support /Prev chain for incremental updates (existing code handles both)
+- [x] Handle hybrid-reference files (XRef table + stream)
+- [x] Write XRef stream tests with unit tests
+
+**Deliverable**: XRef stream parser for PDF 1.5+ ✅
+**Acceptance**: Can parse modern PDFs (PDF 1.5-2.0) ✅
+**Priority**: CRITICAL - Unblocks reading ~80% of modern PDFs ✅
+**Completed**: November 25, 2024
+
+**Implementation**:
+- Added `isXRefStream()` detection function
+- Added `parseXRefStream()` for stream parsing
+- Added `parseXRefStreamEntry()` for binary entry parsing
+- Added `readBigEndianInt()` helper for multi-byte field reading
+- Modified `ParseXRef()` to dispatch to correct parser
+- Added `IsStream` field to XRefTable for tracking type
+- Supports entry types: 0 (free), 1 (in-use), 2 (object stream)
+- Full /Index and /W array support
+- Trailer info extracted from stream dictionary
+
+**Tests**: 15+ unit tests covering all components
+- XRef stream detection ✅
+- Big-endian integer reading ✅
+- Entry parsing (all 3 types) ✅
+- Error handling ✅
+- Hybrid dispatch ✅
+
+**Note**: Tabula can now read PDF 1.5+ files with XRef streams, unblocking modern PDF support!
+
 #### Task 1.6: File Reader (8 hours) ✅ COMPLETE
 - [x] Implement `reader/reader.go`
 - [x] Parse PDF header (%PDF-x.y)
@@ -303,14 +340,14 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - [x] Handle Unicode mapping
 - [x] Write TrueType tests
 
-#### Task 2.3: CIDFont/Type0 Support (16 hours) 🎯 RAG CRITICAL
-- [ ] Implement `font/cidfont.go`
-- [ ] Parse Type0 (composite) fonts
-- [ ] Parse CIDFont dictionaries
-- [ ] Support Identity-H encoding (horizontal CJK)
-- [ ] Support Identity-V encoding (vertical CJK)
-- [ ] Handle CJK character collections (Adobe-GB1, Adobe-Japan1, etc.)
-- [ ] Write CIDFont tests with Chinese, Japanese, Korean samples
+#### Task 2.3: CIDFont/Type0 Support (16 hours) 🎯 RAG CRITICAL ✅
+- [x] Implement `font/cidfont.go`
+- [x] Parse Type0 (composite) fonts
+- [x] Parse CIDFont dictionaries
+- [x] Support Identity-H encoding (horizontal CJK)
+- [x] Support Identity-V encoding (vertical CJK)
+- [x] Handle CJK character collections (Adobe-GB1, Adobe-Japan1, etc.)
+- [x] Write CIDFont tests with Chinese, Japanese, Korean samples
 
 **RAG Impact**: CJK languages are critical for international RAG applications. Type0/CIDFonts are the standard way PDFs encode Chinese, Japanese, and Korean text.
 

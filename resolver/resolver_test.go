@@ -395,33 +395,79 @@ func TestGetObjectResolvedDeep(t *testing.T) {
 	}
 }
 
-// TestReset tests that Reset clears visited map
+// TestReset tests that Reset clears visited map and depth
 func TestReset(t *testing.T) {
 	reader := newMockReader()
 	reader.AddObject(130, core.String("Value"))
 
 	resolver := NewResolver(reader)
-	ref := core.IndirectRef{Number: 130}
 
-	// First resolution
-	_, err := resolver.Resolve(ref)
-	if err != nil {
-		t.Fatalf("first resolve failed: %v", err)
-	}
+	// Manually set some state to test Reset()
+	resolver.visited[130] = true
+	resolver.currentDepth = 5
 
+	// Verify state was set
 	if !resolver.visited[130] {
-		t.Error("object should be marked as visited")
+		t.Error("setup failed: object should be marked as visited")
+	}
+	if resolver.currentDepth != 5 {
+		t.Error("setup failed: depth should be 5")
 	}
 
 	// Reset
 	resolver.Reset()
 
+	// Verify Reset cleared everything
 	if resolver.visited[130] {
 		t.Error("Reset should clear visited map")
 	}
 
 	if resolver.currentDepth != 0 {
 		t.Error("Reset should clear depth")
+	}
+
+	if len(resolver.visited) != 0 {
+		t.Error("Reset should create empty visited map")
+	}
+}
+
+// TestMultipleResolutionsSameObject verifies that the same object can be resolved
+// multiple times without triggering false circular reference errors
+func TestMultipleResolutionsSameObject(t *testing.T) {
+	reader := newMockReader()
+	reader.AddObject(100, core.String("Value"))
+
+	resolver := NewResolver(reader)
+	ref := core.IndirectRef{Number: 100}
+
+	// First resolution
+	result1, err := resolver.Resolve(ref)
+	if err != nil {
+		t.Fatalf("first resolve failed: %v", err)
+	}
+
+	// Second resolution of the same object should succeed
+	// (visited map should have been cleared after first resolution)
+	result2, err := resolver.Resolve(ref)
+	if err != nil {
+		t.Fatalf("second resolve failed: %v", err)
+	}
+
+	// Results should be equal
+	str1, ok1 := result1.(core.String)
+	str2, ok2 := result2.(core.String)
+
+	if !ok1 || !ok2 {
+		t.Error("results are not strings")
+	}
+
+	if str1 != str2 {
+		t.Errorf("results differ: %v vs %v", str1, str2)
+	}
+
+	// Visited map should be empty after both resolutions
+	if len(resolver.visited) != 0 {
+		t.Errorf("visited map should be empty after resolution, has %d entries", len(resolver.visited))
 	}
 }
 

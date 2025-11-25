@@ -9,6 +9,7 @@ import (
 	"github.com/tsawler/tabula/font"
 	"github.com/tsawler/tabula/graphicsstate"
 	"github.com/tsawler/tabula/model"
+	"github.com/tsawler/tabula/pages"
 )
 
 // TextFragment represents a piece of extracted text with position
@@ -41,6 +42,107 @@ func NewExtractor() *Extractor {
 // RegisterFont registers a font for use during extraction
 func (e *Extractor) RegisterFont(name, baseFont, subtype string) {
 	e.fonts[name] = font.NewFont(name, baseFont, subtype)
+}
+
+// RegisterParsedFont registers a pre-parsed font for use during extraction
+// This is useful when you have already parsed the font with its ToUnicode CMap
+func (e *Extractor) RegisterParsedFont(name string, f *font.Font) {
+	e.fonts[name] = f
+}
+
+// RegisterFontsFromPage parses and registers all fonts from a page's resources
+// This is the recommended way to prepare the extractor for text extraction from a page
+func (e *Extractor) RegisterFontsFromPage(page *pages.Page, resolver func(core.IndirectRef) (core.Object, error)) error {
+	// Get page resources
+	resources, err := page.Resources()
+	if err != nil || resources == nil {
+		return nil // Page has no resources
+	}
+
+	return e.RegisterFontsFromResources(resources, resolver)
+}
+
+// RegisterFontsFromResources parses and registers all fonts from a resources dictionary
+// This is useful when working with page resources directly
+func (e *Extractor) RegisterFontsFromResources(resources core.Dict, resolver func(core.IndirectRef) (core.Object, error)) error {
+	// Get Font dictionary
+	fontDictObj := resources.Get("Font")
+	if fontDictObj == nil {
+		return nil // No fonts in resources
+	}
+
+	// Resolve font dictionary if it's a reference
+	fontDictResolved, err := resolveIfRef(fontDictObj, resolver)
+	if err != nil {
+		return fmt.Errorf("failed to resolve font dictionary: %w", err)
+	}
+
+	fonts, ok := fontDictResolved.(core.Dict)
+	if !ok {
+		return nil // Font object is not a dictionary
+	}
+
+	// Parse and register each font
+	for name, fontObj := range fonts {
+		// Resolve font object
+		fontResolved, err := resolveIfRef(fontObj, resolver)
+		if err != nil {
+			continue // Skip fonts that can't be resolved
+		}
+
+		fontDict, ok := fontResolved.(core.Dict)
+		if !ok {
+			continue
+		}
+
+		// Get font subtype
+		subtype := fontDict.Get("Subtype")
+		if subtype == nil {
+			continue
+		}
+
+		subtypeName, ok := subtype.(core.Name)
+		if !ok {
+			continue
+		}
+
+		// Parse font based on type
+		var parsedFont *font.Font
+
+		switch string(subtypeName) {
+		case "Type1":
+			if t1Font, err := font.NewType1Font(fontDict, resolver); err == nil {
+				parsedFont = t1Font.Font
+			}
+		case "TrueType":
+			if ttFont, err := font.NewTrueTypeFont(fontDict, resolver); err == nil {
+				parsedFont = ttFont.Font
+			}
+		case "Type0":
+			if t0Font, err := font.NewType0Font(fontDict, resolver); err == nil {
+				parsedFont = t0Font.Font
+			}
+		}
+
+		// Register parsed font
+		if parsedFont != nil {
+			e.RegisterParsedFont(name, parsedFont)
+			// Also register with "/" prefix to handle both naming conventions
+			if !strings.HasPrefix(name, "/") {
+				e.RegisterParsedFont("/"+name, parsedFont)
+			}
+		}
+	}
+
+	return nil
+}
+
+// resolveIfRef resolves an object if it's an indirect reference, otherwise returns it as-is
+func resolveIfRef(obj core.Object, resolver func(core.IndirectRef) (core.Object, error)) (core.Object, error) {
+	if ref, ok := obj.(core.IndirectRef); ok {
+		return resolver(ref)
+	}
+	return obj, nil
 }
 
 // Extract extracts text from content stream operations
@@ -186,7 +288,7 @@ func (e *Extractor) processOperation(op contentstream.Operation) error {
 	case "Tj":
 		if len(op.Operands) == 1 {
 			if str, ok := op.Operands[0].(core.String); ok {
-				e.showText(string(str))
+				e.showText([]byte(str))
 			}
 		}
 	case "TJ":
@@ -200,7 +302,7 @@ func (e *Extractor) processOperation(op contentstream.Operation) error {
 		e.gs.NextLine()
 		if len(op.Operands) == 1 {
 			if str, ok := op.Operands[0].(core.String); ok {
-				e.showText(string(str))
+				e.showText([]byte(str))
 			}
 		}
 	case "\"":
@@ -214,7 +316,7 @@ func (e *Extractor) processOperation(op contentstream.Operation) error {
 			}
 			e.gs.NextLine()
 			if str, ok := op.Operands[2].(core.String); ok {
-				e.showText(string(str))
+				e.showText([]byte(str))
 			}
 		}
 	}
@@ -223,22 +325,31 @@ func (e *Extractor) processOperation(op contentstream.Operation) error {
 }
 
 // showText processes text showing operation
-func (e *Extractor) showText(text string) {
+func (e *Extractor) showText(data []byte) {
 	x, y := e.gs.GetTextPosition()
 	fontSize := e.gs.GetFontSize()
 	fontName := e.gs.GetFontName()
 
+	// Decode text using font's ToUnicode CMap if available
+	var decodedText string
+	if f, ok := e.fonts[fontName]; ok {
+		decodedText = f.DecodeString(data)
+	} else {
+		// No font registered - use raw bytes as string (fallback)
+		decodedText = string(data)
+	}
+
 	// Calculate text width
 	width := 0.0
 	if f, ok := e.fonts[fontName]; ok {
-		width = f.GetStringWidth(text) * fontSize / 1000.0
+		width = f.GetStringWidth(decodedText) * fontSize / 1000.0
 	} else {
 		// Estimate width if font not available
-		width = float64(len(text)) * fontSize * 0.5
+		width = float64(len(decodedText)) * fontSize * 0.5
 	}
 
 	fragment := TextFragment{
-		Text:     text,
+		Text:     decodedText,
 		X:        x,
 		Y:        y,
 		Width:    width,
@@ -249,8 +360,8 @@ func (e *Extractor) showText(text string) {
 
 	e.fragments = append(e.fragments, fragment)
 
-	// Update text position
-	e.gs.ShowText(text)
+	// Update text position (use original byte length)
+	e.gs.ShowText(string(data))
 }
 
 // showTextArray processes text array showing operation
@@ -258,7 +369,7 @@ func (e *Extractor) showTextArray(arr core.Array) {
 	for _, item := range arr {
 		switch v := item.(type) {
 		case core.String:
-			e.showText(string(v))
+			e.showText([]byte(v))
 		case core.Int:
 			// Position adjustment
 			adjustment := -float64(v) * e.gs.GetFontSize() / 1000.0
@@ -273,17 +384,52 @@ func (e *Extractor) showTextArray(arr core.Array) {
 	}
 }
 
-// GetText returns all extracted text concatenated
+// GetText returns all extracted text concatenated with smart spacing
 func (e *Extractor) GetText() string {
+	if len(e.fragments) == 0 {
+		return ""
+	}
+
 	var sb strings.Builder
+
 	for i, frag := range e.fragments {
 		sb.WriteString(frag.Text)
-		// Add space between fragments if they're not adjacent
+
+		// Determine spacing to next fragment
 		if i < len(e.fragments)-1 {
-			sb.WriteString(" ")
+			nextFrag := e.fragments[i+1]
+
+			// Calculate vertical distance
+			verticalDist := abs(nextFrag.Y - frag.Y)
+
+			// Calculate horizontal distance
+			horizontalDist := nextFrag.X - (frag.X + frag.Width)
+
+			// Detect line break (significant vertical movement)
+			if verticalDist > frag.Height*0.5 {
+				// Check if it's a paragraph break (extra vertical space)
+				if verticalDist > frag.Height*1.5 {
+					sb.WriteString("\n\n")
+				} else {
+					sb.WriteString("\n")
+				}
+			} else if horizontalDist > frag.Height*0.2 {
+				// Horizontal gap suggests a space
+				sb.WriteString(" ")
+			}
+			// If fragments are adjacent, don't add anything
 		}
 	}
+
 	return sb.String()
+}
+
+// abs returns the absolute value of a float64
+func abs(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
 }
 
 // GetFragments returns all text fragments

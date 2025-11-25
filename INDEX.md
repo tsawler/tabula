@@ -52,6 +52,13 @@ Deep dive into the library architecture:
   - Stream decoding
   - Code examples with implementations
 
+- **[PDF_VERSION_SUPPORT.md](PDF_VERSION_SUPPORT.md)** - PDF version compatibility
+  - Version support matrix (PDF 1.0 - 2.0)
+  - Feature availability by version
+  - Critical gaps and roadmap
+  - XRef streams requirement (PDF 1.5+)
+  - Compatibility strategy
+
 ### Performance
 
 - **[PERFORMANCE.md](PERFORMANCE.md)** - Optimization strategies
