@@ -68,3 +68,91 @@ func (d *Document) ExtractTables() []*Table {
 	}
 	return tables
 }
+
+// HasLayout returns true if layout analysis has been performed on any page
+func (d *Document) HasLayout() bool {
+	for _, page := range d.Pages {
+		if page.Layout != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// AllHeadings returns all detected headings across all pages
+func (d *Document) AllHeadings() []HeadingInfo {
+	var headings []HeadingInfo
+	for _, page := range d.Pages {
+		if page.Layout != nil {
+			headings = append(headings, page.Layout.Headings...)
+		}
+	}
+	return headings
+}
+
+// AllLists returns all detected lists across all pages
+func (d *Document) AllLists() []ListInfo {
+	var lists []ListInfo
+	for _, page := range d.Pages {
+		if page.Layout != nil {
+			lists = append(lists, page.Layout.Lists...)
+		}
+	}
+	return lists
+}
+
+// AllParagraphs returns all detected paragraphs across all pages
+func (d *Document) AllParagraphs() []ParagraphInfo {
+	var paragraphs []ParagraphInfo
+	for _, page := range d.Pages {
+		if page.Layout != nil {
+			paragraphs = append(paragraphs, page.Layout.Paragraphs...)
+		}
+	}
+	return paragraphs
+}
+
+// LayoutStats returns combined layout statistics for the entire document
+func (d *Document) LayoutStats() LayoutStats {
+	var stats LayoutStats
+	for _, page := range d.Pages {
+		if page.Layout != nil {
+			stats.FragmentCount += page.Layout.Stats.FragmentCount
+			stats.LineCount += page.Layout.Stats.LineCount
+			stats.BlockCount += page.Layout.Stats.BlockCount
+			stats.ParagraphCount += page.Layout.Stats.ParagraphCount
+			stats.HeadingCount += page.Layout.Stats.HeadingCount
+			stats.ListCount += page.Layout.Stats.ListCount
+		}
+	}
+	return stats
+}
+
+// TableOfContents returns headings organized as a document outline
+func (d *Document) TableOfContents() []TOCEntry {
+	var toc []TOCEntry
+	for _, page := range d.Pages {
+		if page.Layout == nil {
+			continue
+		}
+		for _, h := range page.Layout.Headings {
+			toc = append(toc, TOCEntry{
+				Level:    h.Level,
+				Text:     h.Text,
+				Page:     page.Number,
+				BBox:     h.BBox,
+				FontSize: h.FontSize,
+			})
+		}
+	}
+	return toc
+}
+
+// TOCEntry represents an entry in the table of contents
+type TOCEntry struct {
+	Level    int     // Heading level (1-6)
+	Text     string  // Heading text
+	Page     int     // Page number (1-indexed)
+	BBox     BBox    // Position on page
+	FontSize float64 // Font size of heading
+}
