@@ -130,19 +130,161 @@ func (d *HeaderFooterDetector) Detect(pages []PageFragments) *HeaderFooterResult
 		return &HeaderFooterResult{Config: d.config}
 	}
 
+	// Preprocess pages to handle character-level PDFs
+	// Assemble character fragments into line-based fragments for better pattern matching
+	processedPages := d.preprocessPages(pages)
+
 	// Extract header and footer candidates from each page
-	headerCandidates := d.extractCandidates(pages, Header)
-	footerCandidates := d.extractCandidates(pages, Footer)
+	headerCandidates := d.extractCandidates(processedPages, Header)
+	footerCandidates := d.extractCandidates(processedPages, Footer)
 
 	// Find repeating patterns
-	headers := d.findRepeatingPatterns(headerCandidates, pages, Header)
-	footers := d.findRepeatingPatterns(footerCandidates, pages, Footer)
+	headers := d.findRepeatingPatterns(headerCandidates, processedPages, Header)
+	footers := d.findRepeatingPatterns(footerCandidates, processedPages, Footer)
 
 	return &HeaderFooterResult{
 		Headers: headers,
 		Footers: footers,
 		Config:  d.config,
 	}
+}
+
+// preprocessPages assembles character-level fragments into line-based fragments
+// This is necessary for character-level PDFs (like Google Docs) where each character
+// is a separate fragment, making pattern detection impossible without assembly.
+func (d *HeaderFooterDetector) preprocessPages(pages []PageFragments) []PageFragments {
+	processed := make([]PageFragments, len(pages))
+
+	for i, page := range pages {
+		// Check if this is a character-level page
+		if isCharacterLevel(page.Fragments) {
+			// Assemble fragments into lines
+			assembled := assembleFragmentsIntoLines(page.Fragments)
+			processed[i] = PageFragments{
+				PageIndex:  page.PageIndex,
+				PageHeight: page.PageHeight,
+				PageWidth:  page.PageWidth,
+				Fragments:  assembled,
+			}
+		} else {
+			// Use original fragments
+			processed[i] = page
+		}
+	}
+
+	return processed
+}
+
+// isCharacterLevel returns true if fragments appear to be character-level
+// (average fragment length <= 2 characters)
+func isCharacterLevel(fragments []text.TextFragment) bool {
+	if len(fragments) == 0 {
+		return false
+	}
+
+	totalChars := 0
+	for _, f := range fragments {
+		totalChars += len([]rune(f.Text))
+	}
+
+	avgLen := float64(totalChars) / float64(len(fragments))
+	return avgLen <= 2.0
+}
+
+// assembleFragmentsIntoLines groups character fragments into line-based fragments
+func assembleFragmentsIntoLines(fragments []text.TextFragment) []text.TextFragment {
+	if len(fragments) == 0 {
+		return nil
+	}
+
+	// Sort by Y (descending for typical PDF coords) then by X
+	sorted := make([]text.TextFragment, len(fragments))
+	copy(sorted, fragments)
+	sort.Slice(sorted, func(i, j int) bool {
+		yDiff := sorted[i].Y - sorted[j].Y
+		if absFloat(yDiff) > sorted[i].Height*0.5 {
+			return yDiff > 0 // Higher Y first
+		}
+		return sorted[i].X < sorted[j].X
+	})
+
+	// Group into lines by Y proximity
+	var lines [][]text.TextFragment
+	var currentLine []text.TextFragment
+
+	for _, frag := range sorted {
+		if len(currentLine) == 0 {
+			currentLine = append(currentLine, frag)
+			continue
+		}
+
+		// Check if same line (Y within tolerance)
+		lastFrag := currentLine[len(currentLine)-1]
+		yDiff := absFloat(frag.Y - lastFrag.Y)
+
+		if yDiff <= lastFrag.Height*0.5 {
+			currentLine = append(currentLine, frag)
+		} else {
+			lines = append(lines, currentLine)
+			currentLine = []text.TextFragment{frag}
+		}
+	}
+	if len(currentLine) > 0 {
+		lines = append(lines, currentLine)
+	}
+
+	// Assemble each line into a single fragment
+	var assembled []text.TextFragment
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+
+		// Sort line by X
+		sort.Slice(line, func(i, j int) bool {
+			return line[i].X < line[j].X
+		})
+
+		// Build text with smart spacing
+		var textBuilder strings.Builder
+		var lastEndX float64
+
+		for i, frag := range line {
+			if i > 0 {
+				gap := frag.X - lastEndX
+				// Add space if gap is significant (> 30% of font size)
+				if gap > frag.FontSize*0.3 {
+					textBuilder.WriteString(" ")
+				}
+			}
+			textBuilder.WriteString(frag.Text)
+			lastEndX = frag.X + frag.Width
+		}
+
+		// Compute bounding box
+		first, last := line[0], line[len(line)-1]
+		minY, maxY := first.Y, first.Y
+		for _, f := range line {
+			if f.Y < minY {
+				minY = f.Y
+			}
+			if f.Y+f.Height > maxY {
+				maxY = f.Y + f.Height
+			}
+		}
+
+		assembled = append(assembled, text.TextFragment{
+			Text:     textBuilder.String(),
+			X:        first.X,
+			Y:        first.Y,
+			Width:    (last.X + last.Width) - first.X,
+			Height:   maxY - minY,
+			FontSize: first.FontSize,
+			FontName: first.FontName,
+		})
+	}
+
+	return assembled
 }
 
 // candidate represents a potential header/footer text
@@ -512,6 +654,9 @@ func (r *HeaderFooterResult) FilterFragments(pageIndex int, fragments []text.Tex
 		return fragments
 	}
 
+	// Check if this is a character-level PDF
+	charLevel := isCharacterLevel(fragments)
+
 	// Compute content bounds for position checking
 	minY, maxY := fragments[0].Y, fragments[0].Y
 	for _, frag := range fragments {
@@ -542,7 +687,7 @@ func (r *HeaderFooterResult) FilterFragments(pageIndex int, fragments []text.Tex
 	var filtered []text.TextFragment
 
 	for _, frag := range fragments {
-		if r.isInHeaderFooter(pageIndex, frag, minY, maxY, headerRegion, footerRegion, invertedCoords) {
+		if r.isInHeaderFooter(pageIndex, frag, minY, maxY, headerRegion, footerRegion, invertedCoords, charLevel) {
 			continue
 		}
 		filtered = append(filtered, frag)
@@ -552,7 +697,7 @@ func (r *HeaderFooterResult) FilterFragments(pageIndex int, fragments []text.Tex
 }
 
 // isInHeaderFooter checks if a fragment is in a detected header/footer region
-func (r *HeaderFooterResult) isInHeaderFooter(pageIndex int, frag text.TextFragment, minY, maxY, headerRegion, footerRegion float64, invertedCoords bool) bool {
+func (r *HeaderFooterResult) isInHeaderFooter(pageIndex int, frag text.TextFragment, minY, maxY, headerRegion, footerRegion float64, invertedCoords, charLevel bool) bool {
 	// Check headers
 	for _, header := range r.Headers {
 		if !containsPage(header.PageIndices, pageIndex) {
@@ -566,6 +711,11 @@ func (r *HeaderFooterResult) isInHeaderFooter(pageIndex int, frag text.TextFragm
 			distFromTop = maxY - (frag.Y + frag.Height)
 		}
 		if distFromTop < headerRegion {
+			// For character-level PDFs, use position-only filtering since
+			// individual characters won't match the assembled header text
+			if charLevel {
+				return true
+			}
 			if textsMatch(frag.Text, header.Text, header.IsPageNumber) {
 				return true
 			}
@@ -585,6 +735,10 @@ func (r *HeaderFooterResult) isInHeaderFooter(pageIndex int, frag text.TextFragm
 			distFromBottom = frag.Y - minY
 		}
 		if distFromBottom < footerRegion {
+			// For character-level PDFs, use position-only filtering
+			if charLevel {
+				return true
+			}
 			if textsMatch(frag.Text, footer.Text, footer.IsPageNumber) {
 				return true
 			}

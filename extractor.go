@@ -346,6 +346,7 @@ func (e *Extractor) detectHeaderFooter(allPages []extractedPage) *layout.HeaderF
 		width, _ := pd.page.Width()
 		height, _ := pd.page.Height()
 		pageFragments[i] = layout.PageFragments{
+			PageIndex:  pd.index, // Set the page index for filtering
 			Fragments:  pd.fragments,
 			PageWidth:  width,
 			PageHeight: height,
