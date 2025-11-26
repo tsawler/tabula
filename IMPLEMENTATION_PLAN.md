@@ -1392,6 +1392,8 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 8. **Phase 3**: Table Detection (already have geometric detector implemented!)
 
 **Recent Achievements**:
+- 🎉 **Fluent API** - User-friendly chained method API: `tabula.Open("file.pdf").Pages(1,2).ExcludeHeaders().Text()`
+- 🎉 **Character-level PDF spacing fix** - PDFs with per-character fragments now extract correctly
 - 🎉 **Header/footer detection** - Task 2.10 complete, page numbers and repeating text filtered
 - 🎉 **Multi-column detection** - Task 2.9 complete, 2/3/N-column layouts supported
 - 🎉 **Spanning fragment detection** - Centered titles properly separated from column content
@@ -1471,6 +1473,87 @@ Follow this plan step-by-step, and you'll build not just a PDF library, but a **
 - Google Docs PDF support (inverted coordinates, character-level fragments)
 - RTL text support (Arabic, Hebrew)
 - Type0/CID font support
+- Fluent API for easy text extraction
+
+---
+
+## Fluent API ✅ COMPLETE
+
+The library provides a user-friendly fluent API for common text extraction tasks.
+
+### Basic Usage
+
+```go
+// Simple text extraction
+text, err := tabula.Open("document.pdf").Text()
+
+// With page selection (1-indexed)
+text, err := tabula.Open("doc.pdf").Pages(1, 3, 5).Text()
+text, err := tabula.Open("doc.pdf").PageRange(5, 10).Text()
+
+// With layout filtering
+text, err := tabula.Open("report.pdf").
+    ExcludeHeaders().
+    ExcludeFooters().
+    Text()
+
+// Multi-column processing
+text, err := tabula.Open("newspaper.pdf").ByColumn().Text()
+
+// Combined options
+text, err := tabula.Open("annual-report.pdf").
+    PageRange(2, 50).
+    ExcludeHeaders().
+    ExcludeFooters().
+    ByColumn().
+    Text()
+
+// Get raw fragments with positions
+fragments, err := tabula.Open("doc.pdf").Pages(1).Fragments()
+
+// Page count (doesn't close reader)
+ext := tabula.Open("doc.pdf")
+defer ext.Close()
+count, err := ext.PageCount()
+
+// Must helper for scripts (panics on error)
+text := tabula.Must(tabula.Open("doc.pdf").Text())
+```
+
+### Design Decisions
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Page indexing | 1-based | User-friendly (matches PDF viewers) |
+| Error handling | Fail-fast | Go-idiomatic, clear error reporting |
+| Immutability | New instance per chain | Thread-safe, functional style |
+| Resource cleanup | Automatic on terminal ops | Convenient for common cases |
+
+### Files
+
+- `tabula/tabula.go` - Entry point: `Open()`, `FromReader()`, `Must()`
+- `tabula/extractor.go` - Builder pattern implementation
+- `tabula/options.go` - Configuration options
+- `tabula/tabula_test.go` - Comprehensive tests
+
+### Future Extensions (Planned)
+
+```go
+// Table extraction (Phase 3)
+tables, err := tabula.Open("data.pdf").Tables()
+csv := tables[0].AsCSV()
+
+// Image extraction (Phase 4)
+images, err := tabula.Open("doc.pdf").Images()
+
+// Metadata
+meta, err := tabula.Open("doc.pdf").Metadata()
+
+// Markdown output
+text, err := tabula.Open("doc.pdf").AsMarkdown().Text()
+```
+
+---
 
 **Next Up**: Task 2.11 - Block Detection (layout analysis phase)
 

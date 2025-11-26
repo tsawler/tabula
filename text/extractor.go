@@ -407,6 +407,9 @@ func (e *Extractor) GetText() string {
 		// Reorder fragments in reading order based on direction
 		orderedFrags := e.reorderFragmentsForReading(line, lineDir)
 
+		// Calculate line metrics for smart spacing
+		lineMetrics := e.calculateLineMetrics(orderedFrags, lineDir)
+
 		// Assemble line text
 		for i, frag := range orderedFrags {
 			sb.WriteString(frag.Text)
@@ -416,7 +419,7 @@ func (e *Extractor) GetText() string {
 				nextFrag := orderedFrags[i+1]
 				horizontalDist := calculateHorizontalDistance(frag, nextFrag, lineDir)
 
-				if e.shouldInsertSpace(frag, nextFrag, horizontalDist) {
+				if e.shouldInsertSpaceSmart(frag, nextFrag, horizontalDist, lineMetrics) {
 					sb.WriteString(" ")
 				}
 			}
@@ -439,6 +442,161 @@ func (e *Extractor) GetText() string {
 	}
 
 	return sb.String()
+}
+
+// lineMetrics holds computed metrics for a line to enable smart spacing decisions
+type lineMetrics struct {
+	isCharacterLevel       bool    // True if fragments are single/few characters each
+	hasExplicitSpaces      bool    // True if line has explicit space character fragments
+	avgFragmentLen         float64 // Average number of characters per fragment
+	medianGap              float64 // Median gap between fragments (for character-level)
+	avgGap                 float64 // Average gap between fragments
+	maxNonSpaceGap         float64 // Maximum gap between non-space fragments
+	typicalCharGap         float64 // Typical inter-character gap (25th percentile)
+}
+
+// calculateLineMetrics computes metrics for a line to enable smart spacing
+func (e *Extractor) calculateLineMetrics(fragments []TextFragment, lineDir Direction) lineMetrics {
+	metrics := lineMetrics{}
+
+	if len(fragments) == 0 {
+		return metrics
+	}
+
+	// Calculate average fragment length (in characters) and check for explicit spaces
+	totalChars := 0
+	for _, frag := range fragments {
+		text := frag.Text
+		totalChars += len([]rune(text))
+
+		// Check if this fragment is or contains an explicit space
+		if strings.TrimSpace(text) == "" || strings.Contains(text, " ") {
+			metrics.hasExplicitSpaces = true
+		}
+	}
+	metrics.avgFragmentLen = float64(totalChars) / float64(len(fragments))
+
+	// Character-level if average fragment is <= 2 characters
+	metrics.isCharacterLevel = metrics.avgFragmentLen <= 2.0
+
+	// Calculate gaps between non-space fragments
+	if len(fragments) > 1 {
+		gaps := make([]float64, 0, len(fragments)-1)
+		for i := 0; i < len(fragments)-1; i++ {
+			// Skip gaps involving space-only fragments
+			if strings.TrimSpace(fragments[i].Text) == "" || strings.TrimSpace(fragments[i+1].Text) == "" {
+				continue
+			}
+
+			gap := calculateHorizontalDistance(fragments[i], fragments[i+1], lineDir)
+			if gap > 0 { // Only consider positive gaps
+				gaps = append(gaps, gap)
+				if gap > metrics.maxNonSpaceGap {
+					metrics.maxNonSpaceGap = gap
+				}
+			}
+		}
+
+		if len(gaps) > 0 {
+			// Calculate average gap
+			totalGap := 0.0
+			for _, g := range gaps {
+				totalGap += g
+			}
+			metrics.avgGap = totalGap / float64(len(gaps))
+
+			// Sort gaps to find the typical inter-character gap
+			sortedGaps := make([]float64, len(gaps))
+			copy(sortedGaps, gaps)
+			// Simple bubble sort for small arrays
+			for i := 0; i < len(sortedGaps)-1; i++ {
+				for j := i + 1; j < len(sortedGaps); j++ {
+					if sortedGaps[i] > sortedGaps[j] {
+						sortedGaps[i], sortedGaps[j] = sortedGaps[j], sortedGaps[i]
+					}
+				}
+			}
+
+			// Use 10th percentile for baseline inter-character gap
+			p10Index := len(sortedGaps) / 10
+			if p10Index < 0 {
+				p10Index = 0
+			}
+			metrics.medianGap = sortedGaps[p10Index]
+
+			// Use 25th percentile as typical character gap
+			p25Index := len(sortedGaps) / 4
+			if p25Index >= len(sortedGaps) {
+				p25Index = len(sortedGaps) - 1
+			}
+			metrics.typicalCharGap = sortedGaps[p25Index]
+		}
+	}
+
+	return metrics
+}
+
+// shouldInsertSpaceSmart determines if a space should be inserted between two fragments
+// using line-level metrics to handle both word-level and character-level PDFs
+func (e *Extractor) shouldInsertSpaceSmart(frag, nextFrag TextFragment, horizontalDist float64, metrics lineMetrics) bool {
+	// If current fragment ends with whitespace or next fragment starts with whitespace,
+	// don't insert additional space - the space is already in the text stream
+	if len(frag.Text) > 0 && isWhitespace(frag.Text[len(frag.Text)-1]) {
+		return false
+	}
+	if len(nextFrag.Text) > 0 && isWhitespace(nextFrag.Text[0]) {
+		return false
+	}
+
+	// If fragments overlap or are very close, no space
+	if horizontalDist < 0 || horizontalDist < frag.FontSize*0.05 {
+		return false
+	}
+
+	// For character-level PDFs with explicit space fragments, be very conservative
+	// Only add spaces if this gap is MUCH larger than typical gaps
+	if metrics.isCharacterLevel && metrics.hasExplicitSpaces {
+		// When the PDF has explicit space fragments, trust those for word boundaries
+		// Only add a space if the gap is more than 5x the typical character gap
+		// This handles edge cases where there's truly missing spacing
+		if metrics.typicalCharGap > 0 {
+			threshold := metrics.typicalCharGap * 5.0
+			return horizontalDist >= threshold
+		}
+		// If we can't compute typical gap, don't add spaces - trust explicit ones
+		return false
+	}
+
+	// For character-level PDFs without explicit spaces, use adaptive detection
+	if metrics.isCharacterLevel {
+		// Use the larger of:
+		// 1. 3x the typical (10th percentile) inter-character gap
+		// 2. 80% of font size (conservative fallback)
+		threshold := frag.FontSize * 0.8
+
+		// If we have gap data, use gap-based threshold if it's higher
+		if metrics.medianGap > 0 {
+			gapThreshold := metrics.medianGap * 3.0
+			if gapThreshold > threshold {
+				threshold = gapThreshold
+			}
+		}
+
+		return horizontalDist >= threshold
+	}
+
+	// For word-level PDFs, use font space width
+	spaceWidth := e.getSpaceWidth(frag.FontName, frag.FontSize)
+
+	// Insert space if gap is >= 50% of a space character width
+	threshold := spaceWidth * 0.5
+
+	return horizontalDist >= threshold
+}
+
+// isWhitespace checks if a byte is a whitespace character
+func isWhitespace(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
 // groupFragmentsByLine groups fragments into lines based on Y coordinate
