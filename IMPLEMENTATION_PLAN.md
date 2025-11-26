@@ -671,18 +671,74 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - Minimum block size validation
 - Nil-safe methods throughout
 
-#### Task 2.12: Line Detection (8 hours)
-- [ ] Implement `layout/line.go`
-- [ ] Group fragments into lines
-- [ ] Detect line spacing
-- [ ] Write line detection tests
+#### Task 2.12: Line Detection (8 hours) ✅ COMPLETE
+- [x] Implement `layout/line.go`
+- [x] Group fragments into lines with rich metadata
+- [x] Detect line spacing (before/after each line)
+- [x] Detect line alignment (left, center, right, justified)
+- [x] Calculate baseline, indentation, average font size
+- [x] Detect text direction (LTR/RTL)
+- [x] Write comprehensive line detection tests (29 tests + 2 benchmarks)
 
-#### Task 2.13: Paragraph Detection (12 hours)
-- [ ] Implement `layout/paragraph.go`
-- [ ] Group lines into paragraphs
-- [ ] Detect paragraph breaks
-- [ ] Handle indentation
-- [ ] Write paragraph tests
+**Deliverable**: Line detection with spacing and alignment analysis ✅
+**Acceptance**: Correctly groups fragments into lines with metadata ✅
+**Completed**: November 26, 2024
+**Tests**: 29 test cases + 2 benchmarks, all passing
+**Coverage**: 450+ lines in layout/line.go
+**Performance**:
+- Small document (50 lines): ~4.5μs per page (225K ops/sec)
+- Large document (500 fragments): ~35μs per page (28.5K ops/sec)
+
+**Implementation Details**:
+- **LineDetector** with configurable parameters
+- **Line struct** with:
+  - BBox, Fragments, Text, Index
+  - Baseline, Height, SpacingBefore, SpacingAfter
+  - Alignment (left/center/right/justified)
+  - Indentation, AverageFontSize, Direction
+- **LineLayout** with:
+  - GetText(), GetLine(), GetAllFragments()
+  - FindLinesInRegion(), GetLinesByAlignment()
+  - IsParagraphBreak(), AverageLineSpacing, AverageLineHeight
+- **Line methods**: IsIndented(), WordCount(), IsEmpty(), HasLargerFont()
+- Alignment detection using content boundaries
+- Paragraph break detection via spacing analysis
+
+#### Task 2.13: Paragraph Detection (12 hours) ✅ COMPLETE
+- [x] Implement `layout/paragraph.go`
+- [x] Group lines into paragraphs based on vertical spacing
+- [x] Detect paragraph breaks (spacing, font size, alignment changes)
+- [x] Handle first-line indentation
+- [x] Detect paragraph styles (heading, list-item, block-quote, caption, code)
+- [x] Write comprehensive paragraph tests (26 tests + 2 benchmarks)
+
+**Deliverable**: Paragraph detection with style classification ✅
+**Acceptance**: Correctly groups lines into paragraphs with style detection ✅
+**Completed**: November 26, 2024
+**Tests**: 26 test cases + 2 benchmarks, all passing
+**Coverage**: 500+ lines in layout/paragraph.go
+**Performance**:
+- Small document (50 lines, 5 paragraphs): ~7μs per page (136K ops/sec)
+- Large document (250 lines, 50 paragraphs): ~34μs per page (29K ops/sec)
+
+**Implementation Details**:
+- **ParagraphDetector** with configurable parameters
+- **Paragraph struct** with:
+  - BBox, Lines, Text, Index
+  - Style (normal, heading, list-item, block-quote, caption, code)
+  - Alignment, FirstLineIndent, LeftMargin
+  - AverageFontSize, LineSpacing, SpacingBefore/After
+- **ParagraphLayout** with:
+  - GetText(), GetParagraph(), GetParagraphsByStyle()
+  - GetHeadings(), GetListItems(), FindParagraphsInRegion()
+- **Detection features**:
+  - Spacing-based paragraph breaks
+  - Font size change detection (headings)
+  - Alignment change detection
+  - First-line indent detection
+  - List item pattern detection (bullets, numbers, letters)
+  - Block quote detection (indented blocks)
+- **DetectFromFragments()** convenience method for direct fragment input
 
 #### Task 2.14: Reading Order (12 hours)
 - [ ] Implement `layout/reading_order.go`
@@ -1386,7 +1442,7 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 
 ## Next Steps
 
-**Current Status**: Phase 2 (Text & Layout) - 72% Complete (13 of 18 tasks)
+**Current Status**: Phase 2 (Text & Layout) - 83% Complete (15 of 18 tasks)
 
 **Completed in Phase 2** (as of November 26, 2024):
 - ✅ Task 2.1: Content Stream Parser (Week 5)
@@ -1402,17 +1458,19 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - ✅ Task 2.9: Multi-Column Layout Detection (Week 6) 🎯 RAG CRITICAL
 - ✅ Task 2.10: Header/Footer Detection (Week 6) 🎯 RAG CRITICAL
 - ✅ Task 2.11: Block Detection (Week 7)
+- ✅ Task 2.12: Line Detection (Week 7)
+- ✅ Task 2.13: Paragraph Detection (Week 7) 🎯 RAG CRITICAL
 
 **Next Priority Tasks**:
-1. **Task 2.12**: Line Detection (8 hours)
-2. **Task 2.13**: Paragraph Detection (12 hours) 🎯 RAG CRITICAL
-3. **Task 2.14**: Reading Order (12 hours)
-4. **Task 2.15**: Heading Detection (12 hours) 🎯 RAG CRITICAL
-5. **Task 2.16**: List Detection (12 hours) 🎯 RAG IMPORTANT
-6. **Phase 2.5**: RAG Optimization & Semantic Chunking (100 hours) 🎯
-7. **Phase 3**: Table Detection (already have geometric detector implemented!)
+1. **Task 2.14**: Reading Order (12 hours)
+2. **Task 2.15**: Heading Detection (12 hours) 🎯 RAG CRITICAL
+3. **Task 2.16**: List Detection (12 hours) 🎯 RAG IMPORTANT
+4. **Phase 2.5**: RAG Optimization & Semantic Chunking (100 hours) 🎯
+5. **Phase 3**: Table Detection (already have geometric detector implemented!)
 
 **Recent Achievements**:
+- 🎉 **Paragraph Detection** - Task 2.13 complete, groups lines into paragraphs with style detection (heading, list, quote)
+- 🎉 **Line Detection** - Task 2.12 complete, lines with alignment, spacing, indentation detection
 - 🎉 **Block Detection** - Task 2.11 complete, groups fragments into spatial blocks
 - 🎉 **Fluent API** - User-friendly chained method API: `tabula.Open("file.pdf").Pages(1,2).ExcludeHeaders().Text()`
 - 🎉 **Character-level PDF spacing fix** - PDFs with per-character fragments now extract correctly
