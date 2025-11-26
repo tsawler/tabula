@@ -572,26 +572,36 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - [x] Preserve reading order within columns
 - [x] Write column detection tests (16 tests + 2 benchmarks)
 - [x] Test with academic papers and reports
+- [x] **Spanning fragment detection** (centered titles that cross column gaps)
+- [x] **Density-based histogram analysis** (robust gap detection)
+- [x] **Line-level spanning detection** (handles character-level PDFs like Google Docs)
 
 **Deliverable**: Multi-column layout detection ✅
 **Acceptance**: Correctly detects and orders 2, 3, and N-column layouts ✅
-**Completed**: November 25, 2024
+**Completed**: November 25, 2024 (Enhanced: November 26, 2024)
 **Tests**: 16 test cases + 2 benchmarks, all passing
-**Coverage**: 400+ lines in layout/columns.go
+**Coverage**: 800+ lines in layout/columns.go
 **Performance**:
 - Two-column: ~4.2μs per page (285K ops/sec)
 - Single-column: ~1.7μs per page (675K ops/sec)
 
 **Implementation Details**:
-- Whitespace gap analysis (primary method)
-- X-coordinate clustering (validation)
+- **Density-based histogram analysis** (replaced slab-merging for better robustness)
+  - Builds histogram of fragment density across X-axis
+  - Finds valleys (low-density regions < 20% of average) as column gaps
+  - Handles documents with spanning headers that cross column boundaries
+- **Spanning fragment detection** (handles centered titles)
+  - SpanningFragments field in ColumnLayout struct
+  - Line-level detection: if any non-whitespace fragment has center in gap region
+  - Spanning content output first, then column content
+  - Whitespace filtering to prevent edge false positives
 - Configurable thresholds (MinGapWidth, MinColumnWidth, MinGapHeightRatio)
 - Supports 1-6 columns (configurable MaxColumns)
 - Reading order: left-to-right columns, top-to-bottom within columns
 - Column struct with BBox, Fragments, Index
-- ColumnLayout with GetText(), GetFragmentsInReadingOrder()
+- ColumnLayout with GetText(), GetFragmentsInReadingOrder(), getSpanningText()
 
-**RAG Impact**: Multi-column PDFs are common in academic papers. Without proper column detection, text extraction jumbles columns together, creating incoherent chunks that destroy RAG quality. ✅ IMPLEMENTED
+**RAG Impact**: Multi-column PDFs are common in academic papers. Without proper column detection, text extraction jumbles columns together, creating incoherent chunks that destroy RAG quality. Spanning fragment detection ensures centered titles and headers are properly separated from column content. ✅ IMPLEMENTED
 
 #### Task 2.10: Header/Footer Detection (12 hours) 🎯 RAG CRITICAL ✅ COMPLETE
 - [x] Implement `layout/header_footer.go`
@@ -601,10 +611,12 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - [x] Provide option to filter headers/footers from output
 - [x] Write header/footer detection tests (19 tests + 2 benchmarks)
 - [x] Test with real documents (reports, books, papers)
+- [x] **Coordinate system detection** (handles inverted Y coordinates in Google Docs PDFs)
+- [x] **Short text filtering** (prevents spurious detection of single characters like "P")
 
 **Deliverable**: Header/footer detection and filtering ✅
 **Acceptance**: Correctly detects and filters headers, footers, and page numbers ✅
-**Completed**: November 25, 2024
+**Completed**: November 25, 2024 (Enhanced: November 26, 2024)
 **Tests**: 19 test cases + 2 benchmarks, all passing
 **Coverage**: 600+ lines in layout/header_footer.go
 **Performance**:
@@ -619,6 +631,14 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - Minimum occurrence ratio (default: 50% of pages)
 - HeaderFooterResult with FilterFragments() method
 - Configurable header/footer region heights
+- **Coordinate system auto-detection**:
+  - Standard PDF coords: high Y = top of page
+  - Google Docs style: Y extends beyond page height (inverted)
+  - Heuristic: if maxY > pageHeight, use inverted coordinate logic
+  - Scales header/footer regions appropriately for each system
+- **Short text filter**: Skips text ≤2 chars unless it's a page number pattern
+  - Prevents single letters/characters from being detected as headers/footers
+  - Example: "P" from "Page X" was being falsely detected
 
 **RAG Impact**: Headers, footers, and page numbers pollute embeddings with repetitive noise. Every chunk containing "Page 1", "Page 2", etc. or the same header text introduces irrelevant data that degrades semantic search quality. ✅ IMPLEMENTED
 
@@ -1345,9 +1365,9 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 
 ## Next Steps
 
-**Current Status**: Phase 2 (Text & Layout) - Partially Complete
+**Current Status**: Phase 2 (Text & Layout) - 67% Complete (12 of 18 tasks)
 
-**Completed in Phase 2** (as of November 25, 2024):
+**Completed in Phase 2** (as of November 26, 2024):
 - ✅ Task 2.1: Content Stream Parser (Week 5)
 - ✅ Task 2.2: Basic Text Extraction (Week 5)
 - ✅ Task 2.3: Type0/CIDFont Support (Week 5)
@@ -1374,17 +1394,23 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 **Recent Achievements**:
 - 🎉 **Header/footer detection** - Task 2.10 complete, page numbers and repeating text filtered
 - 🎉 **Multi-column detection** - Task 2.9 complete, 2/3/N-column layouts supported
+- 🎉 **Spanning fragment detection** - Centered titles properly separated from column content
+- 🎉 **Density-based gap detection** - Robust column detection using histogram analysis
+- 🎉 **Coordinate system auto-detection** - Google Docs inverted Y coordinates handled
 - 🎉 **Arabic/Hebrew PDF support** - Google Docs PDFs extract perfectly
 - 🎉 **Type0/CID font support** - Code space range parsing implemented
 - 🎉 **RTL text support** - 50+ scripts, direction detection, fragment reordering
 - 🎉 **Smart spacing** - Font-aware fragment merging
+- 🎉 **Library API improvements** - PageCount(), GetPage(), ExtractTextFragments() added to Reader
 - 🎉 **100+ RTL/layout tests** - Comprehensive test coverage
 
 **Test Corpus Progress**:
 - ✅ Emoji PDFs (multiple variants)
 - ✅ Arabic PDFs (Google Docs)
 - ✅ Basic text PDFs
-- ⏭️ Need: Hebrew PDFs, mixed LTR/RTL, vertical text, multi-column layouts
+- ✅ 2-column PDFs (Google Docs - dinosaurs.pdf, header-footer-column.pdf)
+- ✅ 3-column PDFs (Google Docs - 3cols.pdf)
+- ⏭️ Need: Hebrew PDFs, mixed LTR/RTL, vertical text
 
 ---
 
@@ -1429,24 +1455,23 @@ If you need RAG functionality sooner:
 
 Follow this plan step-by-step, and you'll build not just a PDF library, but a **RAG-first document intelligence system**.
 
-**Current Progress**: Phase 1, Week 2 - Tasks 1.1 through 1.8 complete ✅
-- ✅ Task 1.1-1.2: Project setup & objects
-- ✅ Task 1.3: Lexer (2.4M ops/sec)
-- ✅ Task 1.4: Parser (2.8M ops/sec, 82.4% coverage)
-- ✅ Task 1.5: XRef parsing (120K tables/sec, 79.5% coverage)
-- ✅ Task 1.6: File reader (79.1% coverage)
-- ✅ Task 1.7: Object resolver (86.6% coverage)
-- ✅ Task 1.8: Catalog & pages (72.1% coverage)
+**Current Progress**: Phase 2 (Text & Layout) - Week 6 tasks complete ✅
 
-**Package Coverage**:
-- Core: 79.5%
-- Reader: 79.1%
-- Resolver: 86.6%
-- Pages: 72.1%
-- **Average: ~79%**
+**Phase 1**: ✅ COMPLETE (15/15 tasks)
+- All core PDF parsing, stream decoding, text extraction implemented
 
-**Phase 1 Progress**: 8 of 15 tasks complete (53%)
+**Phase 2 Progress**: 12 of 18 tasks complete (67%)
+- ✅ Tasks 2.1-2.10: Font handling, encoding, RTL, multi-column, header/footer
+- ⏳ Tasks 2.11-2.18: Block/line/paragraph detection, reading order, headings, lists
 
-**Next Up**: Task 1.9 - FlateDecode (Stream Decompression)
+**Key Capabilities Now Working**:
+- Multi-column detection (2, 3, N columns)
+- Spanning fragment detection (centered titles)
+- Header/footer detection with page number filtering
+- Google Docs PDF support (inverted coordinates, character-level fragments)
+- RTL text support (Arabic, Hebrew)
+- Type0/CID font support
+
+**Next Up**: Task 2.11 - Block Detection (layout analysis phase)
 
 Good luck! 🚀

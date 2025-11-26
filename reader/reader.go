@@ -395,13 +395,33 @@ func (r *Reader) ensurePageTree() error {
 // ExtractTextFragments extracts text fragments from a page
 // This is a convenience method that handles content stream decoding and font registration
 func (r *Reader) ExtractTextFragments(page *pages.Page) ([]text.TextFragment, error) {
+	_, fragments, err := r.extractTextWithFragments(page)
+	return fragments, err
+}
+
+// ExtractText extracts text from a page and returns it as a string
+// This is a convenience method for simple text extraction
+func (r *Reader) ExtractText(page *pages.Page) (string, error) {
+	extractor, _, err := r.extractTextWithFragments(page)
+	if err != nil {
+		return "", err
+	}
+	if extractor == nil {
+		return "", nil
+	}
+	return extractor.GetText(), nil
+}
+
+// extractTextWithFragments is the internal implementation that returns both
+// the extractor (for GetText) and the fragments
+func (r *Reader) extractTextWithFragments(page *pages.Page) (*text.Extractor, []text.TextFragment, error) {
 	// Get content streams
 	contents, err := page.Contents()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get contents: %w", err)
+		return nil, nil, fmt.Errorf("failed to get contents: %w", err)
 	}
 	if contents == nil {
-		return nil, nil // Empty page
+		return nil, nil, nil // Empty page
 	}
 
 	// Decode and concatenate all content streams
@@ -413,13 +433,13 @@ func (r *Reader) ExtractTextFragments(page *pages.Page) ([]text.TextFragment, er
 		}
 		data, err := stream.Decode()
 		if err != nil {
-			return nil, fmt.Errorf("failed to decode content stream: %w", err)
+			return nil, nil, fmt.Errorf("failed to decode content stream: %w", err)
 		}
 		allData = append(allData, data...)
 	}
 
 	if len(allData) == 0 {
-		return nil, nil
+		return nil, nil, nil
 	}
 
 	// Create extractor and register fonts
@@ -436,8 +456,8 @@ func (r *Reader) ExtractTextFragments(page *pages.Page) ([]text.TextFragment, er
 	// Extract text fragments
 	fragments, err := extractor.ExtractFromBytes(allData)
 	if err != nil {
-		return nil, fmt.Errorf("failed to extract text: %w", err)
+		return nil, nil, fmt.Errorf("failed to extract text: %w", err)
 	}
 
-	return fragments, nil
+	return extractor, fragments, nil
 }
