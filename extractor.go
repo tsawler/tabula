@@ -486,42 +486,375 @@ func (e *Extractor) ReadingOrder() (*layout.ReadingOrderResult, error) {
 		return nil, err
 	}
 
-	// For ReadingOrder, we only process the first page if multiple are specified
-	// since reading order is per-page
 	if len(pageIndices) == 0 {
 		return nil, fmt.Errorf("no pages to process")
 	}
 
-	pageNum := pageIndices[0]
-	page, err := e.reader.GetPage(pageNum)
-	if err != nil {
-		return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
-	}
-
-	fragments, err := e.reader.ExtractTextFragments(page)
-	if err != nil {
-		return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
-	}
-
-	// For header/footer filtering, we need ALL pages for pattern detection
+	// Detect headers/footers if requested (needs all pages)
+	var headerFooterResult *layout.HeaderFooterResult
 	if e.options.excludeHeaders || e.options.excludeFooters {
 		allPages, err := e.collectAllPages()
 		if err == nil && len(allPages) > 0 {
-			headerFooterResult := e.detectHeaderFooter(allPages)
-			if headerFooterResult != nil {
-				height, _ := page.Height()
-				fragments = headerFooterResult.FilterFragments(pageNum, fragments, height)
-			}
+			headerFooterResult = e.detectHeaderFooter(allPages)
 		}
 	}
 
-	width, _ := page.Width()
-	height, _ := page.Height()
-
 	roDetector := layout.NewReadingOrderDetector()
-	result := roDetector.Detect(fragments, width, height)
 
-	return result, nil
+	// Combined result across all pages
+	combined := &layout.ReadingOrderResult{}
+
+	for _, pageNum := range pageIndices {
+		page, err := e.reader.GetPage(pageNum)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		fragments, err := e.reader.ExtractTextFragments(page)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		// Filter headers/footers if requested
+		if headerFooterResult != nil {
+			height, _ := page.Height()
+			fragments = headerFooterResult.FilterFragments(pageNum, fragments, height)
+		}
+
+		width, _ := page.Width()
+		height, _ := page.Height()
+
+		pageResult := roDetector.Detect(fragments, width, height)
+
+		// Combine results
+		combined.Fragments = append(combined.Fragments, pageResult.Fragments...)
+		combined.Lines = append(combined.Lines, pageResult.Lines...)
+		combined.Sections = append(combined.Sections, pageResult.Sections...)
+
+		// Track max column count
+		if pageResult.ColumnCount > combined.ColumnCount {
+			combined.ColumnCount = pageResult.ColumnCount
+		}
+
+		// Keep page dimensions from first page
+		if combined.PageWidth == 0 {
+			combined.PageWidth = pageResult.PageWidth
+			combined.PageHeight = pageResult.PageHeight
+			combined.Direction = pageResult.Direction
+		}
+	}
+
+	return combined, nil
+}
+
+// Analyze performs complete layout analysis and returns all detected elements.
+// This is the most comprehensive extraction method, combining columns, lines,
+// paragraphs, headings, lists, and reading order into a unified result.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	result, err := tabula.Open("document.pdf").Pages(1).Analyze()
+//	for _, elem := range result.Elements {
+//	    fmt.Printf("[%s] %s\n", elem.Type, elem.Text)
+//	}
+func (e *Extractor) Analyze() (*layout.AnalysisResult, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+
+	if err := e.ensureReader(); err != nil {
+		return nil, err
+	}
+	defer e.Close()
+
+	pageIndices, err := e.resolvePages()
+	if err != nil {
+		return nil, err
+	}
+
+	if len(pageIndices) == 0 {
+		return nil, fmt.Errorf("no pages to process")
+	}
+
+	// Detect headers/footers if requested (needs all pages)
+	var headerFooterResult *layout.HeaderFooterResult
+	if e.options.excludeHeaders || e.options.excludeFooters {
+		allPages, err := e.collectAllPages()
+		if err == nil && len(allPages) > 0 {
+			headerFooterResult = e.detectHeaderFooter(allPages)
+		}
+	}
+
+	analyzer := layout.NewAnalyzer()
+
+	// Combined result across all pages
+	combined := &layout.AnalysisResult{}
+
+	for _, pageNum := range pageIndices {
+		page, err := e.reader.GetPage(pageNum)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		fragments, err := e.reader.ExtractTextFragments(page)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		// Filter headers/footers if requested
+		if headerFooterResult != nil {
+			height, _ := page.Height()
+			fragments = headerFooterResult.FilterFragments(pageNum, fragments, height)
+		}
+
+		width, _ := page.Width()
+		height, _ := page.Height()
+
+		pageResult := analyzer.Analyze(fragments, width, height)
+
+		// Update element page indices and combine
+		for i := range pageResult.Elements {
+			pageResult.Elements[i].Index = len(combined.Elements) + i
+			pageResult.Elements[i].ZOrder = len(combined.Elements) + i
+		}
+
+		combined.Elements = append(combined.Elements, pageResult.Elements...)
+		combined.Stats.FragmentCount += pageResult.Stats.FragmentCount
+		combined.Stats.LineCount += pageResult.Stats.LineCount
+		combined.Stats.BlockCount += pageResult.Stats.BlockCount
+		combined.Stats.ParagraphCount += pageResult.Stats.ParagraphCount
+		combined.Stats.HeadingCount += pageResult.Stats.HeadingCount
+		combined.Stats.ListCount += pageResult.Stats.ListCount
+		combined.Stats.ElementCount += pageResult.Stats.ElementCount
+
+		// Keep page dimensions from first page (or could use max)
+		if combined.PageWidth == 0 {
+			combined.PageWidth = pageResult.PageWidth
+			combined.PageHeight = pageResult.PageHeight
+		}
+	}
+
+	return combined, nil
+}
+
+// Headings extracts and returns detected headings (H1-H6) from the document.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	headings, err := tabula.Open("document.pdf").Headings()
+//	for _, h := range headings {
+//	    fmt.Printf("[%s] %s\n", h.Level, h.Text)
+//	}
+func (e *Extractor) Headings() ([]layout.Heading, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+
+	if err := e.ensureReader(); err != nil {
+		return nil, err
+	}
+	defer e.Close()
+
+	pageIndices, err := e.resolvePages()
+	if err != nil {
+		return nil, err
+	}
+
+	// Detect headers/footers if requested (once, outside the loop)
+	var headerFooterResult *layout.HeaderFooterResult
+	if e.options.excludeHeaders || e.options.excludeFooters {
+		allPages, err := e.collectAllPages()
+		if err == nil && len(allPages) > 0 {
+			headerFooterResult = e.detectHeaderFooter(allPages)
+		}
+	}
+
+	var allHeadings []layout.Heading
+	detector := layout.NewHeadingDetector()
+
+	for _, pageNum := range pageIndices {
+		page, err := e.reader.GetPage(pageNum)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		fragments, err := e.reader.ExtractTextFragments(page)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		// Filter headers/footers if requested
+		if headerFooterResult != nil {
+			height, _ := page.Height()
+			fragments = headerFooterResult.FilterFragments(pageNum, fragments, height)
+		}
+
+		width, _ := page.Width()
+		height, _ := page.Height()
+
+		result := detector.DetectFromFragments(fragments, width, height)
+		if result != nil {
+			for i := range result.Headings {
+				result.Headings[i].PageIndex = pageNum
+			}
+			allHeadings = append(allHeadings, result.Headings...)
+		}
+	}
+
+	return allHeadings, nil
+}
+
+// Lists extracts and returns detected lists (bulleted, numbered, etc.) from the document.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	lists, err := tabula.Open("document.pdf").Lists()
+//	for _, list := range lists {
+//	    fmt.Printf("List type: %s, items: %d\n", list.Type, len(list.Items))
+//	}
+func (e *Extractor) Lists() ([]layout.List, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+
+	if err := e.ensureReader(); err != nil {
+		return nil, err
+	}
+	defer e.Close()
+
+	pageIndices, err := e.resolvePages()
+	if err != nil {
+		return nil, err
+	}
+
+	// Detect headers/footers if requested (once, outside the loop)
+	var headerFooterResult *layout.HeaderFooterResult
+	if e.options.excludeHeaders || e.options.excludeFooters {
+		allPages, err := e.collectAllPages()
+		if err == nil && len(allPages) > 0 {
+			headerFooterResult = e.detectHeaderFooter(allPages)
+		}
+	}
+
+	var allLists []layout.List
+	detector := layout.NewListDetector()
+
+	for _, pageNum := range pageIndices {
+		page, err := e.reader.GetPage(pageNum)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		fragments, err := e.reader.ExtractTextFragments(page)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		// Filter headers/footers if requested
+		if headerFooterResult != nil {
+			height, _ := page.Height()
+			fragments = headerFooterResult.FilterFragments(pageNum, fragments, height)
+		}
+
+		width, _ := page.Width()
+		height, _ := page.Height()
+
+		result := detector.DetectFromFragments(fragments, width, height)
+		if result != nil {
+			allLists = append(allLists, result.Lists...)
+		}
+	}
+
+	return allLists, nil
+}
+
+// Blocks extracts and returns detected text blocks from the document.
+// Blocks are spatially grouped regions of text, useful for understanding
+// document layout structure.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	blocks, err := tabula.Open("document.pdf").Blocks()
+//	for _, block := range blocks {
+//	    fmt.Printf("Block at (%.1f, %.1f): %s\n", block.BBox.X, block.BBox.Y, block.GetText())
+//	}
+func (e *Extractor) Blocks() ([]layout.Block, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+
+	if err := e.ensureReader(); err != nil {
+		return nil, err
+	}
+	defer e.Close()
+
+	pageIndices, err := e.resolvePages()
+	if err != nil {
+		return nil, err
+	}
+
+	// Detect headers/footers if requested (once, outside the loop)
+	var headerFooterResult *layout.HeaderFooterResult
+	if e.options.excludeHeaders || e.options.excludeFooters {
+		allPages, err := e.collectAllPages()
+		if err == nil && len(allPages) > 0 {
+			headerFooterResult = e.detectHeaderFooter(allPages)
+		}
+	}
+
+	var allBlocks []layout.Block
+	detector := layout.NewBlockDetector()
+
+	for _, pageNum := range pageIndices {
+		page, err := e.reader.GetPage(pageNum)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		fragments, err := e.reader.ExtractTextFragments(page)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		// Filter headers/footers if requested
+		if headerFooterResult != nil {
+			height, _ := page.Height()
+			fragments = headerFooterResult.FilterFragments(pageNum, fragments, height)
+		}
+
+		width, _ := page.Width()
+		height, _ := page.Height()
+
+		result := detector.Detect(fragments, width, height)
+		if result != nil {
+			allBlocks = append(allBlocks, result.Blocks...)
+		}
+	}
+
+	return allBlocks, nil
+}
+
+// Elements extracts and returns all detected elements in reading order.
+// Elements include paragraphs, headings, and lists, unified into a single
+// ordered list. This is useful for document reconstruction or RAG workflows.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	elements, err := tabula.Open("document.pdf").Elements()
+//	for _, elem := range elements {
+//	    fmt.Printf("[%s] %s\n", elem.Type, elem.Text)
+//	}
+func (e *Extractor) Elements() ([]layout.LayoutElement, error) {
+	result, err := e.Analyze()
+	if err != nil {
+		return nil, err
+	}
+	return result.Elements, nil
 }
 
 // ============================================================================
