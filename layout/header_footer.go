@@ -1,0 +1,608 @@
+package layout
+
+import (
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/tsawler/tabula/model"
+	"github.com/tsawler/tabula/text"
+)
+
+// HeaderFooterRegion represents a detected header or footer region
+type HeaderFooterRegion struct {
+	// Type indicates if this is a header or footer
+	Type RegionType
+
+	// BBox is the bounding box of the region
+	BBox model.BBox
+
+	// Text is the typical text content (may include page number placeholder)
+	Text string
+
+	// IsPageNumber indicates if this region contains page numbers
+	IsPageNumber bool
+
+	// Confidence is the detection confidence (0.0 to 1.0)
+	Confidence float64
+
+	// PageIndices lists which pages have this header/footer
+	PageIndices []int
+}
+
+// RegionType indicates whether a region is a header or footer
+type RegionType int
+
+const (
+	Header RegionType = iota
+	Footer
+)
+
+func (r RegionType) String() string {
+	if r == Header {
+		return "header"
+	}
+	return "footer"
+}
+
+// HeaderFooterConfig holds configuration for header/footer detection
+type HeaderFooterConfig struct {
+	// HeaderRegionHeight is the height from top of page to consider as header zone
+	// Default: 72 points (1 inch)
+	HeaderRegionHeight float64
+
+	// FooterRegionHeight is the height from bottom of page to consider as footer zone
+	// Default: 72 points (1 inch)
+	FooterRegionHeight float64
+
+	// MinOccurrenceRatio is the minimum fraction of pages a text must appear on
+	// to be considered a header/footer (0.0 to 1.0)
+	// Default: 0.5 (50% of pages)
+	MinOccurrenceRatio float64
+
+	// PositionTolerance is the maximum Y difference for text to be considered same position
+	// Default: 5 points
+	PositionTolerance float64
+
+	// XPositionTolerance is the maximum X difference for text to be considered same position
+	// Default: 10 points
+	XPositionTolerance float64
+
+	// MinPages is the minimum number of pages required for header/footer detection
+	// Default: 2
+	MinPages int
+}
+
+// DefaultHeaderFooterConfig returns sensible default configuration
+func DefaultHeaderFooterConfig() HeaderFooterConfig {
+	return HeaderFooterConfig{
+		HeaderRegionHeight: 72.0,  // 1 inch
+		FooterRegionHeight: 72.0,  // 1 inch
+		MinOccurrenceRatio: 0.5,   // 50% of pages
+		PositionTolerance:  5.0,   // 5 points
+		XPositionTolerance: 10.0,  // 10 points
+		MinPages:           2,
+	}
+}
+
+// PageFragments represents text fragments from a single page
+type PageFragments struct {
+	PageIndex  int
+	PageHeight float64
+	PageWidth  float64
+	Fragments  []text.TextFragment
+}
+
+// HeaderFooterDetector detects headers and footers across pages
+type HeaderFooterDetector struct {
+	config HeaderFooterConfig
+}
+
+// NewHeaderFooterDetector creates a new detector with default configuration
+func NewHeaderFooterDetector() *HeaderFooterDetector {
+	return &HeaderFooterDetector{
+		config: DefaultHeaderFooterConfig(),
+	}
+}
+
+// NewHeaderFooterDetectorWithConfig creates a detector with custom configuration
+func NewHeaderFooterDetectorWithConfig(config HeaderFooterConfig) *HeaderFooterDetector {
+	return &HeaderFooterDetector{
+		config: config,
+	}
+}
+
+// HeaderFooterResult contains the detection results
+type HeaderFooterResult struct {
+	// Headers contains detected header regions
+	Headers []HeaderFooterRegion
+
+	// Footers contains detected footer regions
+	Footers []HeaderFooterRegion
+
+	// Config used for detection
+	Config HeaderFooterConfig
+}
+
+// Detect analyzes fragments from multiple pages to find headers and footers
+func (d *HeaderFooterDetector) Detect(pages []PageFragments) *HeaderFooterResult {
+	if len(pages) < d.config.MinPages {
+		return &HeaderFooterResult{Config: d.config}
+	}
+
+	// Extract header and footer candidates from each page
+	headerCandidates := d.extractCandidates(pages, Header)
+	footerCandidates := d.extractCandidates(pages, Footer)
+
+	// Find repeating patterns
+	headers := d.findRepeatingPatterns(headerCandidates, pages, Header)
+	footers := d.findRepeatingPatterns(footerCandidates, pages, Footer)
+
+	return &HeaderFooterResult{
+		Headers: headers,
+		Footers: footers,
+		Config:  d.config,
+	}
+}
+
+// candidate represents a potential header/footer text
+type candidate struct {
+	Text      string
+	X         float64
+	Y         float64 // Normalized Y (distance from top for headers, from bottom for footers)
+	Width     float64
+	Height    float64
+	PageIndex int
+}
+
+// extractCandidates extracts header or footer candidates from pages
+func (d *HeaderFooterDetector) extractCandidates(pages []PageFragments, regionType RegionType) []candidate {
+	var candidates []candidate
+
+	for _, page := range pages {
+		for _, frag := range page.Fragments {
+			var inRegion bool
+			var normalizedY float64
+
+			if regionType == Header {
+				// Header: top of page (high Y values in PDF coordinates)
+				distFromTop := page.PageHeight - (frag.Y + frag.Height)
+				inRegion = distFromTop < d.config.HeaderRegionHeight
+				normalizedY = distFromTop
+			} else {
+				// Footer: bottom of page (low Y values in PDF coordinates)
+				distFromBottom := frag.Y
+				inRegion = distFromBottom < d.config.FooterRegionHeight
+				normalizedY = distFromBottom
+			}
+
+			if inRegion {
+				candidates = append(candidates, candidate{
+					Text:      strings.TrimSpace(frag.Text),
+					X:         frag.X,
+					Y:         normalizedY,
+					Width:     frag.Width,
+					Height:    frag.Height,
+					PageIndex: page.PageIndex,
+				})
+			}
+		}
+	}
+
+	return candidates
+}
+
+// findRepeatingPatterns finds text that repeats across pages
+func (d *HeaderFooterDetector) findRepeatingPatterns(candidates []candidate, pages []PageFragments, regionType RegionType) []HeaderFooterRegion {
+	if len(candidates) == 0 {
+		return nil
+	}
+
+	// Group candidates by normalized text (ignoring page numbers)
+	groups := make(map[string][]candidate)
+
+	for _, c := range candidates {
+		// Normalize text by replacing page numbers with placeholder
+		normalized := normalizeForComparison(c.Text)
+		groups[normalized] = append(groups[normalized], c)
+	}
+
+	var regions []HeaderFooterRegion
+	minOccurrences := int(float64(len(pages)) * d.config.MinOccurrenceRatio)
+	if minOccurrences < 2 {
+		minOccurrences = 2
+	}
+
+	for normalizedText, group := range groups {
+		// Check if this text appears on enough pages
+		pageSet := make(map[int]bool)
+		for _, c := range group {
+			pageSet[c.PageIndex] = true
+		}
+
+		if len(pageSet) < minOccurrences {
+			continue
+		}
+
+		// Check position consistency
+		if !d.hasConsistentPosition(group) {
+			continue
+		}
+
+		// Calculate bounding box and confidence
+		bbox := d.calculateGroupBBox(group)
+		confidence := d.calculateConfidence(group, len(pages))
+
+		// Determine if this is a page number
+		isPageNum := isPageNumberPattern(normalizedText) || containsPageNumberPattern(group)
+
+		// Get representative text
+		representativeText := group[0].Text
+		if isPageNum {
+			representativeText = "[Page Number]"
+		}
+
+		// Collect page indices
+		var pageIndices []int
+		for idx := range pageSet {
+			pageIndices = append(pageIndices, idx)
+		}
+		sort.Ints(pageIndices)
+
+		regions = append(regions, HeaderFooterRegion{
+			Type:         regionType,
+			BBox:         bbox,
+			Text:         representativeText,
+			IsPageNumber: isPageNum,
+			Confidence:   confidence,
+			PageIndices:  pageIndices,
+		})
+	}
+
+	// Sort by confidence (highest first)
+	sort.Slice(regions, func(i, j int) bool {
+		return regions[i].Confidence > regions[j].Confidence
+	})
+
+	return regions
+}
+
+// hasConsistentPosition checks if candidates appear at consistent positions
+func (d *HeaderFooterDetector) hasConsistentPosition(group []candidate) bool {
+	if len(group) < 2 {
+		return false
+	}
+
+	// Check Y position consistency
+	refY := group[0].Y
+	refX := group[0].X
+
+	for _, c := range group[1:] {
+		yDiff := absFloat(c.Y - refY)
+		xDiff := absFloat(c.X - refX)
+
+		if yDiff > d.config.PositionTolerance {
+			return false
+		}
+		if xDiff > d.config.XPositionTolerance {
+			return false
+		}
+	}
+
+	return true
+}
+
+// calculateGroupBBox calculates the bounding box for a group of candidates
+func (d *HeaderFooterDetector) calculateGroupBBox(group []candidate) model.BBox {
+	if len(group) == 0 {
+		return model.BBox{}
+	}
+
+	minX := group[0].X
+	maxX := group[0].X + group[0].Width
+	minY := group[0].Y
+	maxY := group[0].Y + group[0].Height
+
+	for _, c := range group[1:] {
+		if c.X < minX {
+			minX = c.X
+		}
+		if c.X+c.Width > maxX {
+			maxX = c.X + c.Width
+		}
+		if c.Y < minY {
+			minY = c.Y
+		}
+		if c.Y+c.Height > maxY {
+			maxY = c.Y + c.Height
+		}
+	}
+
+	return model.BBox{
+		X:      minX,
+		Y:      minY,
+		Width:  maxX - minX,
+		Height: maxY - minY,
+	}
+}
+
+// calculateConfidence calculates detection confidence
+func (d *HeaderFooterDetector) calculateConfidence(group []candidate, totalPages int) float64 {
+	if totalPages == 0 {
+		return 0
+	}
+
+	// Base confidence on occurrence ratio
+	pageSet := make(map[int]bool)
+	for _, c := range group {
+		pageSet[c.PageIndex] = true
+	}
+
+	occurrenceRatio := float64(len(pageSet)) / float64(totalPages)
+
+	// Boost confidence for position consistency
+	positionBonus := 0.0
+	if d.hasConsistentPosition(group) {
+		positionBonus = 0.1
+	}
+
+	confidence := occurrenceRatio*0.9 + positionBonus
+	if confidence > 1.0 {
+		confidence = 1.0
+	}
+
+	return confidence
+}
+
+// normalizeForComparison normalizes text for comparison by replacing numbers
+func normalizeForComparison(text string) string {
+	// Replace sequences of digits with a placeholder
+	re := regexp.MustCompile(`\d+`)
+	return re.ReplaceAllString(text, "#")
+}
+
+// isPageNumberPattern checks if normalized text looks like a page number
+func isPageNumberPattern(normalizedText string) bool {
+	// Common page number patterns (after normalization)
+	patterns := []string{
+		"#",                  // Just a number
+		"Page #",             // "Page 1"
+		"page #",             // "page 1"
+		"- # -",              // "- 1 -"
+		"# of #",             // "1 of 10"
+		"Page # of #",        // "Page 1 of 10"
+		"#/#",                // "1/10"
+		"p. #",               // "p. 1"
+		"p.#",                // "p.1"
+		"pg #",               // "pg 1"
+		"pg. #",              // "pg. 1"
+	}
+
+	trimmed := strings.TrimSpace(normalizedText)
+	for _, pattern := range patterns {
+		if strings.EqualFold(trimmed, pattern) {
+			return true
+		}
+	}
+
+	return false
+}
+
+// containsPageNumberPattern checks if any candidate in the group contains page numbers
+func containsPageNumberPattern(group []candidate) bool {
+	if len(group) < 2 {
+		return false
+	}
+
+	// Extract just the numbers from each candidate
+	re := regexp.MustCompile(`\d+`)
+
+	var numbers []int
+	for _, c := range group {
+		matches := re.FindAllString(c.Text, -1)
+		for _, match := range matches {
+			var num int
+			if _, err := parsePageNumber(match, &num); err == nil {
+				numbers = append(numbers, num)
+			}
+		}
+	}
+
+	if len(numbers) < 2 {
+		return false
+	}
+
+	// Sort and check if they form a sequence
+	sort.Ints(numbers)
+
+	// Check for sequential or near-sequential pattern
+	sequential := 0
+	for i := 1; i < len(numbers); i++ {
+		diff := numbers[i] - numbers[i-1]
+		if diff == 1 {
+			sequential++
+		}
+	}
+
+	// If more than half are sequential, it's likely page numbers
+	return sequential >= len(numbers)/2
+}
+
+// parsePageNumber parses a string as a page number
+func parsePageNumber(s string, result *int) (bool, error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false, nil
+	}
+
+	num := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return false, nil
+		}
+		num = num*10 + int(c-'0')
+	}
+
+	*result = num
+	return true, nil
+}
+
+// FilterFragments removes header/footer fragments from a page
+func (r *HeaderFooterResult) FilterFragments(pageIndex int, fragments []text.TextFragment, pageHeight float64) []text.TextFragment {
+	if r == nil {
+		return fragments
+	}
+
+	var filtered []text.TextFragment
+
+	for _, frag := range fragments {
+		if r.isInHeaderFooter(pageIndex, frag, pageHeight) {
+			continue
+		}
+		filtered = append(filtered, frag)
+	}
+
+	return filtered
+}
+
+// isInHeaderFooter checks if a fragment is in a detected header/footer region
+func (r *HeaderFooterResult) isInHeaderFooter(pageIndex int, frag text.TextFragment, pageHeight float64) bool {
+	// Check headers
+	for _, header := range r.Headers {
+		if !containsPage(header.PageIndices, pageIndex) {
+			continue
+		}
+
+		// Check if fragment is in header region
+		distFromTop := pageHeight - (frag.Y + frag.Height)
+		if distFromTop < r.Config.HeaderRegionHeight {
+			// Check text similarity
+			if textsMatch(frag.Text, header.Text, header.IsPageNumber) {
+				return true
+			}
+		}
+	}
+
+	// Check footers
+	for _, footer := range r.Footers {
+		if !containsPage(footer.PageIndices, pageIndex) {
+			continue
+		}
+
+		// Check if fragment is in footer region
+		if frag.Y < r.Config.FooterRegionHeight {
+			// Check text similarity
+			if textsMatch(frag.Text, footer.Text, footer.IsPageNumber) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// containsPage checks if a page index is in the list
+func containsPage(pages []int, pageIndex int) bool {
+	for _, p := range pages {
+		if p == pageIndex {
+			return true
+		}
+	}
+	return false
+}
+
+// textsMatch checks if two texts match (considering page numbers)
+func textsMatch(fragText, regionText string, isPageNumber bool) bool {
+	fragText = strings.TrimSpace(fragText)
+	regionText = strings.TrimSpace(regionText)
+
+	if isPageNumber {
+		// For page numbers, just check if it's a number or page number pattern
+		normalized := normalizeForComparison(fragText)
+		return isPageNumberPattern(normalized)
+	}
+
+	// For regular text, check exact match or normalized match
+	if fragText == regionText {
+		return true
+	}
+
+	// Try normalized comparison
+	return normalizeForComparison(fragText) == normalizeForComparison(regionText)
+}
+
+// HasHeaders returns true if any headers were detected
+func (r *HeaderFooterResult) HasHeaders() bool {
+	return r != nil && len(r.Headers) > 0
+}
+
+// HasFooters returns true if any footers were detected
+func (r *HeaderFooterResult) HasFooters() bool {
+	return r != nil && len(r.Footers) > 0
+}
+
+// HasHeadersOrFooters returns true if any headers or footers were detected
+func (r *HeaderFooterResult) HasHeadersOrFooters() bool {
+	return r.HasHeaders() || r.HasFooters()
+}
+
+// GetHeaderTexts returns all detected header texts
+func (r *HeaderFooterResult) GetHeaderTexts() []string {
+	if r == nil {
+		return nil
+	}
+
+	var texts []string
+	for _, h := range r.Headers {
+		texts = append(texts, h.Text)
+	}
+	return texts
+}
+
+// GetFooterTexts returns all detected footer texts
+func (r *HeaderFooterResult) GetFooterTexts() []string {
+	if r == nil {
+		return nil
+	}
+
+	var texts []string
+	for _, f := range r.Footers {
+		texts = append(texts, f.Text)
+	}
+	return texts
+}
+
+// abs returns the absolute value of a float64
+func absFloat(x float64) float64 {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
+// Summary returns a human-readable summary of detection results
+func (r *HeaderFooterResult) Summary() string {
+	if r == nil || !r.HasHeadersOrFooters() {
+		return "No headers or footers detected"
+	}
+
+	var parts []string
+
+	if len(r.Headers) > 0 {
+		headerTexts := make([]string, len(r.Headers))
+		for i, h := range r.Headers {
+			headerTexts[i] = h.Text
+		}
+		parts = append(parts, "Headers: "+strings.Join(headerTexts, ", "))
+	}
+
+	if len(r.Footers) > 0 {
+		footerTexts := make([]string, len(r.Footers))
+		for i, f := range r.Footers {
+			footerTexts[i] = f.Text
+		}
+		parts = append(parts, "Footers: "+strings.Join(footerTexts, ", "))
+	}
+
+	return strings.Join(parts, "; ")
+}

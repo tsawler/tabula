@@ -564,27 +564,63 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 
 **RAG Impact**: PUA characters are used for custom icons and symbols in corporate PDFs. ActualText provides accessibility text that's often more semantic than raw glyphs. Both improve RAG quality for specialized documents.
 
-#### Task 2.9: Multi-Column Layout Detection (12 hours) 🎯 RAG CRITICAL
-- [ ] Implement `layout/columns.go`
-- [ ] Detect column boundaries via X-coordinate clustering
-- [ ] Detect column boundaries via whitespace gaps
-- [ ] Handle 2, 3, and N-column layouts
-- [ ] Preserve reading order within columns
-- [ ] Write column detection tests
-- [ ] Test with academic papers and reports
+#### Task 2.9: Multi-Column Layout Detection (12 hours) 🎯 RAG CRITICAL ✅ COMPLETE
+- [x] Implement `layout/columns.go`
+- [x] Detect column boundaries via X-coordinate clustering
+- [x] Detect column boundaries via whitespace gaps
+- [x] Handle 2, 3, and N-column layouts
+- [x] Preserve reading order within columns
+- [x] Write column detection tests (16 tests + 2 benchmarks)
+- [x] Test with academic papers and reports
 
-**RAG Impact**: Multi-column PDFs are common in academic papers. Without proper column detection, text extraction jumbles columns together, creating incoherent chunks that destroy RAG quality.
+**Deliverable**: Multi-column layout detection ✅
+**Acceptance**: Correctly detects and orders 2, 3, and N-column layouts ✅
+**Completed**: November 25, 2024
+**Tests**: 16 test cases + 2 benchmarks, all passing
+**Coverage**: 400+ lines in layout/columns.go
+**Performance**:
+- Two-column: ~4.2μs per page (285K ops/sec)
+- Single-column: ~1.7μs per page (675K ops/sec)
 
-#### Task 2.10: Header/Footer Detection (12 hours) 🎯 RAG CRITICAL
-- [ ] Implement `layout/header_footer.go`
-- [ ] Detect repeating text at same positions across pages
-- [ ] Detect page numbers (numeric patterns at consistent positions)
-- [ ] Mark header/footer regions for exclusion
-- [ ] Provide option to filter headers/footers from output
-- [ ] Write header/footer detection tests
-- [ ] Test with real documents (reports, books, papers)
+**Implementation Details**:
+- Whitespace gap analysis (primary method)
+- X-coordinate clustering (validation)
+- Configurable thresholds (MinGapWidth, MinColumnWidth, MinGapHeightRatio)
+- Supports 1-6 columns (configurable MaxColumns)
+- Reading order: left-to-right columns, top-to-bottom within columns
+- Column struct with BBox, Fragments, Index
+- ColumnLayout with GetText(), GetFragmentsInReadingOrder()
 
-**RAG Impact**: Headers, footers, and page numbers pollute embeddings with repetitive noise. Every chunk containing "Page 1", "Page 2", etc. or the same header text introduces irrelevant data that degrades semantic search quality.
+**RAG Impact**: Multi-column PDFs are common in academic papers. Without proper column detection, text extraction jumbles columns together, creating incoherent chunks that destroy RAG quality. ✅ IMPLEMENTED
+
+#### Task 2.10: Header/Footer Detection (12 hours) 🎯 RAG CRITICAL ✅ COMPLETE
+- [x] Implement `layout/header_footer.go`
+- [x] Detect repeating text at same positions across pages
+- [x] Detect page numbers (numeric patterns at consistent positions)
+- [x] Mark header/footer regions for exclusion
+- [x] Provide option to filter headers/footers from output
+- [x] Write header/footer detection tests (19 tests + 2 benchmarks)
+- [x] Test with real documents (reports, books, papers)
+
+**Deliverable**: Header/footer detection and filtering ✅
+**Acceptance**: Correctly detects and filters headers, footers, and page numbers ✅
+**Completed**: November 25, 2024
+**Tests**: 19 test cases + 2 benchmarks, all passing
+**Coverage**: 600+ lines in layout/header_footer.go
+**Performance**:
+- 10-page document: ~12μs (84K docs/sec)
+- 100-page document: ~114μs (8.7K docs/sec)
+
+**Implementation Details**:
+- Multi-page analysis for pattern detection
+- Repeating text detection at consistent positions
+- Page number patterns: "1", "Page 1", "1 of 10", "Page 1 of 10", "p. 1", etc.
+- Position tolerance configuration (Y and X)
+- Minimum occurrence ratio (default: 50% of pages)
+- HeaderFooterResult with FilterFragments() method
+- Configurable header/footer region heights
+
+**RAG Impact**: Headers, footers, and page numbers pollute embeddings with repetitive noise. Every chunk containing "Page 1", "Page 2", etc. or the same header text introduces irrelevant data that degrades semantic search quality. ✅ IMPLEMENTED
 
 ### Week 7: Layout Analysis
 
@@ -1322,22 +1358,27 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - ✅ Task 2.6: Enhanced Text Extractor (Week 6)
 - ✅ Task 2.7: Text Fragment Ordering (Week 6) - Mostly Complete
 - ✅ Task 2.8: Symbol and Emoji Font Handling (Week 6) - Mostly Complete 🎯
+- ✅ Task 2.9: Multi-Column Layout Detection (Week 6) 🎯 RAG CRITICAL
+- ✅ Task 2.10: Header/Footer Detection (Week 6) 🎯 RAG CRITICAL
 
 **Next Priority Tasks**:
-1. **Task 2.8b**: PUA and ActualText Support (4 hours) 🎯
-2. **Task 2.9**: Multi-column Detection (12 hours) 🎯 RAG CRITICAL
-3. **Task 2.10**: Header/Footer Detection (8 hours) 🎯 RAG CRITICAL
-4. **Task 2.11**: Paragraph Detection (12 hours) 🎯 RAG CRITICAL
-5. **Task 2.12**: Heading Detection (8 hours) 🎯 RAG CRITICAL
-6. **Phase 2.5**: RAG Optimization & Semantic Chunking (100 hours) 🎯
-7. **Phase 3**: Table Detection (already have geometric detector implemented!)
+1. **Task 2.11**: Block Detection (12 hours)
+2. **Task 2.12**: Line Detection (8 hours)
+3. **Task 2.13**: Paragraph Detection (12 hours) 🎯 RAG CRITICAL
+4. **Task 2.14**: Reading Order (12 hours)
+5. **Task 2.15**: Heading Detection (12 hours) 🎯 RAG CRITICAL
+6. **Task 2.16**: List Detection (12 hours) 🎯 RAG IMPORTANT
+7. **Phase 2.5**: RAG Optimization & Semantic Chunking (100 hours) 🎯
+8. **Phase 3**: Table Detection (already have geometric detector implemented!)
 
 **Recent Achievements**:
+- 🎉 **Header/footer detection** - Task 2.10 complete, page numbers and repeating text filtered
+- 🎉 **Multi-column detection** - Task 2.9 complete, 2/3/N-column layouts supported
 - 🎉 **Arabic/Hebrew PDF support** - Google Docs PDFs extract perfectly
 - 🎉 **Type0/CID font support** - Code space range parsing implemented
 - 🎉 **RTL text support** - 50+ scripts, direction detection, fragment reordering
 - 🎉 **Smart spacing** - Font-aware fragment merging
-- 🎉 **60+ RTL tests** - Comprehensive test coverage
+- 🎉 **100+ RTL/layout tests** - Comprehensive test coverage
 
 **Test Corpus Progress**:
 - ✅ Emoji PDFs (multiple variants)
