@@ -644,11 +644,32 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 
 ### Week 7: Layout Analysis
 
-#### Task 2.11: Block Detection (12 hours)
-- [ ] Implement `layout/block.go`
-- [ ] Group fragments into blocks
-- [ ] Detect block boundaries
-- [ ] Write block detection tests
+#### Task 2.11: Block Detection (12 hours) ✅ COMPLETE
+- [x] Implement `layout/block.go`
+- [x] Group fragments into blocks (line-based grouping then vertical gap analysis)
+- [x] Detect block boundaries (using configurable vertical gap threshold)
+- [x] Write block detection tests (19 tests + 2 benchmarks)
+
+**Deliverable**: Block detection for grouping text into spatial regions ✅
+**Acceptance**: Correctly groups fragments into blocks based on spatial proximity ✅
+**Completed**: November 26, 2024
+**Tests**: 19 test cases + 2 benchmarks, all passing
+**Coverage**: 500+ lines in layout/block.go
+**Performance**:
+- Small document (50 fragments): ~6μs per page (168K ops/sec)
+- Large document (500 fragments): ~37μs per page (27K ops/sec)
+
+**Implementation Details**:
+- **BlockDetector** with configurable parameters
+- **Block struct** with BBox, Fragments, Lines, Index, Level
+- **BlockLayout** with GetText(), GetBlock(), GetAllFragments()
+- Line grouping using Y-coordinate tolerance
+- Vertical gap analysis for block boundaries
+- Horizontal overlap checking between lines
+- Reading order sorting (top-to-bottom, left-to-right)
+- Block merging for overlapping blocks
+- Minimum block size validation
+- Nil-safe methods throughout
 
 #### Task 2.12: Line Detection (8 hours)
 - [ ] Implement `layout/line.go`
@@ -1365,7 +1386,7 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 
 ## Next Steps
 
-**Current Status**: Phase 2 (Text & Layout) - 67% Complete (12 of 18 tasks)
+**Current Status**: Phase 2 (Text & Layout) - 72% Complete (13 of 18 tasks)
 
 **Completed in Phase 2** (as of November 26, 2024):
 - ✅ Task 2.1: Content Stream Parser (Week 5)
@@ -1380,18 +1401,19 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - ✅ Task 2.8: Symbol and Emoji Font Handling (Week 6) - Mostly Complete 🎯
 - ✅ Task 2.9: Multi-Column Layout Detection (Week 6) 🎯 RAG CRITICAL
 - ✅ Task 2.10: Header/Footer Detection (Week 6) 🎯 RAG CRITICAL
+- ✅ Task 2.11: Block Detection (Week 7)
 
 **Next Priority Tasks**:
-1. **Task 2.11**: Block Detection (12 hours)
-2. **Task 2.12**: Line Detection (8 hours)
-3. **Task 2.13**: Paragraph Detection (12 hours) 🎯 RAG CRITICAL
-4. **Task 2.14**: Reading Order (12 hours)
-5. **Task 2.15**: Heading Detection (12 hours) 🎯 RAG CRITICAL
-6. **Task 2.16**: List Detection (12 hours) 🎯 RAG IMPORTANT
-7. **Phase 2.5**: RAG Optimization & Semantic Chunking (100 hours) 🎯
-8. **Phase 3**: Table Detection (already have geometric detector implemented!)
+1. **Task 2.12**: Line Detection (8 hours)
+2. **Task 2.13**: Paragraph Detection (12 hours) 🎯 RAG CRITICAL
+3. **Task 2.14**: Reading Order (12 hours)
+4. **Task 2.15**: Heading Detection (12 hours) 🎯 RAG CRITICAL
+5. **Task 2.16**: List Detection (12 hours) 🎯 RAG IMPORTANT
+6. **Phase 2.5**: RAG Optimization & Semantic Chunking (100 hours) 🎯
+7. **Phase 3**: Table Detection (already have geometric detector implemented!)
 
 **Recent Achievements**:
+- 🎉 **Block Detection** - Task 2.11 complete, groups fragments into spatial blocks
 - 🎉 **Fluent API** - User-friendly chained method API: `tabula.Open("file.pdf").Pages(1,2).ExcludeHeaders().Text()`
 - 🎉 **Character-level PDF spacing fix** - PDFs with per-character fragments now extract correctly
 - 🎉 **Header/footer detection** - Task 2.10 complete, page numbers and repeating text filtered
