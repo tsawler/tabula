@@ -359,13 +359,26 @@ func (e *Extractor) extractWithParagraphs(fragments []text.TextFragment, page *p
 	roDetector := layout.NewReadingOrderDetector()
 	roResult := roDetector.Detect(fragments, width, height)
 
-	if roResult == nil || len(roResult.Lines) == 0 {
-		return ""
+	// Get lines - either from reading order result or directly from line detector
+	var lines []layout.Line
+	if roResult != nil && len(roResult.Lines) > 0 {
+		lines = roResult.Lines
+	} else {
+		// Fallback to direct line detection for simple documents
+		// (e.g., when column detection filters out all content)
+		lineDetector := layout.NewLineDetector()
+		lineLayout := lineDetector.Detect(fragments, width, height)
+		lines = lineLayout.Lines
 	}
 
-	// Detect paragraphs from reading-order lines
+	if len(lines) == 0 {
+		// Last resort: use simple text assembly
+		return e.assembleText(fragments)
+	}
+
+	// Detect paragraphs from lines
 	paraDetector := layout.NewParagraphDetector()
-	paraLayout := paraDetector.Detect(roResult.Lines, width, height)
+	paraLayout := paraDetector.Detect(lines, width, height)
 
 	// Build text by joining lines within paragraphs with spaces
 	var result strings.Builder
