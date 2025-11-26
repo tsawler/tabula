@@ -302,8 +302,9 @@ func (d *ParagraphDetector) groupIntoParagraphs(lines []Line, avgLineSpacing, av
 			isNewParagraph = true
 		}
 
-		// 3. Alignment change
-		if line.Alignment != prevLine.Alignment && line.Alignment != AlignUnknown && prevLine.Alignment != AlignUnknown {
+		// 3. Significant alignment change
+		// Don't break on minor alignment differences (left/justified are often mixed in body text)
+		if isSignificantAlignmentChange(prevLine.Alignment, line.Alignment) {
 			isNewParagraph = true
 		}
 
@@ -482,6 +483,38 @@ func (d *ParagraphDetector) detectDominantAlignment(lines []Line) LineAlignment 
 	}
 
 	return dominant
+}
+
+// isSignificantAlignmentChange returns true if the alignment change is significant enough
+// to indicate a paragraph break. Minor changes (left/justified) are ignored since they
+// commonly occur within the same paragraph (e.g., short end-of-paragraph lines in justified text)
+func isSignificantAlignmentChange(prev, curr LineAlignment) bool {
+	// Unknown alignments don't trigger breaks
+	if prev == AlignUnknown || curr == AlignUnknown {
+		return false
+	}
+
+	// Same alignment - no change
+	if prev == curr {
+		return false
+	}
+
+	// Left and Justified are compatible (common in body text)
+	if (prev == AlignLeft || prev == AlignJustified) && (curr == AlignLeft || curr == AlignJustified) {
+		return false
+	}
+
+	// Center to/from anything else is significant
+	if prev == AlignCenter || curr == AlignCenter {
+		return true
+	}
+
+	// Right to/from anything else is significant
+	if prev == AlignRight || curr == AlignRight {
+		return true
+	}
+
+	return true
 }
 
 // isListItem checks if text starts with a list item pattern

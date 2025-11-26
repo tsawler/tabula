@@ -184,8 +184,8 @@ func (e *Extractor) Text() (string, error) {
 		return "", err
 	}
 
-	// Collect all page data for header/footer detection
-	allPages := make([]extractedPage, 0, len(pageIndices))
+	// Collect requested page data
+	requestedPages := make([]extractedPage, 0, len(pageIndices))
 
 	for _, pageNum := range pageIndices {
 		page, err := e.reader.GetPage(pageNum)
@@ -198,22 +198,25 @@ func (e *Extractor) Text() (string, error) {
 			return "", fmt.Errorf("page %d: %w", pageNum+1, err)
 		}
 
-		allPages = append(allPages, extractedPage{
+		requestedPages = append(requestedPages, extractedPage{
 			index:     pageNum,
 			fragments: fragments,
 			page:      page,
 		})
 	}
 
-	// Detect headers/footers across all pages if needed
+	// Detect headers/footers if needed (requires ALL pages for pattern detection)
 	var headerFooterResult *layout.HeaderFooterResult
 	if e.options.excludeHeaders || e.options.excludeFooters {
-		headerFooterResult = e.detectHeaderFooter(allPages)
+		allPages, err := e.collectAllPages()
+		if err == nil && len(allPages) > 0 {
+			headerFooterResult = e.detectHeaderFooter(allPages)
+		}
 	}
 
-	// Process each page
+	// Process each requested page
 	var result strings.Builder
-	for i, pd := range allPages {
+	for i, pd := range requestedPages {
 		fragments := pd.fragments
 
 		// Filter headers/footers
@@ -298,6 +301,229 @@ func (e *Extractor) PageCount() (int, error) {
 	return e.reader.PageCount()
 }
 
+// Lines extracts and returns detected text lines with position and alignment info.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	lines, err := tabula.Open("document.pdf").Lines()
+//	for _, line := range lines {
+//	    fmt.Printf("%s (align: %s)\n", line.Text, line.Alignment)
+//	}
+func (e *Extractor) Lines() ([]layout.Line, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+
+	if err := e.ensureReader(); err != nil {
+		return nil, err
+	}
+	defer e.Close()
+
+	pageIndices, err := e.resolvePages()
+	if err != nil {
+		return nil, err
+	}
+
+	// Collect requested page data
+	requestedPages := make([]extractedPage, 0, len(pageIndices))
+	for _, pageNum := range pageIndices {
+		page, err := e.reader.GetPage(pageNum)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		fragments, err := e.reader.ExtractTextFragments(page)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		requestedPages = append(requestedPages, extractedPage{
+			index:     pageNum,
+			fragments: fragments,
+			page:      page,
+		})
+	}
+
+	// Detect headers/footers if needed (requires ALL pages for pattern detection)
+	var headerFooterResult *layout.HeaderFooterResult
+	if e.options.excludeHeaders || e.options.excludeFooters {
+		allPages, err := e.collectAllPages()
+		if err == nil && len(allPages) > 0 {
+			headerFooterResult = e.detectHeaderFooter(allPages)
+		}
+	}
+
+	// Process each requested page and collect lines
+	var allLines []layout.Line
+	lineDetector := layout.NewLineDetector()
+
+	for _, pd := range requestedPages {
+		fragments := pd.fragments
+
+		// Filter headers/footers
+		if headerFooterResult != nil {
+			height, _ := pd.page.Height()
+			fragments = headerFooterResult.FilterFragments(pd.index, fragments, height)
+		}
+
+		width, _ := pd.page.Width()
+		height, _ := pd.page.Height()
+
+		lineLayout := lineDetector.Detect(fragments, width, height)
+		allLines = append(allLines, lineLayout.Lines...)
+	}
+
+	return allLines, nil
+}
+
+// Paragraphs extracts and returns detected paragraphs with style information.
+// This uses reading order detection to handle multi-column layouts correctly.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	paragraphs, err := tabula.Open("document.pdf").
+//	    ExcludeHeaders().
+//	    ExcludeFooters().
+//	    Paragraphs()
+//	for _, para := range paragraphs {
+//	    fmt.Printf("[%s] %s\n", para.Style, para.Text)
+//	}
+func (e *Extractor) Paragraphs() ([]layout.Paragraph, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+
+	if err := e.ensureReader(); err != nil {
+		return nil, err
+	}
+	defer e.Close()
+
+	pageIndices, err := e.resolvePages()
+	if err != nil {
+		return nil, err
+	}
+
+	// Collect requested page data
+	requestedPages := make([]extractedPage, 0, len(pageIndices))
+	for _, pageNum := range pageIndices {
+		page, err := e.reader.GetPage(pageNum)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		fragments, err := e.reader.ExtractTextFragments(page)
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		requestedPages = append(requestedPages, extractedPage{
+			index:     pageNum,
+			fragments: fragments,
+			page:      page,
+		})
+	}
+
+	// Detect headers/footers if needed (requires ALL pages for pattern detection)
+	var headerFooterResult *layout.HeaderFooterResult
+	if e.options.excludeHeaders || e.options.excludeFooters {
+		allPages, err := e.collectAllPages()
+		if err == nil && len(allPages) > 0 {
+			headerFooterResult = e.detectHeaderFooter(allPages)
+		}
+	}
+
+	// Process each requested page and collect paragraphs
+	var allParagraphs []layout.Paragraph
+	roDetector := layout.NewReadingOrderDetector()
+
+	for _, pd := range requestedPages {
+		fragments := pd.fragments
+
+		// Filter headers/footers
+		if headerFooterResult != nil {
+			height, _ := pd.page.Height()
+			fragments = headerFooterResult.FilterFragments(pd.index, fragments, height)
+		}
+
+		width, _ := pd.page.Width()
+		height, _ := pd.page.Height()
+
+		// Use reading order detection for multi-column support
+		roResult := roDetector.Detect(fragments, width, height)
+		paraLayout := roResult.GetParagraphs()
+		allParagraphs = append(allParagraphs, paraLayout.Paragraphs...)
+	}
+
+	return allParagraphs, nil
+}
+
+// ReadingOrder extracts and returns detailed reading order analysis.
+// This includes column detection, section boundaries, and proper text ordering
+// for multi-column documents.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	ro, err := tabula.Open("newspaper.pdf").Pages(1).ReadingOrder()
+//	fmt.Printf("Columns: %d\n", ro.ColumnCount)
+//	for _, section := range ro.Sections {
+//	    fmt.Printf("Section: %s\n", section.Type)
+//	}
+func (e *Extractor) ReadingOrder() (*layout.ReadingOrderResult, error) {
+	if e.err != nil {
+		return nil, e.err
+	}
+
+	if err := e.ensureReader(); err != nil {
+		return nil, err
+	}
+	defer e.Close()
+
+	pageIndices, err := e.resolvePages()
+	if err != nil {
+		return nil, err
+	}
+
+	// For ReadingOrder, we only process the first page if multiple are specified
+	// since reading order is per-page
+	if len(pageIndices) == 0 {
+		return nil, fmt.Errorf("no pages to process")
+	}
+
+	pageNum := pageIndices[0]
+	page, err := e.reader.GetPage(pageNum)
+	if err != nil {
+		return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+	}
+
+	fragments, err := e.reader.ExtractTextFragments(page)
+	if err != nil {
+		return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+	}
+
+	// For header/footer filtering, we need ALL pages for pattern detection
+	if e.options.excludeHeaders || e.options.excludeFooters {
+		allPages, err := e.collectAllPages()
+		if err == nil && len(allPages) > 0 {
+			headerFooterResult := e.detectHeaderFooter(allPages)
+			if headerFooterResult != nil {
+				height, _ := page.Height()
+				fragments = headerFooterResult.FilterFragments(pageNum, fragments, height)
+			}
+		}
+	}
+
+	width, _ := page.Width()
+	height, _ := page.Height()
+
+	roDetector := layout.NewReadingOrderDetector()
+	result := roDetector.Detect(fragments, width, height)
+
+	return result, nil
+}
+
 // ============================================================================
 // Internal helpers
 // ============================================================================
@@ -355,6 +581,36 @@ func (e *Extractor) detectHeaderFooter(allPages []extractedPage) *layout.HeaderF
 
 	detector := layout.NewHeaderFooterDetector()
 	return detector.Detect(pageFragments)
+}
+
+// collectAllPages collects fragment data from ALL pages in the document.
+// This is needed for header/footer detection which requires multi-page patterns.
+func (e *Extractor) collectAllPages() ([]extractedPage, error) {
+	pageCount, err := e.reader.PageCount()
+	if err != nil {
+		return nil, err
+	}
+
+	allPages := make([]extractedPage, 0, pageCount)
+	for i := 0; i < pageCount; i++ {
+		page, err := e.reader.GetPage(i)
+		if err != nil {
+			continue // Skip pages that can't be read
+		}
+
+		fragments, err := e.reader.ExtractTextFragments(page)
+		if err != nil {
+			continue // Skip pages that can't be extracted
+		}
+
+		allPages = append(allPages, extractedPage{
+			index:     i,
+			fragments: fragments,
+			page:      page,
+		})
+	}
+
+	return allPages, nil
 }
 
 // extractByColumn processes fragments column by column.

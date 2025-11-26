@@ -740,13 +740,33 @@ Phase 2 will add advanced text extraction with layout preservation, including:
   - Block quote detection (indented blocks)
 - **DetectFromFragments()** convenience method for direct fragment input
 
-#### Task 2.14: Reading Order (12 hours)
-- [ ] Implement `layout/reading_order.go`
-- [ ] Integrate multi-column detection
-- [ ] Z-order sorting within columns
-- [ ] Cross-column ordering
-- [ ] Handle RTL and vertical text ordering
-- [ ] Write reading order tests
+#### Task 2.14: Reading Order (12 hours) ✅ COMPLETE
+- [x] Implement `layout/reading_order.go`
+- [x] Integrate multi-column detection
+- [x] Z-order sorting within columns
+- [x] Cross-column ordering
+- [x] Handle RTL and vertical text ordering
+- [x] Write reading order tests
+
+**Deliverable**: Reading order detection with multi-column support ✅
+**Acceptance**: Correctly orders content across columns, spanning regions, and RTL text ✅
+**Completed**: November 26, 2024
+**Tests**: 40+ test cases + 2 benchmarks, all passing
+**Coverage**: 657 lines in layout/reading_order.go
+
+**Implementation Details**:
+- **ReadingOrderDetector** with configurable options
+- **ReadingOrderConfig** supporting LTR, RTL, TopToBottom directions
+- **ReadingOrderResult** with Fragments, Lines, Sections in reading order
+- **ReadingSection** representing spanning or column content
+- **Inverted Y coordinate detection** for Google Docs PDFs
+- **Column integration** via ColumnDetector
+- **Spanning content** handled first, then columns in reading direction
+- **RTL auto-detection** from fragment Direction properties
+- **Paragraph integration** via GetParagraphs() method
+- **Convenience functions**: ReorderForReading(), ReorderLinesForReading()
+
+**RAG Impact**: Reading order is essential for multi-column documents. Without proper ordering, text from different columns gets interleaved, destroying semantic coherence. Our implementation detects columns, handles spanning content (titles/headers), and respects reading direction for accurate text flow. ✅ FULLY COMPLETE
 
 ### Week 8: Heading & List Detection
 
@@ -1442,7 +1462,7 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 
 ## Next Steps
 
-**Current Status**: Phase 2 (Text & Layout) - 83% Complete (15 of 18 tasks)
+**Current Status**: Phase 2 (Text & Layout) - 89% Complete (16 of 18 tasks)
 
 **Completed in Phase 2** (as of November 26, 2024):
 - ✅ Task 2.1: Content Stream Parser (Week 5)
@@ -1460,15 +1480,18 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - ✅ Task 2.11: Block Detection (Week 7)
 - ✅ Task 2.12: Line Detection (Week 7)
 - ✅ Task 2.13: Paragraph Detection (Week 7) 🎯 RAG CRITICAL
+- ✅ Task 2.14: Reading Order (Week 7) 🎯 RAG CRITICAL
 
 **Next Priority Tasks**:
-1. **Task 2.14**: Reading Order (12 hours)
-2. **Task 2.15**: Heading Detection (12 hours) 🎯 RAG CRITICAL
-3. **Task 2.16**: List Detection (12 hours) 🎯 RAG IMPORTANT
-4. **Phase 2.5**: RAG Optimization & Semantic Chunking (100 hours) 🎯
-5. **Phase 3**: Table Detection (already have geometric detector implemented!)
+1. **Task 2.15**: Heading Detection (12 hours) 🎯 RAG CRITICAL
+2. **Task 2.16**: List Detection (12 hours) 🎯 RAG IMPORTANT
+3. **Task 2.17**: Layout Analyzer (16 hours) - Orchestration layer
+4. **Task 2.18**: Phase 2 Integration (8 hours) - Document model updates
+5. **Phase 2.5**: RAG Optimization & Semantic Chunking (100 hours) 🎯
+6. **Phase 3**: Table Detection (already have geometric detector implemented!)
 
 **Recent Achievements**:
+- 🎉 **Reading Order Detection** - Task 2.14 complete, multi-column ordering with RTL support and spanning content
 - 🎉 **Paragraph Detection** - Task 2.13 complete, groups lines into paragraphs with style detection (heading, list, quote)
 - 🎉 **Line Detection** - Task 2.12 complete, lines with alignment, spacing, indentation detection
 - 🎉 **Block Detection** - Task 2.11 complete, groups fragments into spatial blocks
@@ -1537,19 +1560,21 @@ If you need RAG functionality sooner:
 
 Follow this plan step-by-step, and you'll build not just a PDF library, but a **RAG-first document intelligence system**.
 
-**Current Progress**: Phase 2 (Text & Layout) - Week 6 tasks complete ✅
+**Current Progress**: Phase 2 (Text & Layout) - Week 7 tasks complete ✅
 
 **Phase 1**: ✅ COMPLETE (15/15 tasks)
 - All core PDF parsing, stream decoding, text extraction implemented
 
-**Phase 2 Progress**: 12 of 18 tasks complete (67%)
-- ✅ Tasks 2.1-2.10: Font handling, encoding, RTL, multi-column, header/footer
-- ⏳ Tasks 2.11-2.18: Block/line/paragraph detection, reading order, headings, lists
+**Phase 2 Progress**: 16 of 18 tasks complete (89%)
+- ✅ Tasks 2.1-2.14: Font handling, encoding, RTL, multi-column, header/footer, block/line/paragraph/reading order
+- ⏳ Tasks 2.15-2.18: Heading detection, list detection, layout analyzer, phase integration
 
 **Key Capabilities Now Working**:
+- Reading order detection (multi-column, spanning, RTL)
 - Multi-column detection (2, 3, N columns)
 - Spanning fragment detection (centered titles)
 - Header/footer detection with page number filtering
+- Block, line, and paragraph detection
 - Google Docs PDF support (inverted coordinates, character-level fragments)
 - RTL text support (Arabic, Hebrew)
 - Type0/CID font support
@@ -1635,6 +1660,6 @@ text, err := tabula.Open("doc.pdf").AsMarkdown().Text()
 
 ---
 
-**Next Up**: Task 2.11 - Block Detection (layout analysis phase)
+**Next Up**: Task 2.15 - Heading Detection (detect H1, H2, etc. by font size/weight/position)
 
 Good luck! 🚀

@@ -61,6 +61,12 @@ type ColumnConfig struct {
 	// MergeThreshold is the maximum X distance between fragments to consider them same column
 	// Default: 10 points
 	MergeThreshold float64
+
+	// SpanningThreshold is the minimum line width ratio (vs content width) for content
+	// to be considered spanning. Lines with content in gaps but less than this width
+	// are treated as column content (avoids false positives from stray fragments).
+	// Default: 0.35 (line must span 35% of content width - allows centered titles)
+	SpanningThreshold float64
 }
 
 // DefaultColumnConfig returns sensible default configuration
@@ -71,6 +77,7 @@ func DefaultColumnConfig() ColumnConfig {
 		MinGapHeightRatio: 0.5,
 		MaxColumns:        6,
 		MergeThreshold:    10.0,
+		SpanningThreshold: 0.35,
 	}
 }
 
@@ -132,7 +139,8 @@ func (d *ColumnDetector) Detect(fragments []text.TextFragment, pageWidth, pageHe
 
 // separateSpanningFragments separates fragments that span across column gaps
 // from fragments that belong to a single column.
-// A line is "spanning" if it has content INSIDE a gap region (e.g., centered title).
+// A line is "spanning" if it has content INSIDE a gap region (e.g., centered title)
+// AND the line spans a significant width (to avoid false positives from stray fragments).
 // Multi-column lines have content on BOTH SIDES of gaps but NOT inside them.
 func (d *ColumnDetector) separateSpanningFragments(fragments []text.TextFragment, gaps []Gap) (regular, spanning []text.TextFragment) {
 	if len(fragments) == 0 || len(gaps) == 0 {
@@ -142,11 +150,38 @@ func (d *ColumnDetector) separateSpanningFragments(fragments []text.TextFragment
 	// Group fragments by Y position (lines)
 	lines := groupFragmentsIntoLines(fragments)
 
+	// Calculate total width span of all fragments to estimate page content width
+	pageLeft, pageRight := float64(1e9), float64(0)
+	for _, frag := range fragments {
+		if frag.X < pageLeft {
+			pageLeft = frag.X
+		}
+		if frag.X+frag.Width > pageRight {
+			pageRight = frag.X + frag.Width
+		}
+	}
+	contentWidth := pageRight - pageLeft
+
 	// Check each line to see if it has content in any gap region
 	for _, line := range lines {
 		if len(line) == 0 {
 			continue
 		}
+
+		// Calculate line extent (min X to max X+Width of non-whitespace fragments)
+		lineLeft, lineRight := float64(1e9), float64(0)
+		for _, frag := range line {
+			if isWhitespaceOnly(frag.Text) {
+				continue
+			}
+			if frag.X < lineLeft {
+				lineLeft = frag.X
+			}
+			if frag.X+frag.Width > lineRight {
+				lineRight = frag.X + frag.Width
+			}
+		}
+		lineWidth := lineRight - lineLeft
 
 		// Check if any non-whitespace fragment on this line has its CENTER in a gap region
 		// (edge overlaps are not enough - column content at edges can slightly overlap)
@@ -170,14 +205,81 @@ func (d *ColumnDetector) separateSpanningFragments(fragments []text.TextFragment
 			}
 		}
 
-		if lineSpansGap {
+		// Only consider it spanning if:
+		// 1. It has content in a gap region, AND
+		// 2. The line width is at least SpanningThreshold of total content width
+		//    This filters out stray fragments that happen to fall in gap regions
+		isSpanning := lineSpansGap && lineWidth > contentWidth*d.config.SpanningThreshold
+
+		if isSpanning {
 			spanning = append(spanning, line...)
 		} else {
 			regular = append(regular, line...)
 		}
 	}
 
+	// Additional filter: if spanning content looks like stray body text, move it to regular
+	// Spanning content like titles should be at distinct Y positions from body content
+	spanning = filterStraySpanningContent(spanning, regular)
+
 	return regular, spanning
+}
+
+// filterStraySpanningContent moves spanning lines back to regular if they appear to be
+// stray body text rather than actual titles/headers. Body text that spans gaps is unusual
+// and often indicates incorrect gap detection rather than true spanning content.
+func filterStraySpanningContent(spanning, regular []text.TextFragment) []text.TextFragment {
+	if len(spanning) == 0 {
+		return spanning
+	}
+
+	// Group spanning fragments by Y (into lines)
+	spanningLines := groupFragmentsIntoLines(spanning)
+
+	// Find the Y position range of regular content
+	if len(regular) == 0 {
+		return spanning
+	}
+
+	regularMinY, regularMaxY := float64(1e9), float64(0)
+	for _, frag := range regular {
+		if frag.Y < regularMinY {
+			regularMinY = frag.Y
+		}
+		if frag.Y > regularMaxY {
+			regularMaxY = frag.Y
+		}
+	}
+
+	// Keep only spanning lines that are clearly separate from body content
+	// (at least 20 points away from the regular content Y range)
+	var filteredSpanning []text.TextFragment
+	tolerance := 20.0
+
+	for _, line := range spanningLines {
+		if len(line) == 0 {
+			continue
+		}
+
+		lineY := line[0].Y
+
+		// Line is valid spanning if it's above or below the main body content
+		isAboveBody := lineY < regularMinY-tolerance
+		isBelowBody := lineY > regularMaxY+tolerance
+
+		// Also consider it spanning if it's near the top of regular content
+		// (within first 5% of content Y range - header position)
+		contentRange := regularMaxY - regularMinY
+		isNearTop := contentRange > 0 && lineY < regularMinY+contentRange*0.05
+
+		if isAboveBody || isBelowBody || isNearTop {
+			filteredSpanning = append(filteredSpanning, line...)
+		}
+		// Lines in the middle of body content are moved back to regular implicitly
+		// by not being added to filteredSpanning
+	}
+
+	return filteredSpanning
 }
 
 // Gap represents a vertical whitespace gap
