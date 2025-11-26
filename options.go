@@ -12,6 +12,7 @@ type ExtractOptions struct {
 	// Processing options
 	byColumn       bool
 	preserveLayout bool
+	joinParagraphs bool // Join lines within paragraphs with spaces instead of newlines
 }
 
 // defaultOptions returns the default extraction options.
@@ -22,6 +23,7 @@ func defaultOptions() ExtractOptions {
 		excludeFooters: false,
 		byColumn:       false,
 		preserveLayout: false,
+		joinParagraphs: false,
 	}
 }
 
@@ -32,6 +34,7 @@ func (o ExtractOptions) clone() ExtractOptions {
 		excludeFooters: o.excludeFooters,
 		byColumn:       o.byColumn,
 		preserveLayout: o.preserveLayout,
+		joinParagraphs: o.joinParagraphs,
 	}
 
 	// Deep copy pages slice

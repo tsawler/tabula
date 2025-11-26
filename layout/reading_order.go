@@ -203,28 +203,48 @@ func (d *ReadingOrderDetector) detectInvertedY(fragments []text.TextFragment, pa
 		return *d.config.InvertedY
 	}
 
-	// Auto-detect based on content distribution
-	// In standard PDF coords (Y=0 at bottom), most content Y values will be > pageHeight/2
-	// In inverted coords (Y=0 at top), most content Y values will be < pageHeight/2
 	if len(fragments) == 0 {
 		return false
 	}
 
-	aboveMiddle := 0
-	belowMiddle := 0
-	middle := pageHeight / 2
-
+	// Find actual Y coordinate range
+	minY, maxY := fragments[0].Y, fragments[0].Y
 	for _, f := range fragments {
-		if f.Y > middle {
-			aboveMiddle++
-		} else {
-			belowMiddle++
+		if f.Y < minY {
+			minY = f.Y
+		}
+		if f.Y > maxY {
+			maxY = f.Y
 		}
 	}
 
-	// If more content is below the middle (in Y terms), coords are likely inverted
-	// because text would normally be in the upper part of the page
-	return belowMiddle < aboveMiddle
+	// Check if first fragments in document order are at the top or bottom of the Y range.
+	// In most PDFs, content is written top-to-bottom, so the first fragments
+	// should be near the top of the page.
+	// - If first fragments have LOW Y values, then low Y = top (inverted)
+	// - If first fragments have HIGH Y values, then high Y = top (standard)
+
+	// Sample the first few fragments (they're typically the title or first line)
+	sampleSize := 20
+	if sampleSize > len(fragments) {
+		sampleSize = len(fragments)
+	}
+
+	midY := (minY + maxY) / 2
+	firstFragsAboveMid := 0
+	firstFragsBelowMid := 0
+
+	for i := 0; i < sampleSize; i++ {
+		if fragments[i].Y > midY {
+			firstFragsAboveMid++
+		} else {
+			firstFragsBelowMid++
+		}
+	}
+
+	// If first fragments are mostly in the lower half of Y range, coords are inverted
+	// (because first content = top of page = low Y values in inverted coords)
+	return firstFragsBelowMid > firstFragsAboveMid
 }
 
 // detectReadingDirection analyzes fragments to detect the primary reading direction

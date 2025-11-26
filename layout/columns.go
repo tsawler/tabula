@@ -862,6 +862,11 @@ func groupFragmentsIntoLines(fragments []text.TextFragment) [][]text.TextFragmen
 		}
 	}
 
+	// Sort bands by Y position (top to bottom in PDF coordinates = highest Y first)
+	sort.Slice(bands, func(i, j int) bool {
+		return bands[i].y > bands[j].y
+	})
+
 	// Convert bands to lines
 	var lines [][]text.TextFragment
 	for _, band := range bands {

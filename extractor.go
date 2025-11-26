@@ -134,6 +134,34 @@ func (e *Extractor) ExcludeFooters() *Extractor {
 	return newExt
 }
 
+// ExcludeHeadersAndFooters configures the extractor to exclude both
+// detected headers and footers. This is a convenience method equivalent
+// to calling ExcludeHeaders().ExcludeFooters().
+//
+// Example:
+//
+//	text, err := tabula.Open("doc.pdf").ExcludeHeadersAndFooters().Text()
+func (e *Extractor) ExcludeHeadersAndFooters() *Extractor {
+	newExt := e.clone()
+	newExt.options.excludeHeaders = true
+	newExt.options.excludeFooters = true
+	return newExt
+}
+
+// JoinParagraphs configures the extractor to join lines within paragraphs
+// using spaces instead of newlines. This produces cleaner text output where
+// paragraph breaks are preserved but soft line breaks within paragraphs are removed.
+//
+// Example:
+//
+//	text, err := tabula.Open("doc.pdf").JoinParagraphs().Text()
+//	text, err := tabula.Open("doc.pdf").ExcludeHeadersAndFooters().JoinParagraphs().Text()
+func (e *Extractor) JoinParagraphs() *Extractor {
+	newExt := e.clone()
+	newExt.options.joinParagraphs = true
+	return newExt
+}
+
 // ByColumn configures the extractor to process text column by column
 // in reading order, rather than line by line across the full page width.
 // This is useful for multi-column documents like newspapers or academic papers.
@@ -157,6 +185,71 @@ func (e *Extractor) PreserveLayout() *Extractor {
 	newExt := e.clone()
 	newExt.options.preserveLayout = true
 	return newExt
+}
+
+// IsCharacterLevel checks if the first page of the PDF uses character-level
+// text fragments (one character per fragment). This requires special handling
+// for proper text extraction.
+// Note: This reads page 1 to make the determination. The reader remains open.
+//
+// Example:
+//
+//	ext := tabula.Open("document.pdf")
+//	defer ext.Close()
+//	isCharLevel, err := ext.IsCharacterLevel()
+func (e *Extractor) IsCharacterLevel() (bool, error) {
+	if e.err != nil {
+		return false, e.err
+	}
+
+	if err := e.ensureReader(); err != nil {
+		return false, err
+	}
+
+	page, err := e.reader.GetPage(0)
+	if err != nil {
+		return false, fmt.Errorf("reading page 1: %w", err)
+	}
+
+	fragments, err := e.reader.ExtractTextFragments(page)
+	if err != nil {
+		return false, fmt.Errorf("extracting fragments: %w", err)
+	}
+
+	return isCharacterLevel(fragments), nil
+}
+
+// IsMultiColumn checks if the first page of the PDF appears to have a
+// multi-column layout.
+// Note: This reads page 1 to make the determination. The reader remains open.
+//
+// Example:
+//
+//	ext := tabula.Open("newspaper.pdf")
+//	defer ext.Close()
+//	multiCol, err := ext.IsMultiColumn()
+func (e *Extractor) IsMultiColumn() (bool, error) {
+	if e.err != nil {
+		return false, e.err
+	}
+
+	if err := e.ensureReader(); err != nil {
+		return false, err
+	}
+
+	page, err := e.reader.GetPage(0)
+	if err != nil {
+		return false, fmt.Errorf("reading page 1: %w", err)
+	}
+
+	fragments, err := e.reader.ExtractTextFragments(page)
+	if err != nil {
+		return false, fmt.Errorf("extracting fragments: %w", err)
+	}
+
+	width, _ := page.Width()
+	height, _ := page.Height()
+	return detectMultiColumn(fragments, width, height), nil
 }
 
 // ============================================================================
@@ -227,10 +320,19 @@ func (e *Extractor) Text() (string, error) {
 
 		// Extract text
 		var pageText string
-		if e.options.byColumn {
+		if e.options.joinParagraphs {
+			pageText = e.extractWithParagraphs(fragments, pd.page)
+		} else if e.options.byColumn {
 			pageText = e.extractByColumn(fragments, pd.page)
 		} else {
-			pageText = e.assembleText(fragments)
+			// Auto-detect: use reading order if multi-column or character-level
+			width, _ := pd.page.Width()
+			height, _ := pd.page.Height()
+			if isCharacterLevel(fragments) || detectMultiColumn(fragments, width, height) {
+				pageText = e.extractByColumn(fragments, pd.page)
+			} else {
+				pageText = e.assembleText(fragments)
+			}
 		}
 
 		if i > 0 && result.Len() > 0 && len(pageText) > 0 {
@@ -240,6 +342,48 @@ func (e *Extractor) Text() (string, error) {
 	}
 
 	return result.String(), nil
+}
+
+// extractWithParagraphs uses paragraph detection to join lines within paragraphs
+// with spaces instead of newlines, producing cleaner text output.
+// It respects multi-column layouts by using reading order detection.
+func (e *Extractor) extractWithParagraphs(fragments []text.TextFragment, page *pages.Page) string {
+	if len(fragments) == 0 {
+		return ""
+	}
+
+	width, _ := page.Width()
+	height, _ := page.Height()
+
+	// Use reading order detector to handle multi-column layouts
+	roDetector := layout.NewReadingOrderDetector()
+	roResult := roDetector.Detect(fragments, width, height)
+
+	if roResult == nil || len(roResult.Lines) == 0 {
+		return ""
+	}
+
+	// Detect paragraphs from reading-order lines
+	paraDetector := layout.NewParagraphDetector()
+	paraLayout := paraDetector.Detect(roResult.Lines, width, height)
+
+	// Build text by joining lines within paragraphs with spaces
+	var result strings.Builder
+	for i, para := range paraLayout.Paragraphs {
+		if i > 0 {
+			result.WriteString("\n\n")
+		}
+
+		// Join lines within the paragraph with spaces
+		for j, line := range para.Lines {
+			if j > 0 {
+				result.WriteString(" ")
+			}
+			result.WriteString(strings.TrimSpace(line.Text))
+		}
+	}
+
+	return result.String()
 }
 
 // Fragments extracts and returns text fragments with position information.
@@ -946,7 +1090,7 @@ func (e *Extractor) collectAllPages() ([]extractedPage, error) {
 	return allPages, nil
 }
 
-// extractByColumn processes fragments column by column.
+// extractByColumn processes fragments column by column using reading order detection.
 func (e *Extractor) extractByColumn(fragments []text.TextFragment, page *pages.Page) string {
 	if len(fragments) == 0 {
 		return ""
@@ -955,14 +1099,39 @@ func (e *Extractor) extractByColumn(fragments []text.TextFragment, page *pages.P
 	width, _ := page.Width()
 	height, _ := page.Height()
 
-	detector := layout.NewColumnDetector()
-	columnLayout := detector.Detect(fragments, width, height)
+	// Use reading order detector which handles multi-column layouts correctly
+	roDetector := layout.NewReadingOrderDetector()
+	roResult := roDetector.Detect(fragments, width, height)
 
-	if columnLayout == nil || columnLayout.IsSingleColumn() {
+	if roResult == nil || len(roResult.Sections) == 0 {
 		return e.assembleText(fragments)
 	}
 
-	return columnLayout.GetText()
+	// Build text from sections in reading order
+	var result strings.Builder
+
+	for si, section := range roResult.Sections {
+		if si > 0 && result.Len() > 0 {
+			result.WriteString("\n\n")
+		}
+
+		// Output lines within each section
+		for li, line := range section.Lines {
+			if li > 0 {
+				// Check vertical gap for paragraph breaks within section
+				prevLine := section.Lines[li-1]
+				gap := prevLine.BBox.Y - (line.BBox.Y + line.BBox.Height)
+				if gap > line.BBox.Height*0.8 {
+					result.WriteString("\n\n")
+				} else {
+					result.WriteString("\n")
+				}
+			}
+			result.WriteString(strings.TrimSpace(line.Text))
+		}
+	}
+
+	return result.String()
 }
 
 // assembleText combines fragments into text with appropriate spacing.
@@ -1028,4 +1197,39 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+// isCharacterLevel detects if fragments appear to be character-level
+// (one character per fragment) which requires special handling.
+// Returns true if more than 60% of fragments contain single characters.
+func isCharacterLevel(fragments []text.TextFragment) bool {
+	if len(fragments) < 10 {
+		return false // Not enough data to determine
+	}
+
+	singleCharCount := 0
+	for _, frag := range fragments {
+		// Trim whitespace and check length
+		text := strings.TrimSpace(frag.Text)
+		if len(text) <= 1 {
+			singleCharCount++
+		}
+	}
+
+	// If more than 60% are single characters, it's character-level
+	return float64(singleCharCount)/float64(len(fragments)) > 0.6
+}
+
+// detectMultiColumn checks if fragments appear to be laid out in multiple columns.
+// Uses the ReadingOrderDetector to perform proper column analysis.
+func detectMultiColumn(fragments []text.TextFragment, pageWidth, pageHeight float64) bool {
+	if len(fragments) < 20 || pageWidth == 0 {
+		return false
+	}
+
+	// Use the reading order detector which has sophisticated column detection
+	roDetector := layout.NewReadingOrderDetector()
+	result := roDetector.Detect(fragments, pageWidth, pageHeight)
+
+	return result != nil && result.ColumnCount > 1
 }
