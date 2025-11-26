@@ -160,20 +160,73 @@ func (d *HeaderFooterDetector) extractCandidates(pages []PageFragments, regionTy
 	var candidates []candidate
 
 	for _, page := range pages {
+		if len(page.Fragments) == 0 {
+			continue
+		}
+
+		// Compute actual content bounds
+		minY, maxY := page.Fragments[0].Y, page.Fragments[0].Y
+		for _, frag := range page.Fragments {
+			if frag.Y < minY {
+				minY = frag.Y
+			}
+			if frag.Y+frag.Height > maxY {
+				maxY = frag.Y + frag.Height
+			}
+		}
+		contentHeight := maxY - minY
+		if contentHeight <= 0 {
+			contentHeight = page.PageHeight
+		}
+
+		// Detect coordinate system:
+		// - Standard PDF: Y increases upward (high Y = top of page)
+		// - Google Docs style: Y increases downward and may exceed page height
+		// Heuristic: if maxY > pageHeight, assume inverted coordinates
+		invertedCoords := maxY > page.PageHeight
+
+		// Determine reference bounds for header/footer detection
+		// Use page bounds when content is within page, otherwise use content bounds
+		refMinY, refMaxY := 0.0, page.PageHeight
+		headerRegion := d.config.HeaderRegionHeight
+		footerRegion := d.config.FooterRegionHeight
+
+		if invertedCoords {
+			// Content extends beyond page - use content bounds with scaled regions
+			refMinY, refMaxY = minY, maxY
+			scale := contentHeight / page.PageHeight
+			headerRegion *= scale
+			footerRegion *= scale
+		}
+
 		for _, frag := range page.Fragments {
 			var inRegion bool
 			var normalizedY float64
 
 			if regionType == Header {
-				// Header: top of page (high Y values in PDF coordinates)
-				distFromTop := page.PageHeight - (frag.Y + frag.Height)
-				inRegion = distFromTop < d.config.HeaderRegionHeight
-				normalizedY = distFromTop
+				if invertedCoords {
+					// Inverted: low Y = top of page, so header is near refMinY
+					distFromTop := frag.Y - refMinY
+					inRegion = distFromTop < headerRegion
+					normalizedY = distFromTop
+				} else {
+					// Standard: high Y = top of page, so header is near refMaxY
+					distFromTop := refMaxY - (frag.Y + frag.Height)
+					inRegion = distFromTop < headerRegion
+					normalizedY = distFromTop
+				}
 			} else {
-				// Footer: bottom of page (low Y values in PDF coordinates)
-				distFromBottom := frag.Y
-				inRegion = distFromBottom < d.config.FooterRegionHeight
-				normalizedY = distFromBottom
+				if invertedCoords {
+					// Inverted: high Y = bottom of page, so footer is near refMaxY
+					distFromBottom := refMaxY - (frag.Y + frag.Height)
+					inRegion = distFromBottom < footerRegion
+					normalizedY = distFromBottom
+				} else {
+					// Standard: low Y = bottom of page, so footer is near refMinY
+					distFromBottom := frag.Y - refMinY
+					inRegion = distFromBottom < footerRegion
+					normalizedY = distFromBottom
+				}
 			}
 
 			if inRegion {
@@ -214,6 +267,12 @@ func (d *HeaderFooterDetector) findRepeatingPatterns(candidates []candidate, pag
 	}
 
 	for normalizedText, group := range groups {
+		// Skip very short text that isn't a page number
+		// Single letters/characters are likely fragments of larger text
+		if len(normalizedText) <= 2 && !isPageNumberPattern(normalizedText) {
+			continue
+		}
+
 		// Check if this text appears on enough pages
 		pageSet := make(map[int]bool)
 		for _, c := range group {
@@ -449,14 +508,41 @@ func parsePageNumber(s string, result *int) (bool, error) {
 
 // FilterFragments removes header/footer fragments from a page
 func (r *HeaderFooterResult) FilterFragments(pageIndex int, fragments []text.TextFragment, pageHeight float64) []text.TextFragment {
-	if r == nil {
+	if r == nil || len(fragments) == 0 {
 		return fragments
+	}
+
+	// Compute content bounds for position checking
+	minY, maxY := fragments[0].Y, fragments[0].Y
+	for _, frag := range fragments {
+		if frag.Y < minY {
+			minY = frag.Y
+		}
+		if frag.Y+frag.Height > maxY {
+			maxY = frag.Y + frag.Height
+		}
+	}
+	contentHeight := maxY - minY
+	if contentHeight <= 0 {
+		contentHeight = pageHeight
+	}
+
+	// Detect coordinate system
+	invertedCoords := maxY > pageHeight
+
+	// Scale regions if content extends beyond page
+	headerRegion := r.Config.HeaderRegionHeight
+	footerRegion := r.Config.FooterRegionHeight
+	if contentHeight > pageHeight {
+		scale := contentHeight / pageHeight
+		headerRegion *= scale
+		footerRegion *= scale
 	}
 
 	var filtered []text.TextFragment
 
 	for _, frag := range fragments {
-		if r.isInHeaderFooter(pageIndex, frag, pageHeight) {
+		if r.isInHeaderFooter(pageIndex, frag, minY, maxY, headerRegion, footerRegion, invertedCoords) {
 			continue
 		}
 		filtered = append(filtered, frag)
@@ -466,17 +552,20 @@ func (r *HeaderFooterResult) FilterFragments(pageIndex int, fragments []text.Tex
 }
 
 // isInHeaderFooter checks if a fragment is in a detected header/footer region
-func (r *HeaderFooterResult) isInHeaderFooter(pageIndex int, frag text.TextFragment, pageHeight float64) bool {
+func (r *HeaderFooterResult) isInHeaderFooter(pageIndex int, frag text.TextFragment, minY, maxY, headerRegion, footerRegion float64, invertedCoords bool) bool {
 	// Check headers
 	for _, header := range r.Headers {
 		if !containsPage(header.PageIndices, pageIndex) {
 			continue
 		}
 
-		// Check if fragment is in header region
-		distFromTop := pageHeight - (frag.Y + frag.Height)
-		if distFromTop < r.Config.HeaderRegionHeight {
-			// Check text similarity
+		var distFromTop float64
+		if invertedCoords {
+			distFromTop = frag.Y - minY
+		} else {
+			distFromTop = maxY - (frag.Y + frag.Height)
+		}
+		if distFromTop < headerRegion {
 			if textsMatch(frag.Text, header.Text, header.IsPageNumber) {
 				return true
 			}
@@ -489,9 +578,13 @@ func (r *HeaderFooterResult) isInHeaderFooter(pageIndex int, frag text.TextFragm
 			continue
 		}
 
-		// Check if fragment is in footer region
-		if frag.Y < r.Config.FooterRegionHeight {
-			// Check text similarity
+		var distFromBottom float64
+		if invertedCoords {
+			distFromBottom = maxY - (frag.Y + frag.Height)
+		} else {
+			distFromBottom = frag.Y - minY
+		}
+		if distFromBottom < footerRegion {
 			if textsMatch(frag.Text, footer.Text, footer.IsPageNumber) {
 				return true
 			}

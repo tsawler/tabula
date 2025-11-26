@@ -26,6 +26,11 @@ type ColumnLayout struct {
 	// Detected columns (sorted left to right)
 	Columns []Column
 
+	// SpanningFragments are fragments that span across column gaps
+	// (e.g., centered titles, full-width headers)
+	// These are excluded from column content and stored separately
+	SpanningFragments []text.TextFragment
+
 	// Page dimensions
 	PageWidth  float64
 	PageHeight float64
@@ -107,18 +112,72 @@ func (d *ColumnDetector) Detect(fragments []text.TextFragment, pageWidth, pageHe
 		return d.singleColumnLayout(fragments, pageWidth, pageHeight)
 	}
 
-	// Create columns based on gaps
-	columns := d.createColumnsFromGaps(fragments, gaps, pageWidth, pageHeight)
+	// Separate spanning fragments (those that cross gaps) from regular fragments
+	regularFragments, spanningFragments := d.separateSpanningFragments(fragments, gaps)
+
+	// Create columns based on gaps using only regular fragments
+	columns := d.createColumnsFromGaps(regularFragments, gaps, pageWidth, pageHeight)
 
 	// Validate and possibly merge columns
 	columns = d.validateColumns(columns)
 
 	return &ColumnLayout{
-		Columns:    columns,
-		PageWidth:  pageWidth,
-		PageHeight: pageHeight,
-		Config:     d.config,
+		Columns:           columns,
+		SpanningFragments: spanningFragments,
+		PageWidth:         pageWidth,
+		PageHeight:        pageHeight,
+		Config:            d.config,
 	}
+}
+
+// separateSpanningFragments separates fragments that span across column gaps
+// from fragments that belong to a single column.
+// A line is "spanning" if it has content INSIDE a gap region (e.g., centered title).
+// Multi-column lines have content on BOTH SIDES of gaps but NOT inside them.
+func (d *ColumnDetector) separateSpanningFragments(fragments []text.TextFragment, gaps []Gap) (regular, spanning []text.TextFragment) {
+	if len(fragments) == 0 || len(gaps) == 0 {
+		return fragments, nil
+	}
+
+	// Group fragments by Y position (lines)
+	lines := groupFragmentsIntoLines(fragments)
+
+	// Check each line to see if it has content in any gap region
+	for _, line := range lines {
+		if len(line) == 0 {
+			continue
+		}
+
+		// Check if any non-whitespace fragment on this line has its CENTER in a gap region
+		// (edge overlaps are not enough - column content at edges can slightly overlap)
+		// Whitespace is ignored because trailing spaces can end up in gap regions
+		lineSpansGap := false
+		for _, gap := range gaps {
+			for _, frag := range line {
+				// Skip whitespace-only fragments
+				if isWhitespaceOnly(frag.Text) {
+					continue
+				}
+				fragCenter := frag.X + frag.Width/2
+				// Fragment spans gap if its center is inside the gap region
+				if fragCenter > gap.Left && fragCenter < gap.Right {
+					lineSpansGap = true
+					break
+				}
+			}
+			if lineSpansGap {
+				break
+			}
+		}
+
+		if lineSpansGap {
+			spanning = append(spanning, line...)
+		} else {
+			regular = append(regular, line...)
+		}
+	}
+
+	return regular, spanning
 }
 
 // Gap represents a vertical whitespace gap
@@ -149,51 +208,109 @@ func (g Gap) Center() float64 {
 	return (g.Left + g.Right) / 2
 }
 
-// findVerticalGaps finds significant vertical whitespace gaps
+// findVerticalGaps finds significant vertical whitespace gaps using density analysis
+// This approach handles documents with spanning headers/titles that cross column boundaries
 func (d *ColumnDetector) findVerticalGaps(fragments []text.TextFragment, pageWidth, pageHeight float64) []Gap {
 	if len(fragments) == 0 {
 		return nil
 	}
 
-	// Build a list of horizontal "slabs" - the X ranges covered by text
-	// at different Y levels
+	// Build histogram of fragment density across X axis
+	// Use 5-point buckets for good resolution
+	bucketSize := 5.0
+	numBuckets := int(pageWidth/bucketSize) + 1
+	histogram := make([]int, numBuckets)
 
-	// Collect all X ranges
-	var slabs []slab
+	// Find X range of actual content
+	minX, maxX := fragments[0].X, fragments[0].X+fragments[0].Width
 	for _, f := range fragments {
-		slabs = append(slabs, slab{
-			left:  f.X,
-			right: f.X + f.Width,
-		})
+		if f.X < minX {
+			minX = f.X
+		}
+		if f.X+f.Width > maxX {
+			maxX = f.X + f.Width
+		}
+
+		// Count fragment in buckets it spans
+		startBucket := int(f.X / bucketSize)
+		endBucket := int((f.X + f.Width) / bucketSize)
+		if startBucket < 0 {
+			startBucket = 0
+		}
+		if endBucket >= numBuckets {
+			endBucket = numBuckets - 1
+		}
+		for b := startBucket; b <= endBucket; b++ {
+			histogram[b]++
+		}
 	}
 
-	// Sort by left edge
-	sort.Slice(slabs, func(i, j int) bool {
-		return slabs[i].left < slabs[j].left
-	})
+	// Find average density in content area
+	startBucket := int(minX / bucketSize)
+	endBucket := int(maxX / bucketSize)
+	if startBucket < 0 {
+		startBucket = 0
+	}
+	if endBucket >= numBuckets {
+		endBucket = numBuckets - 1
+	}
 
-	// Merge overlapping slabs to get covered regions
-	merged := mergeSlabs(slabs)
+	totalDensity := 0
+	contentBuckets := 0
+	for b := startBucket; b <= endBucket; b++ {
+		totalDensity += histogram[b]
+		contentBuckets++
+	}
+	avgDensity := float64(totalDensity) / float64(contentBuckets)
 
-	// Find gaps between merged regions
+	// Find valleys (low-density regions) that could be column gaps
+	// A valley must have density < 20% of average AND span at least MinGapWidth
+	densityThreshold := avgDensity * 0.2
 	var gaps []Gap
-	for i := 0; i < len(merged)-1; i++ {
-		gapLeft := merged[i].right
-		gapRight := merged[i+1].left
-		gapWidth := gapRight - gapLeft
 
-		if gapWidth >= d.config.MinGapWidth {
-			// Verify this gap extends vertically
-			gapExtent := d.measureGapVerticalExtent(fragments, gapLeft, gapRight, pageHeight)
+	inValley := false
+	valleyStart := 0
 
-			if gapExtent >= d.config.MinGapHeightRatio {
+	for b := startBucket; b <= endBucket; b++ {
+		isLow := float64(histogram[b]) < densityThreshold
+
+		if isLow && !inValley {
+			// Start of a valley
+			inValley = true
+			valleyStart = b
+		} else if !isLow && inValley {
+			// End of a valley
+			inValley = false
+			valleyEnd := b
+
+			gapLeft := float64(valleyStart) * bucketSize
+			gapRight := float64(valleyEnd) * bucketSize
+			gapWidth := gapRight - gapLeft
+
+			if gapWidth >= d.config.MinGapWidth {
 				gaps = append(gaps, Gap{
 					Left:   gapLeft,
 					Right:  gapRight,
-					Top:    pageHeight, // Full page for now
+					Top:    pageHeight,
 					Bottom: 0,
 				})
 			}
+		}
+	}
+
+	// Handle valley at end
+	if inValley {
+		gapLeft := float64(valleyStart) * bucketSize
+		gapRight := float64(endBucket) * bucketSize
+		gapWidth := gapRight - gapLeft
+
+		if gapWidth >= d.config.MinGapWidth {
+			gaps = append(gaps, Gap{
+				Left:   gapLeft,
+				Right:  gapRight,
+				Top:    pageHeight,
+				Bottom: 0,
+			})
 		}
 	}
 
@@ -332,6 +449,10 @@ func (d *ColumnDetector) singleColumnLayout(fragments []text.TextFragment, pageW
 
 // createColumnsFromGaps creates columns based on detected gaps
 func (d *ColumnDetector) createColumnsFromGaps(fragments []text.TextFragment, gaps []Gap, pageWidth, pageHeight float64) []Column {
+	if len(fragments) == 0 {
+		return nil
+	}
+
 	// Sort gaps by X position
 	sort.Slice(gaps, func(i, j int) bool {
 		return gaps[i].Left < gaps[j].Left
@@ -405,7 +526,7 @@ func (d *ColumnDetector) createColumnsFromGaps(fragments []text.TextFragment, ga
 		}
 	}
 
-	// Update column bbox to actual content
+	// Update column bounding boxes
 	// Note: We preserve document order (order fragments appear in PDF)
 	// rather than sorting by Y, since PDFs typically have content in visual order
 	for i := range columns {
@@ -479,11 +600,25 @@ func fragmentsBBox(fragments []text.TextFragment) model.BBox {
 
 // GetText returns the text content in reading order (column by column, top to bottom)
 func (l *ColumnLayout) GetText() string {
-	if l == nil || len(l.Columns) == 0 {
+	if l == nil {
 		return ""
 	}
 
 	var result string
+
+	// First, output spanning fragments (full-width headers, titles, etc.)
+	// These are typically at the top of the page
+	if len(l.SpanningFragments) > 0 {
+		spanningText := l.getSpanningText()
+		if len(spanningText) > 0 {
+			result += spanningText + "\n\n"
+		}
+	}
+
+	// Then output column content
+	if len(l.Columns) == 0 {
+		return result
+	}
 
 	for colIdx, col := range l.Columns {
 		colText := l.getColumnText(col)
@@ -492,6 +627,43 @@ func (l *ColumnLayout) GetText() string {
 		// Add column separator (double newline between columns)
 		if colIdx < len(l.Columns)-1 && len(colText) > 0 {
 			result += "\n\n"
+		}
+	}
+
+	return result
+}
+
+// getSpanningText returns text from spanning fragments
+func (l *ColumnLayout) getSpanningText() string {
+	if len(l.SpanningFragments) == 0 {
+		return ""
+	}
+
+	// Group spanning fragments into lines
+	lines := groupFragmentsIntoLines(l.SpanningFragments)
+
+	var result string
+	for lineIdx, line := range lines {
+		// Sort fragments within line by X (left to right)
+		sort.Slice(line, func(i, j int) bool {
+			return line[i].X < line[j].X
+		})
+
+		// Assemble line text
+		for i, frag := range line {
+			if i > 0 {
+				prevFrag := line[i-1]
+				gap := frag.X - (prevFrag.X + prevFrag.Width)
+				if gap > frag.Height*0.1 {
+					result += " "
+				}
+			}
+			result += frag.Text
+		}
+
+		// Add line break between lines
+		if lineIdx < len(lines)-1 {
+			result += "\n"
 		}
 	}
 
@@ -557,7 +729,6 @@ func groupFragmentsIntoLines(fragments []text.TextFragment) [][]text.TextFragmen
 	}
 
 	// Group by Y similarity while preserving order
-	// We'll collect unique Y "bands" in order of appearance
 	type yBand struct {
 		y         float64
 		fragments []text.TextFragment
@@ -570,6 +741,9 @@ func groupFragmentsIntoLines(fragments []text.TextFragment) [][]text.TextFragmen
 		found := false
 		for i := range bands {
 			yTolerance := frag.Height * 0.5
+			if yTolerance < 2.0 {
+				yTolerance = 2.0 // Minimum tolerance
+			}
 			if absFloat64(frag.Y-bands[i].y) <= yTolerance {
 				bands[i].fragments = append(bands[i].fragments, frag)
 				found = true
@@ -601,6 +775,16 @@ func absFloat64(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+// isWhitespaceOnly returns true if the string contains only whitespace
+func isWhitespaceOnly(s string) bool {
+	for _, r := range s {
+		if r != ' ' && r != '\t' && r != '\n' && r != '\r' {
+			return false
+		}
+	}
+	return true
 }
 
 // ColumnCount returns the number of detected columns

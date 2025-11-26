@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/tsawler/tabula/core"
+	"github.com/tsawler/tabula/pages"
+	"github.com/tsawler/tabula/text"
 )
 
 // PDFVersion represents a PDF version
@@ -29,7 +31,11 @@ type Reader struct {
 	version    PDFVersion
 	objCache   map[int]core.Object // Cache for loaded objects
 	fileSize   int64
+	pageTree   *pages.PageTree // Cached page tree
 }
+
+// Ensure Reader implements pages.ObjectResolver
+var _ pages.ObjectResolver = (*Reader)(nil)
 
 // NewReader creates a new PDF reader for the given file
 func NewReader(file *os.File) (*Reader, error) {
@@ -288,4 +294,150 @@ func (r *Reader) ClearCache() {
 // CacheSize returns the number of cached objects
 func (r *Reader) CacheSize() int {
 	return len(r.objCache)
+}
+
+// Resolve resolves an object if it's an indirect reference, otherwise returns it as-is
+// Implements pages.ObjectResolver interface
+func (r *Reader) Resolve(obj core.Object) (core.Object, error) {
+	if ref, ok := obj.(core.IndirectRef); ok {
+		return r.ResolveReference(ref)
+	}
+	return obj, nil
+}
+
+// ResolveDeep recursively resolves all indirect references in an object
+// Implements pages.ObjectResolver interface
+func (r *Reader) ResolveDeep(obj core.Object) (core.Object, error) {
+	// First resolve if it's a reference
+	resolved, err := r.Resolve(obj)
+	if err != nil {
+		return nil, err
+	}
+
+	// Recursively resolve based on type
+	switch v := resolved.(type) {
+	case core.Array:
+		result := make(core.Array, len(v))
+		for i, elem := range v {
+			resolvedElem, err := r.ResolveDeep(elem)
+			if err != nil {
+				return nil, err
+			}
+			result[i] = resolvedElem
+		}
+		return result, nil
+
+	case core.Dict:
+		result := make(core.Dict)
+		for key, val := range v {
+			resolvedVal, err := r.ResolveDeep(val)
+			if err != nil {
+				return nil, err
+			}
+			result[key] = resolvedVal
+		}
+		return result, nil
+
+	default:
+		return resolved, nil
+	}
+}
+
+// PageCount returns the number of pages in the PDF
+func (r *Reader) PageCount() (int, error) {
+	if err := r.ensurePageTree(); err != nil {
+		return 0, err
+	}
+	return r.pageTree.Count()
+}
+
+// GetPage returns the page at the given index (0-based)
+func (r *Reader) GetPage(index int) (*pages.Page, error) {
+	if err := r.ensurePageTree(); err != nil {
+		return nil, err
+	}
+	return r.pageTree.GetPage(index)
+}
+
+// ensurePageTree loads the page tree if not already loaded
+func (r *Reader) ensurePageTree() error {
+	if r.pageTree != nil {
+		return nil
+	}
+
+	// Get catalog
+	catalog, err := r.GetCatalog()
+	if err != nil {
+		return fmt.Errorf("failed to get catalog: %w", err)
+	}
+
+	// Get pages dict
+	pagesRef := catalog.Get("Pages")
+	if pagesRef == nil {
+		return fmt.Errorf("catalog missing /Pages entry")
+	}
+
+	pagesObj, err := r.Resolve(pagesRef)
+	if err != nil {
+		return fmt.Errorf("failed to resolve pages: %w", err)
+	}
+
+	pagesDict, ok := pagesObj.(core.Dict)
+	if !ok {
+		return fmt.Errorf("pages is not a dictionary: %T", pagesObj)
+	}
+
+	// Create page tree
+	r.pageTree = pages.NewPageTree(pagesDict, r)
+	return nil
+}
+
+// ExtractTextFragments extracts text fragments from a page
+// This is a convenience method that handles content stream decoding and font registration
+func (r *Reader) ExtractTextFragments(page *pages.Page) ([]text.TextFragment, error) {
+	// Get content streams
+	contents, err := page.Contents()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get contents: %w", err)
+	}
+	if contents == nil {
+		return nil, nil // Empty page
+	}
+
+	// Decode and concatenate all content streams
+	var allData []byte
+	for _, contentObj := range contents {
+		stream, ok := contentObj.(*core.Stream)
+		if !ok {
+			continue
+		}
+		data, err := stream.Decode()
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode content stream: %w", err)
+		}
+		allData = append(allData, data...)
+	}
+
+	if len(allData) == 0 {
+		return nil, nil
+	}
+
+	// Create extractor and register fonts
+	extractor := text.NewExtractor()
+
+	// Register fonts from page resources
+	resolverFunc := func(ref core.IndirectRef) (core.Object, error) {
+		return r.ResolveReference(ref)
+	}
+	if err := extractor.RegisterFontsFromPage(page, resolverFunc); err != nil {
+		// Non-fatal - continue with default font handling
+	}
+
+	// Extract text fragments
+	fragments, err := extractor.ExtractFromBytes(allData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract text: %w", err)
+	}
+
+	return fragments, nil
 }
