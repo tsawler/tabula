@@ -976,18 +976,48 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - Sentence overlap: ~4.1μs/op
 - Apply to 50 chunks: ~37μs/op
 
-#### Task 2.5.4: Chunk Metadata & Context (12 hours) 🎯 RAG CRITICAL
-- [ ] Add rich metadata to each chunk:
+#### Task 2.5.4: Chunk Metadata & Context (12 hours) 🎯 RAG CRITICAL ✅ COMPLETE
+- [x] Add rich metadata to each chunk:
   - Document title
   - Section heading (full path: H1 → H2 → H3)
   - Page number(s)
   - Chunk position in document
   - Element types contained (text, table, list, etc.)
   - Estimated token count
-- [ ] Implement context injection (prepend section heading to chunk text)
-- [ ] Write metadata tests
+- [x] Implement context injection (prepend section heading to chunk text)
+- [x] Write metadata tests
 
 **RAG Impact**: Metadata enables filtering ("only search in section X") and context injection improves retrieval by including the section heading in the chunk.
+
+**Completed**: November 27, 2024
+
+**Implementation** (`rag/metadata.go`):
+- **ContextFormat enum**: None, Bracket, Markdown, Breadcrumb, XML formats for context injection
+- **MetadataConfig**: Configurable options for document title, page numbers, section path inclusion
+- **ChunkMetadata utility methods**:
+  - `ToJSON()`, `ToJSONIndent()`: JSON serialization
+  - `ToMap()`: Map conversion for flexible access
+  - `GetSectionPathString()`: Format section path with custom separator
+  - `GetPageRange()`: Human-readable page range ("p. 5" or "pp. 5-10")
+  - `GetReadingTimeMinutes()`, `GetReadingTimeString()`: Reading time estimation
+  - `IsInSection()`, `IsOnPage()`: Location checking
+  - `ContainsElementType()`: Element type checking
+- **Chunk context methods**:
+  - `GenerateContextText()`: Generate chunk text with configurable context injection
+  - `ToEmbeddingFormat()`: Optimized for embedding generation
+  - `ToSearchableText()`: Plain text for keyword search
+  - `Summary()`: Brief chunk summary
+- **ChunkCollection**: Fluent filtering and search API
+  - `FilterBySection()`, `FilterByPage()`, `FilterByPageRange()`
+  - `FilterByElementType()`, `FilterWithTables()`, `FilterWithLists()`, `FilterWithImages()`
+  - `FilterByMinTokens()`, `FilterByMaxTokens()`
+  - `Search()`: Case-insensitive keyword search
+  - `First()`, `Last()`, `GetByIndex()`, `GetByID()`
+  - `GetAllSections()`, `GetPageRange()`, `GetTotalTokens()`, `GetTotalWords()`
+  - `Statistics()`: Aggregate collection statistics
+
+**Tests**: 40+ test cases covering all functionality
+**Coverage**: 79.5% overall on rag package
 
 #### Task 2.5.5: List & Enumeration Coherence (8 hours) 🎯 RAG IMPORTANT
 - [ ] Detect list intros ("The following features:", "Steps:")
