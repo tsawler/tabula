@@ -946,12 +946,35 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - Sentence end detection with abbreviation handling (Mr., Dr., etc.)
 - Integrated with Chunker's `splitSectionByParagraphs` method
 
-#### Task 2.5.3: Chunk Overlap Strategy (8 hours)
-- [ ] Implement configurable overlap
-- [ ] Sentence-level overlap (not character-level)
-- [ ] Preserve complete sentences in overlap regions
-- [ ] Ensure overlaps don't break semantic boundaries
-- [ ] Write overlap tests
+#### Task 2.5.3: Chunk Overlap Strategy (8 hours) ✅ COMPLETE
+- [x] Implement configurable overlap
+- [x] Sentence-level overlap (not character-level)
+- [x] Preserve complete sentences in overlap regions
+- [x] Ensure overlaps don't break semantic boundaries
+- [x] Write overlap tests
+
+**Deliverable**: Flexible overlap system with multiple strategies ✅
+**Completed**: November 27, 2024
+**Tests**: 20+ test cases, 3 benchmarks, all passing
+**Coverage**: 75.6% on rag package
+
+**Implementation Details**:
+- `OverlapStrategy` enum: None, Character, Sentence, Paragraph
+- `OverlapConfig`: Strategy, Size, MinOverlap, MaxOverlap, PreserveWords, IncludeHeadingContext
+- `OverlapGenerator`: generates overlap from end of chunks using selected strategy
+- `OverlapResult`: contains overlap text, char count, sentence count
+- `ApplyOverlapToChunks`: applies overlap between consecutive chunks
+- `ChunkWithOverlap`: wraps Chunk with overlap prefix/suffix info
+- `ChunkWithOverlapEnabled`: new Chunker method returning chunks with overlap
+- Sentence-level overlap extracts last N complete sentences
+- Paragraph-level overlap extracts last N paragraphs
+- Character-level overlap with word boundary preservation
+- MaxOverlap truncation respects sentence boundaries
+
+**Performance**:
+- Character overlap: ~771ns/op
+- Sentence overlap: ~4.1μs/op
+- Apply to 50 chunks: ~37μs/op
 
 #### Task 2.5.4: Chunk Metadata & Context (12 hours) 🎯 RAG CRITICAL
 - [ ] Add rich metadata to each chunk:

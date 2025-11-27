@@ -230,6 +230,7 @@ type Chunker struct {
 	config           ChunkerConfig
 	boundaryDetector *BoundaryDetector
 	orphanDetector   *OrphanedContentDetector
+	overlapGenerator *OverlapGenerator
 }
 
 // NewChunker creates a new chunker with default configuration
@@ -247,7 +248,8 @@ func NewChunker() *Chunker {
 			LookAheadChars:        200,
 			ListIntroPatterns:     DefaultBoundaryConfig().ListIntroPatterns,
 		}),
-		orphanDetector: NewOrphanedContentDetector(config.MinChunkSize),
+		orphanDetector:   NewOrphanedContentDetector(config.MinChunkSize),
+		overlapGenerator: createOverlapGenerator(config),
 	}
 }
 
@@ -265,8 +267,37 @@ func NewChunkerWithConfig(config ChunkerConfig) *Chunker {
 			LookAheadChars:        200,
 			ListIntroPatterns:     DefaultBoundaryConfig().ListIntroPatterns,
 		}),
-		orphanDetector: NewOrphanedContentDetector(config.MinChunkSize),
+		orphanDetector:   NewOrphanedContentDetector(config.MinChunkSize),
+		overlapGenerator: createOverlapGenerator(config),
 	}
+}
+
+// createOverlapGenerator creates an overlap generator from chunker config
+func createOverlapGenerator(config ChunkerConfig) *OverlapGenerator {
+	strategy := OverlapNone
+	size := config.OverlapSize
+
+	if config.OverlapSize > 0 {
+		if config.OverlapSentences {
+			strategy = OverlapSentence
+			// For sentence-based, OverlapSize represents number of sentences
+			// Default to 2 sentences if OverlapSize seems to be character-based
+			if size > 10 {
+				size = 2
+			}
+		} else {
+			strategy = OverlapCharacter
+		}
+	}
+
+	return NewOverlapGeneratorWithConfig(OverlapConfig{
+		Strategy:              strategy,
+		Size:                  size,
+		MinOverlap:            20,
+		MaxOverlap:            config.OverlapSize * 3, // Allow some flexibility
+		PreserveWords:         true,
+		IncludeHeadingContext: config.IncludeSectionContext,
+	})
 }
 
 // ChunkResult contains the chunking output
@@ -334,6 +365,110 @@ func (c *Chunker) Chunk(doc *model.Document) (*ChunkResult, error) {
 	}
 
 	return result, nil
+}
+
+// ChunkWithOverlapResult contains chunking output with overlap information
+type ChunkWithOverlapResult struct {
+	// Chunks are the generated chunks with overlap information
+	Chunks []*ChunkWithOverlap
+
+	// DocumentTitle is the document title if available
+	DocumentTitle string
+
+	// TotalPages is the total number of pages processed
+	TotalPages int
+
+	// Statistics about the chunking process
+	Stats ChunkStats
+
+	// OverlapStats contains overlap-specific statistics
+	OverlapStats OverlapStats
+}
+
+// OverlapStats contains statistics about overlap in chunks
+type OverlapStats struct {
+	// TotalOverlapChars is the total characters in overlap regions
+	TotalOverlapChars int
+
+	// AvgOverlapChars is the average overlap size
+	AvgOverlapChars int
+
+	// ChunksWithOverlap is the number of chunks that have overlap
+	ChunksWithOverlap int
+
+	// OverlapStrategy is the strategy used
+	OverlapStrategy OverlapStrategy
+}
+
+// ChunkWithOverlapEnabled processes a document and returns chunks with overlap
+func (c *Chunker) ChunkWithOverlapEnabled(doc *model.Document) (*ChunkWithOverlapResult, error) {
+	// First, chunk without overlap
+	baseResult, err := c.Chunk(doc)
+	if err != nil {
+		return nil, err
+	}
+
+	// Apply overlap between chunks
+	overlapConfig := OverlapConfig{
+		Strategy:              c.getOverlapStrategy(),
+		Size:                  c.getOverlapSize(),
+		MinOverlap:            20,
+		MaxOverlap:            c.config.OverlapSize * 3,
+		PreserveWords:         true,
+		IncludeHeadingContext: c.config.IncludeSectionContext,
+	}
+
+	chunksWithOverlap := ApplyOverlapToChunks(baseResult.Chunks, overlapConfig)
+
+	// Calculate overlap statistics
+	overlapStats := c.calculateOverlapStats(chunksWithOverlap)
+
+	return &ChunkWithOverlapResult{
+		Chunks:        chunksWithOverlap,
+		DocumentTitle: baseResult.DocumentTitle,
+		TotalPages:    baseResult.TotalPages,
+		Stats:         baseResult.Stats,
+		OverlapStats:  overlapStats,
+	}, nil
+}
+
+// getOverlapStrategy returns the overlap strategy from config
+func (c *Chunker) getOverlapStrategy() OverlapStrategy {
+	if c.config.OverlapSize <= 0 {
+		return OverlapNone
+	}
+	if c.config.OverlapSentences {
+		return OverlapSentence
+	}
+	return OverlapCharacter
+}
+
+// getOverlapSize returns the overlap size based on strategy
+func (c *Chunker) getOverlapSize() int {
+	if c.config.OverlapSentences && c.config.OverlapSize > 10 {
+		return 2 // Default to 2 sentences
+	}
+	return c.config.OverlapSize
+}
+
+// calculateOverlapStats computes statistics about overlap
+func (c *Chunker) calculateOverlapStats(chunks []*ChunkWithOverlap) OverlapStats {
+	stats := OverlapStats{
+		OverlapStrategy: c.getOverlapStrategy(),
+	}
+
+	for _, chunk := range chunks {
+		if chunk.HasOverlapPrefix {
+			stats.ChunksWithOverlap++
+			stats.TotalOverlapChars += len(chunk.OverlapPrefix)
+		}
+	}
+
+	if stats.ChunksWithOverlap > 0 {
+		stats.AvgOverlapChars = stats.TotalOverlapChars / stats.ChunksWithOverlap
+	}
+
+	return stats
 }
 
 // Section represents a document section defined by a heading
