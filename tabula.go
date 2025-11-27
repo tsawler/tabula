@@ -3,11 +3,17 @@
 //
 // Basic usage:
 //
-//	text, err := tabula.Open("document.pdf").Text()
+//	text, warnings, err := tabula.Open("document.pdf").Text()
+//	if err != nil {
+//	    // handle error
+//	}
+//	if len(warnings) > 0 {
+//	    log.Println("Warnings:", tabula.FormatWarnings(warnings))
+//	}
 //
 // With options:
 //
-//	text, err := tabula.Open("report.pdf").
+//	text, _, err := tabula.Open("report.pdf").
 //	    Pages(1, 2, 3).
 //	    ExcludeHeaders().
 //	    ExcludeFooters().
@@ -26,7 +32,7 @@ import (
 //
 // Example:
 //
-//	text, err := tabula.Open("document.pdf").Text()
+//	text, warnings, err := tabula.Open("document.pdf").Text()
 func Open(filename string) *Extractor {
 	return &Extractor{
 		filename: filename,
@@ -45,7 +51,7 @@ func Open(filename string) *Extractor {
 //	    // handle error
 //	}
 //	defer r.Close()
-//	text, err := tabula.FromReader(r).Text()
+//	text, warnings, err := tabula.FromReader(r).Text()
 func FromReader(r *reader.Reader) *Extractor {
 	return &Extractor{
 		reader:       r,
@@ -61,8 +67,22 @@ func FromReader(r *reader.Reader) *Extractor {
 //
 // Example:
 //
-//	text := tabula.Must(tabula.Open("document.pdf").Text())
+//	count := tabula.Must(tabula.Open("document.pdf").PageCount())
 func Must[T any](val T, err error) T {
+	if err != nil {
+		panic(err)
+	}
+	return val
+}
+
+// MustText is a helper that wraps a call to Text() or Fragments() and panics
+// if the error is non-nil. It discards warnings and returns just the value.
+// It is intended for use in scripts or tests where error handling would be cumbersome.
+//
+// Example:
+//
+//	text := tabula.MustText(tabula.Open("document.pdf").Text())
+func MustText[T any](val T, _ []Warning, err error) T {
 	if err != nil {
 		panic(err)
 	}

@@ -35,6 +35,9 @@ type Extractor struct {
 
 	// Accumulated error (fail-fast)
 	err error
+
+	// Warnings accumulated during processing
+	warnings []Warning
 }
 
 // clone creates a shallow copy of the Extractor with a deep copy of options.
@@ -47,6 +50,7 @@ func (e *Extractor) clone() *Extractor {
 		readerOpened: e.readerOpened,
 		options:      e.options.clone(),
 		err:          e.err,
+		warnings:     append([]Warning(nil), e.warnings...),
 	}
 	return newExt
 }
@@ -92,7 +96,7 @@ func (e *Extractor) Close() error {
 //
 // Example:
 //
-//	text, err := tabula.Open("doc.pdf").Pages(1, 3, 5).Text()
+//	text, _, err := tabula.Open("doc.pdf").Pages(1, 3, 5).Text()
 func (e *Extractor) Pages(pages ...int) *Extractor {
 	newExt := e.clone()
 	newExt.options.pages = append(newExt.options.pages, pages...)
@@ -103,7 +107,7 @@ func (e *Extractor) Pages(pages ...int) *Extractor {
 //
 // Example:
 //
-//	text, err := tabula.Open("doc.pdf").PageRange(5, 10).Text()
+//	text, _, err := tabula.Open("doc.pdf").PageRange(5, 10).Text()
 func (e *Extractor) PageRange(start, end int) *Extractor {
 	newExt := e.clone()
 	for i := start; i <= end; i++ {
@@ -116,7 +120,7 @@ func (e *Extractor) PageRange(start, end int) *Extractor {
 //
 // Example:
 //
-//	text, err := tabula.Open("doc.pdf").ExcludeHeaders().Text()
+//	text, _, err := tabula.Open("doc.pdf").ExcludeHeaders().Text()
 func (e *Extractor) ExcludeHeaders() *Extractor {
 	newExt := e.clone()
 	newExt.options.excludeHeaders = true
@@ -127,7 +131,7 @@ func (e *Extractor) ExcludeHeaders() *Extractor {
 //
 // Example:
 //
-//	text, err := tabula.Open("doc.pdf").ExcludeFooters().Text()
+//	text, _, err := tabula.Open("doc.pdf").ExcludeFooters().Text()
 func (e *Extractor) ExcludeFooters() *Extractor {
 	newExt := e.clone()
 	newExt.options.excludeFooters = true
@@ -140,7 +144,7 @@ func (e *Extractor) ExcludeFooters() *Extractor {
 //
 // Example:
 //
-//	text, err := tabula.Open("doc.pdf").ExcludeHeadersAndFooters().Text()
+//	text, _, err := tabula.Open("doc.pdf").ExcludeHeadersAndFooters().Text()
 func (e *Extractor) ExcludeHeadersAndFooters() *Extractor {
 	newExt := e.clone()
 	newExt.options.excludeHeaders = true
@@ -154,8 +158,8 @@ func (e *Extractor) ExcludeHeadersAndFooters() *Extractor {
 //
 // Example:
 //
-//	text, err := tabula.Open("doc.pdf").JoinParagraphs().Text()
-//	text, err := tabula.Open("doc.pdf").ExcludeHeadersAndFooters().JoinParagraphs().Text()
+//	text, _, err := tabula.Open("doc.pdf").JoinParagraphs().Text()
+//	text, _, err := tabula.Open("doc.pdf").ExcludeHeadersAndFooters().JoinParagraphs().Text()
 func (e *Extractor) JoinParagraphs() *Extractor {
 	newExt := e.clone()
 	newExt.options.joinParagraphs = true
@@ -168,7 +172,7 @@ func (e *Extractor) JoinParagraphs() *Extractor {
 //
 // Example:
 //
-//	text, err := tabula.Open("newspaper.pdf").ByColumn().Text()
+//	text, _, err := tabula.Open("newspaper.pdf").ByColumn().Text()
 func (e *Extractor) ByColumn() *Extractor {
 	newExt := e.clone()
 	newExt.options.byColumn = true
@@ -180,7 +184,7 @@ func (e *Extractor) ByColumn() *Extractor {
 //
 // Example:
 //
-//	text, err := tabula.Open("form.pdf").PreserveLayout().Text()
+//	text, _, err := tabula.Open("form.pdf").PreserveLayout().Text()
 func (e *Extractor) PreserveLayout() *Extractor {
 	newExt := e.clone()
 	newExt.options.preserveLayout = true
@@ -259,22 +263,30 @@ func (e *Extractor) IsMultiColumn() (bool, error) {
 // Text extracts and returns the text content from the configured pages.
 // This is a terminal operation that closes the underlying reader.
 //
+// Returns the extracted text, any warnings encountered during processing,
+// and an error if extraction failed. Warnings indicate non-fatal issues
+// (e.g., messy PDF detected) where extraction succeeded but results may
+// be imperfect.
+//
 // Example:
 //
-//	text, err := tabula.Open("document.pdf").Text()
-func (e *Extractor) Text() (string, error) {
+//	text, warnings, err := tabula.Open("document.pdf").Text()
+//	if len(warnings) > 0 {
+//	    log.Println("Warnings:", tabula.FormatWarnings(warnings))
+//	}
+func (e *Extractor) Text() (string, []Warning, error) {
 	if e.err != nil {
-		return "", e.err
+		return "", nil, e.err
 	}
 
 	if err := e.ensureReader(); err != nil {
-		return "", err
+		return "", nil, err
 	}
 	defer e.Close()
 
 	pageIndices, err := e.resolvePages()
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
 	// Collect requested page data
@@ -283,12 +295,12 @@ func (e *Extractor) Text() (string, error) {
 	for _, pageNum := range pageIndices {
 		page, err := e.reader.GetPage(pageNum)
 		if err != nil {
-			return "", fmt.Errorf("page %d: %w", pageNum+1, err)
+			return "", nil, fmt.Errorf("page %d: %w", pageNum+1, err)
 		}
 
 		fragments, err := e.reader.ExtractTextFragments(page)
 		if err != nil {
-			return "", fmt.Errorf("page %d: %w", pageNum+1, err)
+			return "", nil, fmt.Errorf("page %d: %w", pageNum+1, err)
 		}
 
 		requestedPages = append(requestedPages, extractedPage{
@@ -312,7 +324,7 @@ func (e *Extractor) Text() (string, error) {
 	for i, pd := range requestedPages {
 		// Check for messy PDF traits on the first page processed
 		if i == 0 {
-			e.CheckMessyPDF(pd.fragments)
+			e.checkMessyPDF(pd.fragments)
 		}
 
 		fragments := pd.fragments
@@ -346,7 +358,7 @@ func (e *Extractor) Text() (string, error) {
 		result.WriteString(pageText)
 	}
 
-	return result.String(), nil
+	return result.String(), e.warnings, nil
 }
 
 // extractWithParagraphs uses paragraph detection to join lines within paragraphs
@@ -407,40 +419,48 @@ func (e *Extractor) extractWithParagraphs(fragments []text.TextFragment, page *p
 // Fragments extracts and returns text fragments with position information.
 // This is a terminal operation that closes the underlying reader.
 //
+// Returns the fragments, any warnings encountered during processing,
+// and an error if extraction failed.
+//
 // Example:
 //
-//	fragments, err := tabula.Open("document.pdf").Pages(1).Fragments()
-func (e *Extractor) Fragments() ([]text.TextFragment, error) {
+//	fragments, warnings, err := tabula.Open("document.pdf").Pages(1).Fragments()
+func (e *Extractor) Fragments() ([]text.TextFragment, []Warning, error) {
 	if e.err != nil {
-		return nil, e.err
+		return nil, nil, e.err
 	}
 
 	if err := e.ensureReader(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer e.Close()
 
 	pageIndices, err := e.resolvePages()
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	var allFragments []text.TextFragment
-	for _, pageNum := range pageIndices {
+	for i, pageNum := range pageIndices {
 		page, err := e.reader.GetPage(pageNum)
 		if err != nil {
-			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+			return nil, nil, fmt.Errorf("page %d: %w", pageNum+1, err)
 		}
 
 		fragments, err := e.reader.ExtractTextFragments(page)
 		if err != nil {
-			return nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+			return nil, nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		// Check for messy PDF traits on the first page processed
+		if i == 0 {
+			e.checkMessyPDF(fragments)
 		}
 
 		allFragments = append(allFragments, fragments...)
 	}
 
-	return allFragments, nil
+	return allFragments, e.warnings, nil
 }
 
 // PageCount returns the total number of pages in the PDF.

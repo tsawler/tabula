@@ -15,7 +15,7 @@ func testPDFPath(filename string) string {
 
 func TestOpen(t *testing.T) {
 	// Test with non-existent file
-	_, err := Open("nonexistent.pdf").Text()
+	_, _, err := Open("nonexistent.pdf").Text()
 	if err == nil {
 		t.Error("expected error for non-existent file")
 	}
@@ -27,7 +27,7 @@ func TestBasicTextExtraction(t *testing.T) {
 		t.Skip("test PDF not found:", pdfPath)
 	}
 
-	text, err := Open(pdfPath).Text()
+	text, _, err := Open(pdfPath).Text()
 	if err != nil {
 		t.Fatalf("failed to extract text: %v", err)
 	}
@@ -49,13 +49,13 @@ func TestPageSelection(t *testing.T) {
 	}
 
 	// Extract only page 1
-	text1, err := Open(pdfPath).Pages(1).Text()
+	text1, _, err := Open(pdfPath).Pages(1).Text()
 	if err != nil {
 		t.Fatalf("failed to extract page 1: %v", err)
 	}
 
 	// Extract all pages
-	textAll, err := Open(pdfPath).Text()
+	textAll, _, err := Open(pdfPath).Text()
 	if err != nil {
 		t.Fatalf("failed to extract all pages: %v", err)
 	}
@@ -85,7 +85,7 @@ func TestPageRange(t *testing.T) {
 	}
 
 	// Extract pages 1-2
-	text, err := Open(pdfPath).PageRange(1, 2).Text()
+	text, _, err := Open(pdfPath).PageRange(1, 2).Text()
 	if err != nil {
 		t.Fatalf("failed to extract page range: %v", err)
 	}
@@ -102,13 +102,13 @@ func TestInvalidPage(t *testing.T) {
 	}
 
 	// Try to extract page 1000 (should fail)
-	_, err := Open(pdfPath).Pages(1000).Text()
+	_, _, err := Open(pdfPath).Pages(1000).Text()
 	if err == nil {
 		t.Error("expected error for invalid page number")
 	}
 
 	// Try page 0 (should fail - 1-indexed)
-	_, err = Open(pdfPath).Pages(0).Text()
+	_, _, err = Open(pdfPath).Pages(0).Text()
 	if err == nil {
 		t.Error("expected error for page 0 (1-indexed)")
 	}
@@ -139,7 +139,7 @@ func TestFragments(t *testing.T) {
 		t.Skip("test PDF not found:", pdfPath)
 	}
 
-	fragments, err := Open(pdfPath).Pages(1).Fragments()
+	fragments, _, err := Open(pdfPath).Pages(1).Fragments()
 	if err != nil {
 		t.Fatalf("failed to extract fragments: %v", err)
 	}
@@ -204,7 +204,7 @@ func TestByColumn(t *testing.T) {
 	}
 
 	// Extract with column detection
-	text, err := Open(pdfPath).ByColumn().Text()
+	text, _, err := Open(pdfPath).ByColumn().Text()
 	if err != nil {
 		t.Fatalf("failed to extract with column detection: %v", err)
 	}
@@ -221,7 +221,7 @@ func TestExcludeHeadersFooters(t *testing.T) {
 	}
 
 	// Extract with header/footer exclusion
-	textFiltered, err := Open(pdfPath).
+	textFiltered, _, err := Open(pdfPath).
 		ExcludeHeaders().
 		ExcludeFooters().
 		Text()
@@ -230,7 +230,7 @@ func TestExcludeHeadersFooters(t *testing.T) {
 	}
 
 	// Extract without filtering
-	textUnfiltered, err := Open(pdfPath).Text()
+	textUnfiltered, _, err := Open(pdfPath).Text()
 	if err != nil {
 		t.Fatalf("failed to extract without filtering: %v", err)
 	}
