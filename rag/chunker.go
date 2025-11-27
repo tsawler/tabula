@@ -227,13 +227,27 @@ func DefaultChunkerConfig() ChunkerConfig {
 
 // Chunker performs semantic chunking of documents
 type Chunker struct {
-	config ChunkerConfig
+	config           ChunkerConfig
+	boundaryDetector *BoundaryDetector
+	orphanDetector   *OrphanedContentDetector
 }
 
 // NewChunker creates a new chunker with default configuration
 func NewChunker() *Chunker {
+	config := DefaultChunkerConfig()
 	return &Chunker{
-		config: DefaultChunkerConfig(),
+		config: config,
+		boundaryDetector: NewBoundaryDetectorWithConfig(BoundaryConfig{
+			MinChunkSize:          config.MinChunkSize,
+			MaxChunkSize:          config.MaxChunkSize,
+			PreferParagraphBreaks: config.PreserveParagraphs,
+			KeepListsIntact:       config.PreserveListCoherence,
+			KeepTablesIntact:      config.PreserveTableCoherence,
+			KeepFiguresIntact:     true,
+			LookAheadChars:        200,
+			ListIntroPatterns:     DefaultBoundaryConfig().ListIntroPatterns,
+		}),
+		orphanDetector: NewOrphanedContentDetector(config.MinChunkSize),
 	}
 }
 
@@ -241,6 +255,17 @@ func NewChunker() *Chunker {
 func NewChunkerWithConfig(config ChunkerConfig) *Chunker {
 	return &Chunker{
 		config: config,
+		boundaryDetector: NewBoundaryDetectorWithConfig(BoundaryConfig{
+			MinChunkSize:          config.MinChunkSize,
+			MaxChunkSize:          config.MaxChunkSize,
+			PreferParagraphBreaks: config.PreserveParagraphs,
+			KeepListsIntact:       config.PreserveListCoherence,
+			KeepTablesIntact:      config.PreserveTableCoherence,
+			KeepFiguresIntact:     true,
+			LookAheadChars:        200,
+			ListIntroPatterns:     DefaultBoundaryConfig().ListIntroPatterns,
+		}),
+		orphanDetector: NewOrphanedContentDetector(config.MinChunkSize),
 	}
 }
 
@@ -571,8 +596,36 @@ func (c *Chunker) chunkSection(section *Section, chunkIndex *int, docTitle strin
 }
 
 // splitSectionByParagraphs splits a large section into paragraph-based chunks
+// using context-aware boundary detection to avoid breaking semantic units
 func (c *Chunker) splitSectionByParagraphs(section *Section, chunkIndex *int, docTitle string) []*Chunk {
 	chunks := make([]*Chunk, 0)
+
+	// Convert ContentElements to ContentBlocks for boundary detection
+	blocks := make([]ContentBlock, len(section.Content))
+	for i, elem := range section.Content {
+		blocks[i] = ContentBlock{
+			Type:     elem.Type,
+			Text:     elem.Text,
+			Page:     elem.Page,
+			Index:    i,
+			ListInfo: elem.ListInfo,
+		}
+	}
+
+	// Find atomic blocks that should not be split
+	atomicBlocks := c.boundaryDetector.FindAtomicBlocks(blocks)
+
+	// Mark list intro paragraphs
+	for i := range blocks {
+		if blocks[i].Type == model.ElementTypeParagraph {
+			if i+1 < len(blocks) && blocks[i+1].Type == model.ElementTypeList {
+				if c.boundaryDetector.isListIntro(blocks[i].Text) {
+					blocks[i].IsIntro = true
+				}
+			}
+		}
+	}
+
 	var currentText strings.Builder
 	var currentElements []ContentElement
 	var elementTypes []string
@@ -582,6 +635,24 @@ func (c *Chunker) splitSectionByParagraphs(section *Section, chunkIndex *int, do
 		text := currentText.String()
 		if strings.TrimSpace(text) == "" {
 			return
+		}
+
+		// Check for orphaned content and merge if needed
+		if c.orphanDetector != nil && len(text) < c.config.MinChunkSize && len(chunks) > 0 {
+			// Content is too small - merge with previous chunk if possible
+			prevChunk := chunks[len(chunks)-1]
+			if len(prevChunk.Text)+len(text)+2 <= c.config.MaxChunkSize {
+				prevChunk.Text = prevChunk.Text + "\n\n" + text
+				prevChunk.Metadata.CharCount = len(prevChunk.Text)
+				prevChunk.Metadata.WordCount = countWords(prevChunk.Text)
+				prevChunk.Metadata.EstimatedTokens = len(prevChunk.Text) / 4
+				prevChunk.TextWithContext = prevChunk.generateContextualText()
+				currentText.Reset()
+				currentElements = nil
+				elementTypes = nil
+				hasTable, hasList, hasImage = false, false, false
+				return
+			}
 		}
 
 		// Calculate bounding box from elements
@@ -611,13 +682,124 @@ func (c *Chunker) splitSectionByParagraphs(section *Section, chunkIndex *int, do
 		hasTable, hasList, hasImage = false, false, false
 	}
 
-	for _, elem := range section.Content {
+	i := 0
+	for i < len(section.Content) {
+		elem := section.Content[i]
 		elemText := elem.Text
+
+		// Check if this element is part of an atomic block
+		atomicBlock := GetAtomicBlockAt(i, atomicBlocks)
+		if atomicBlock != nil {
+			// Flush current content before atomic block
+			if currentText.Len() > 0 {
+				flushChunk()
+			}
+
+			// Collect all elements in the atomic block
+			var atomicText strings.Builder
+			var atomicElements []ContentElement
+			atomicHasTable, atomicHasList, atomicHasImage := false, false, false
+			var atomicTypes []string
+
+			for j := atomicBlock.StartIndex; j <= atomicBlock.EndIndex && j < len(section.Content); j++ {
+				atomicElem := section.Content[j]
+				if atomicText.Len() > 0 {
+					atomicText.WriteString("\n\n")
+				}
+				atomicText.WriteString(atomicElem.Text)
+				atomicElements = append(atomicElements, atomicElem)
+
+				elemType := atomicElem.Type.String()
+				found := false
+				for _, et := range atomicTypes {
+					if et == elemType {
+						found = true
+						break
+					}
+				}
+				if !found {
+					atomicTypes = append(atomicTypes, elemType)
+				}
+
+				switch atomicElem.Type {
+				case model.ElementTypeTable:
+					atomicHasTable = true
+				case model.ElementTypeList:
+					atomicHasList = true
+				case model.ElementTypeImage:
+					atomicHasImage = true
+				}
+			}
+
+			// Handle the atomic block
+			atomicStr := atomicText.String()
+			if len(atomicStr) > c.config.MaxChunkSize {
+				// Atomic block exceeds max - split by sentences as last resort
+				for _, atomicElem := range atomicElements {
+					if len(atomicElem.Text) > c.config.MaxChunkSize {
+						sentenceChunks := c.splitBySentences(atomicElem.Text, section, chunkIndex, docTitle, atomicElem)
+						chunks = append(chunks, sentenceChunks...)
+					} else {
+						// Add element normally
+						if currentText.Len() > 0 {
+							currentText.WriteString("\n\n")
+						}
+						currentText.WriteString(atomicElem.Text)
+						currentElements = append(currentElements, atomicElem)
+					}
+				}
+			} else {
+				// Atomic block fits - add as single unit
+				var bbox *model.BBox
+				for _, ae := range atomicElements {
+					if bbox == nil {
+						bbox = &model.BBox{X: ae.BBox.X, Y: ae.BBox.Y, Width: ae.BBox.Width, Height: ae.BBox.Height}
+					} else {
+						bbox = mergeBBox(bbox, &ae.BBox)
+					}
+				}
+				chunk := c.createChunk(atomicStr, section, *chunkIndex, docTitle, atomicTypes, atomicHasTable, atomicHasList, atomicHasImage, bbox)
+				chunk.Metadata.Level = ChunkLevelParagraph
+				chunks = append(chunks, chunk)
+				*chunkIndex++
+			}
+
+			// Skip past atomic block
+			i = atomicBlock.EndIndex + 1
+			continue
+		}
 
 		// Check if adding this element would exceed max size
 		addedLen := len(elemText)
 		if currentText.Len() > 0 {
 			addedLen += 2 // "\n\n"
+		}
+
+		// Check if this is an intro paragraph followed by a list
+		if i+1 < len(section.Content) && blocks[i].IsIntro {
+			// Keep intro with following list
+			nextElem := section.Content[i+1]
+			totalLen := len(elemText) + 2 + len(nextElem.Text)
+
+			if currentText.Len()+totalLen > c.config.MaxChunkSize && currentText.Len() > 0 {
+				flushChunk()
+			}
+
+			// Add intro
+			if currentText.Len() > 0 {
+				currentText.WriteString("\n\n")
+			}
+			currentText.WriteString(elemText)
+			currentElements = append(currentElements, elem)
+
+			// Add list
+			currentText.WriteString("\n\n")
+			currentText.WriteString(nextElem.Text)
+			currentElements = append(currentElements, nextElem)
+			hasList = true
+
+			i += 2
+			continue
 		}
 
 		if currentText.Len()+addedLen > c.config.MaxChunkSize && currentText.Len() > 0 {
@@ -635,6 +817,7 @@ func (c *Chunker) splitSectionByParagraphs(section *Section, chunkIndex *int, do
 			// Split by sentences
 			sentenceChunks := c.splitBySentences(elemText, section, chunkIndex, docTitle, elem)
 			chunks = append(chunks, sentenceChunks...)
+			i++
 			continue
 		}
 
@@ -667,6 +850,8 @@ func (c *Chunker) splitSectionByParagraphs(section *Section, chunkIndex *int, do
 		case model.ElementTypeImage:
 			hasImage = true
 		}
+
+		i++
 	}
 
 	// Flush remaining content

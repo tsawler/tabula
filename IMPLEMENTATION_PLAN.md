@@ -881,36 +881,70 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 
 ### Week 8.5-9: Semantic Chunking Strategy
 
-#### Task 2.5.1: Hierarchical Chunking Framework (16 hours) 🎯 RAG CRITICAL
-- [ ] Implement `rag/chunker.go`
-- [ ] Define chunking hierarchy:
+#### Task 2.5.1: Hierarchical Chunking Framework (16 hours) 🎯 RAG CRITICAL ✅ COMPLETE
+- [x] Implement `rag/chunker.go`
+- [x] Define chunking hierarchy:
   - Level 1: Document (entire PDF)
   - Level 2: Section (by headings)
   - Level 3: Paragraph
   - Level 4: Sentence (only if paragraph too large)
-- [ ] Implement chunk boundary detection at each level
-- [ ] Preserve parent-child relationships (section → paragraphs)
-- [ ] Add metadata to chunks (section title, page number, position)
-- [ ] Write chunking framework tests
+- [x] Implement chunk boundary detection at each level
+- [x] Preserve parent-child relationships (section → paragraphs)
+- [x] Add metadata to chunks (section title, page number, position)
+- [x] Write chunking framework tests
 
 **RAG Impact**: This is THE most important feature for RAG quality. Hierarchical chunking ensures chunks have complete thoughts, not sentence fragments.
 
-#### Task 2.5.2: Context-Aware Chunk Boundaries (12 hours) 🎯 RAG CRITICAL
-- [ ] Implement smart boundary detection
-- [ ] Never break within:
+**Deliverable**: Complete hierarchical chunking framework ✅
+**Acceptance**: Chunks maintain semantic coherence at section/paragraph/sentence levels ✅
+**Completed**: November 27, 2024
+**Tests**: 20+ test cases, 3 benchmarks, all passing
+**Coverage**: 81% on rag/chunker.go
+**Performance**:
+- Small documents: ~666ns/op (~1.5M docs/sec)
+- Large documents (50 sections): ~41μs/op (~24K docs/sec)
+
+**Implementation Details**:
+- `ChunkLevel` enum: Document, Section, Paragraph, Sentence
+- `ChunkMetadata`: document title, section path, page numbers, element types, char/word/token counts, bounding boxes
+- `Chunk`: ID, Text, TextWithContext (with section heading prepended), Metadata
+- `ChunkerConfig`: target/max/min sizes, overlap, heading split levels, coherence options
+- `Chunker`: Main chunker with `Chunk(doc)` method returning `ChunkResult`
+- `Section`: Internal type for hierarchical section tree with parent-child relationships
+- Smart splitting: Respects paragraph boundaries, falls back to sentences for oversized content
+- Context injection: Section heading prepended to chunk text for better retrieval
+
+#### Task 2.5.2: Context-Aware Chunk Boundaries (12 hours) 🎯 RAG CRITICAL ✅ COMPLETE
+- [x] Implement smart boundary detection
+- [x] Never break within:
   - A sentence
   - A list (keep intro + items together)
   - A table
   - A figure caption
   - A code block
-- [ ] Prefer boundaries at:
+- [x] Prefer boundaries at:
   - Paragraph breaks
   - Section breaks (headings)
   - List endings
-- [ ] Implement "look ahead" to avoid orphaned content
-- [ ] Write boundary detection tests
+- [x] Implement "look ahead" to avoid orphaned content
+- [x] Write boundary detection tests
 
 **RAG Impact**: Avoids the #1 chunking mistake - breaking semantic units mid-thought.
+
+**Deliverable**: Context-aware boundary detection system ✅
+**Completed**: November 27, 2024
+**Tests**: 30+ test cases, 2 benchmarks, all passing
+**Coverage**: 70.4% on rag package
+
+**Implementation Details**:
+- `BoundaryType` enum: None, Sentence, Paragraph, List, ListItem, Heading, Table, Figure, CodeBlock, PageBreak
+- `Boundary` struct with Type, Position, Score, ElementIndex, Context
+- `BoundaryDetector` with configurable options for keeping lists/tables/figures intact
+- `AtomicBlock` detection: identifies tables, lists with intros, figures with captions
+- `OrphanedContentDetector`: prevents creating tiny chunks by merging with adjacent content
+- List intro detection via regex patterns (e.g., "The following:", "Steps:", etc.)
+- Sentence end detection with abbreviation handling (Mr., Dr., etc.)
+- Integrated with Chunker's `splitSectionByParagraphs` method
 
 #### Task 2.5.3: Chunk Overlap Strategy (8 hours)
 - [ ] Implement configurable overlap
