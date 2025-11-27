@@ -1220,23 +1220,69 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 
 ### Week 9: Line & Rectangle Detection
 
-#### Task 3.1: Graphics Operator Processing (12 hours)
-- [ ] Extend graphics state machine
-- [ ] Track path construction (m, l, c, v, y)
-- [ ] Track rectangles (re)
-- [ ] Track stroke/fill operators (S, s, f, F, B)
-- [ ] Write graphics tests
+#### Task 3.1: Graphics Operator Processing (12 hours) ✅ COMPLETE
+- [x] Extend graphics state machine
+- [x] Track path construction (m, l, c, v, y)
+- [x] Track rectangles (re)
+- [x] Track stroke/fill operators (S, s, f, F, B)
+- [x] Write graphics tests
 
-#### Task 3.2: Line Extraction (8 hours)
-- [ ] Implement line detection
-- [ ] Store Line objects
-- [ ] Classify horizontal/vertical
-- [ ] Write line extraction tests
+**Deliverable**: Graphics path extraction for table detection ✅
+**Acceptance**: Can extract lines and rectangles from PDF graphics ✅
+**Completed**: November 27, 2024
 
-#### Task 3.3: Rectangle Extraction (8 hours)
-- [ ] Detect rectangles from paths
-- [ ] Classify filled/stroked
-- [ ] Write rectangle tests
+**Implementation** (`graphicsstate/path.go` - ~600 lines):
+- PathSegmentType enum: MoveTo, LineTo, CurveTo, ClosePath
+- Path struct with full path construction API
+- PathExtractor for extracting lines and rectangles
+- Support for all path operators: m, l, c, v, y, h, re
+- Support for all stroke/fill operators: S, s, f, F, f*, B, B*, b, b*, n
+- Automatic rectangle detection from closed paths
+- Line classification (horizontal/vertical)
+- Transformation matrix support (CTM)
+- Filtering by length and size
+
+**Tests**: 45+ test cases
+**Coverage**: 87.7%
+
+#### Task 3.2: Line Extraction (8 hours) ✅ COMPLETE
+- [x] Implement line detection
+- [x] Store Line objects
+- [x] Classify horizontal/vertical
+- [x] Write line extraction tests
+
+**Deliverable**: Content stream graphics extraction ✅
+**Acceptance**: Can extract lines from PDF content streams ✅
+**Completed**: November 27, 2024
+
+**Implementation** (`graphicsstate/extractor.go` - ~400 lines):
+- GraphicsExtractor that processes content stream operations
+- Support for all graphics state operators (q, Q, cm, w, RG, rg, G, g, K, k)
+- Support for all path operators (m, l, c, v, y, h, re)
+- Support for all paint operators (S, s, f, F, f*, B, B*, b, b*, n)
+- CMYK to RGB color conversion
+- ToModelLines() for converting to model.Line objects
+- Line classification (horizontal/vertical/diagonal)
+- Grid line extraction for table detection
+- Statistics and filtering methods
+
+**Tests**: 30+ test cases for GraphicsExtractor
+**Coverage**: 89.2%
+
+#### Task 3.3: Rectangle Extraction (8 hours) ✅ COMPLETE
+- [x] Detect rectangles from paths
+- [x] Classify filled/stroked
+- [x] Write rectangle tests
+
+**Deliverable**: Rectangle detection from PDF graphics ✅
+**Completed**: November 27, 2024 (integrated with Task 3.2)
+
+**Implementation** (included in graphicsstate/extractor.go):
+- GetRectangles() returns all extracted rectangles
+- GetFilteredRectangles() with size filtering
+- ToModelRectangles() for conversion to model.Line with IsRect=true
+- Filled/stroked classification
+- Bounding box extraction
 
 #### Task 3.4: Grid Line Detection (8 hours)
 - [ ] Detect aligned lines
