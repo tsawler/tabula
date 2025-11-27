@@ -7,14 +7,38 @@ import (
 	"testing"
 )
 
+// TestXRefEntryType tests XRefEntryType enum
+func TestXRefEntryType(t *testing.T) {
+	tests := []struct {
+		entryType XRefEntryType
+		wantStr   string
+	}{
+		{XRefEntryFree, "free"},
+		{XRefEntryUncompressed, "uncompressed"},
+		{XRefEntryCompressed, "compressed"},
+		{XRefEntryType(99), "unknown"},
+	}
+
+	for _, tt := range tests {
+		if got := tt.entryType.String(); got != tt.wantStr {
+			t.Errorf("XRefEntryType(%d).String() = %q, want %q", tt.entryType, got, tt.wantStr)
+		}
+	}
+}
+
 // TestXRefEntry tests XRef entry creation
 func TestXRefEntry(t *testing.T) {
+	// Test uncompressed entry
 	entry := &XRefEntry{
+		Type:       XRefEntryUncompressed,
 		Offset:     1234,
 		Generation: 0,
 		InUse:      true,
 	}
 
+	if entry.Type != XRefEntryUncompressed {
+		t.Errorf("expected Type XRefEntryUncompressed, got %v", entry.Type)
+	}
 	if entry.Offset != 1234 {
 		t.Errorf("expected offset 1234, got %d", entry.Offset)
 	}
@@ -24,6 +48,39 @@ func TestXRefEntry(t *testing.T) {
 	if !entry.InUse {
 		t.Error("expected InUse to be true")
 	}
+
+	// Test compressed entry (object in object stream)
+	compressedEntry := &XRefEntry{
+		Type:       XRefEntryCompressed,
+		Offset:     10,  // Object stream number
+		Generation: 5,   // Index within object stream
+		InUse:      true,
+	}
+
+	if compressedEntry.Type != XRefEntryCompressed {
+		t.Errorf("expected Type XRefEntryCompressed, got %v", compressedEntry.Type)
+	}
+	if compressedEntry.Offset != 10 {
+		t.Errorf("expected offset (objstm number) 10, got %d", compressedEntry.Offset)
+	}
+	if compressedEntry.Generation != 5 {
+		t.Errorf("expected generation (objstm index) 5, got %d", compressedEntry.Generation)
+	}
+
+	// Test free entry
+	freeEntry := &XRefEntry{
+		Type:       XRefEntryFree,
+		Offset:     0,
+		Generation: 65535,
+		InUse:      false,
+	}
+
+	if freeEntry.Type != XRefEntryFree {
+		t.Errorf("expected Type XRefEntryFree, got %v", freeEntry.Type)
+	}
+	if freeEntry.InUse {
+		t.Error("expected InUse to be false for free entry")
+	}
 }
 
 // TestXRefTable tests XRef table operations
@@ -32,6 +89,7 @@ func TestXRefTable(t *testing.T) {
 
 	// Test Set and Get
 	entry := &XRefEntry{
+		Type:       XRefEntryUncompressed,
 		Offset:     1000,
 		Generation: 0,
 		InUse:      true,
@@ -63,6 +121,7 @@ func TestParseEntry(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      string
+		wantType   XRefEntryType
 		wantOffset int64
 		wantGen    int
 		wantInUse  bool
@@ -71,6 +130,7 @@ func TestParseEntry(t *testing.T) {
 		{
 			"in-use entry",
 			"0000000017 00000 n ",
+			XRefEntryUncompressed,
 			17,
 			0,
 			true,
@@ -79,6 +139,7 @@ func TestParseEntry(t *testing.T) {
 		{
 			"free entry",
 			"0000000000 65535 f ",
+			XRefEntryFree,
 			0,
 			65535,
 			false,
@@ -87,6 +148,7 @@ func TestParseEntry(t *testing.T) {
 		{
 			"large offset",
 			"0001234567 00003 n ",
+			XRefEntryUncompressed,
 			1234567,
 			3,
 			true,
@@ -95,6 +157,7 @@ func TestParseEntry(t *testing.T) {
 		{
 			"with trailing newline",
 			"0000000100 00000 n \n",
+			XRefEntryUncompressed,
 			100,
 			0,
 			true,
@@ -103,6 +166,7 @@ func TestParseEntry(t *testing.T) {
 		{
 			"too short",
 			"short",
+			0,
 			0,
 			0,
 			false,
@@ -122,6 +186,9 @@ func TestParseEntry(t *testing.T) {
 				return
 			}
 
+			if entry.Type != tt.wantType {
+				t.Errorf("expected Type %v, got %v", tt.wantType, entry.Type)
+			}
 			if entry.Offset != tt.wantOffset {
 				t.Errorf("expected offset %d, got %d", tt.wantOffset, entry.Offset)
 			}

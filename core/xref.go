@@ -8,11 +8,38 @@ import (
 	"strings"
 )
 
+// XRefEntryType represents the type of an XRef entry
+type XRefEntryType int
+
+const (
+	// XRefEntryFree indicates a free (deleted) object entry
+	XRefEntryFree XRefEntryType = 0
+	// XRefEntryUncompressed indicates an in-use object at a byte offset in the file
+	XRefEntryUncompressed XRefEntryType = 1
+	// XRefEntryCompressed indicates an object stored in an object stream (PDF 1.5+)
+	XRefEntryCompressed XRefEntryType = 2
+)
+
+// String returns a human-readable representation of the entry type
+func (t XRefEntryType) String() string {
+	switch t {
+	case XRefEntryFree:
+		return "free"
+	case XRefEntryUncompressed:
+		return "uncompressed"
+	case XRefEntryCompressed:
+		return "compressed"
+	default:
+		return "unknown"
+	}
+}
+
 // XRefEntry represents a single cross-reference table entry
 type XRefEntry struct {
-	Offset     int64 // Byte offset in file (for in-use objects) or next free object number (for free objects)
-	Generation int   // Generation number
-	InUse      bool  // true if object is in use, false if free
+	Type       XRefEntryType // Entry type (free, uncompressed, or compressed)
+	Offset     int64         // Byte offset (uncompressed) or object stream number (compressed)
+	Generation int           // Generation number (uncompressed) or index within object stream (compressed)
+	InUse      bool          // true if object is in use (Type != XRefEntryFree)
 }
 
 // XRefTable represents a PDF cross-reference table
@@ -244,23 +271,17 @@ func (x *XRefParser) parseTraditionalXRef() (*XRefTable, error) {
 
 // parseXRefStream parses an XRef stream (PDF 1.5+)
 func (x *XRefParser) parseXRefStream() (*XRefTable, error) {
-	// Skip past the "num gen obj" line
-	scanner := bufio.NewScanner(x.reader)
-	if !scanner.Scan() {
-		return nil, fmt.Errorf("failed to read object header")
-	}
-	// The line should be "num gen obj", we just skip it
-
-	// Parse the stream object using the object parser
+	// Parse the entire indirect object "num gen obj << ... >> stream ... endstream endobj"
+	// Don't use Scanner here - it buffers ahead and corrupts the reader position
 	parser := NewParser(x.reader)
-	obj, err := parser.ParseObject()
+	indObj, err := parser.ParseIndirectObject()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse xref stream object: %w", err)
 	}
 
-	stream, ok := obj.(*Stream)
+	stream, ok := indObj.Object.(*Stream)
 	if !ok {
-		return nil, fmt.Errorf("xref is not a stream object, got %T", obj)
+		return nil, fmt.Errorf("xref is not a stream object, got %T", indObj.Object)
 	}
 
 	// Verify this is an XRef stream
@@ -390,21 +411,24 @@ func (x *XRefParser) parseXRefStreamEntry(data []byte, w []int) (*XRefEntry, int
 	switch entryType {
 	case 0:
 		// Free entry
+		entry.Type = XRefEntryFree
 		entry.InUse = false
 		entry.Offset = field1          // Next free object number
 		entry.Generation = int(field2) // Generation if reused
 	case 1:
 		// In-use uncompressed entry
+		entry.Type = XRefEntryUncompressed
 		entry.InUse = true
 		entry.Offset = field1
 		entry.Generation = int(field2)
 	case 2:
 		// Object in object stream (PDF 1.5+)
-		// For now, treat as in-use with special offset encoding
-		// TODO: Full object stream support in a future task
+		// Offset stores the object stream number
+		// Generation stores the index within the object stream
+		entry.Type = XRefEntryCompressed
 		entry.InUse = true
 		entry.Offset = field1          // Object stream number
-		entry.Generation = int(field2) // Index within stream
+		entry.Generation = int(field2) // Index within object stream
 	default:
 		return nil, 0, fmt.Errorf("invalid xref entry type: %d", entryType)
 	}
@@ -457,17 +481,23 @@ func (x *XRefParser) parseEntry(line string) (*XRefEntry, error) {
 		return nil, fmt.Errorf("invalid generation %q: %w", genStr, err)
 	}
 
-	// Parse in-use flag
-	inUse := false
+	// Parse in-use flag and determine entry type
+	// Traditional XRef tables only have free and uncompressed entries
+	// (Compressed entries only exist in XRef streams, PDF 1.5+)
+	var entryType XRefEntryType
+	var inUse bool
 	if flag == "n" {
+		entryType = XRefEntryUncompressed
 		inUse = true
 	} else if flag == "f" {
+		entryType = XRefEntryFree
 		inUse = false
 	} else {
 		return nil, fmt.Errorf("invalid in-use flag: %q", flag)
 	}
 
 	return &XRefEntry{
+		Type:       entryType,
 		Offset:     offset,
 		Generation: generation,
 		InUse:      inUse,
