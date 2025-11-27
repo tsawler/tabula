@@ -200,10 +200,16 @@ func (gs *GraphicsState) NextLine() {
 // ShowText updates position after showing text (Tj operator)
 // Returns the displacement caused by the text
 func (gs *GraphicsState) ShowText(text string) (dx, dy float64) {
-	// Calculate text displacement
-	// Simplified: assumes each character advances by fontSize * horizontalScaling / 100
-	// Real implementation would need font metrics
+	// Use a default width calculation if no width is provided
+	// This assumes 1000 units per em for the font (standard)
+	// and that the text length * font size is roughly the width (very rough approximation)
+	// This is kept for backward compatibility but ShowTextWithWidth should be used instead
+	return gs.ShowTextWithWidth(text, float64(len(text))*gs.Text.FontSize*gs.Text.HorizontalScaling/100.0)
+}
 
+// ShowTextWithWidth updates position after showing text with a known width
+// width should be the total width of the text glyphs in user space units
+func (gs *GraphicsState) ShowTextWithWidth(text string, width float64) (dx, dy float64) {
 	numChars := float64(len(text))
 	numSpaces := float64(0)
 	for _, c := range text {
@@ -213,10 +219,19 @@ func (gs *GraphicsState) ShowText(text string) (dx, dy float64) {
 	}
 
 	// Calculate total displacement
-	charAdvance := gs.Text.FontSize * gs.Text.HorizontalScaling / 100.0
-	totalAdvance := numChars * charAdvance
-	totalAdvance += numSpaces * gs.Text.WordSpacing
-	totalAdvance += numChars * gs.Text.CharSpacing
+	// Start with the glyph width provided
+	totalAdvance := width
+
+	// Add word spacing and character spacing
+	// Note: These are scaled by horizontal scaling?
+	// The spec says: tx = ((w0 - Tj/1000) * fs + Tc + Tw) * Th / 100
+	// Here 'width' corresponds to (w0 * fs * Th / 100) roughly
+	// But Tc and Tw are added PER CHARACTER/SPACE
+	// And they are also scaled by Th/100
+
+	scale := gs.Text.HorizontalScaling / 100.0
+	totalAdvance += numSpaces * gs.Text.WordSpacing * scale
+	totalAdvance += numChars * gs.Text.CharSpacing * scale
 
 	// Update text matrix (E component = tx)
 	gs.Text.TextMatrix[4] += totalAdvance

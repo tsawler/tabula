@@ -462,3 +462,45 @@ end
 		t.Logf("✅ Correctly parsed emoji: U+%04X %q", runes[0], result)
 	}
 }
+
+func TestCMapTightPacking(t *testing.T) {
+	// Test with tight packing in bfrange (no spaces between tokens)
+	// This mimics the behavior seen in rnb.pdf
+	cmapData := "/CIDInit /ProcSet findresource begin\n" +
+		"12 dict begin\n" +
+		"begincmap\n" +
+		"/CMapName /Adobe-Identity-UCS def\n" +
+		"/CMapType 2 def\n" +
+		"1 begincodespacerange\n" +
+		"<00><FF>\n" +
+		"endcodespacerange\n" +
+		"2 beginbfrange\n" +
+		"<21><21><0052>\n" +
+		"<22><22><0065>\n" +
+		"endbfrange\n" +
+		"endcmap\n" +
+		"CMapName currentdict /CMap defineresource pop\n" +
+		"end\n" +
+		"end\n"
+
+	cmap, err := parseCMapData([]byte(cmapData))
+	if err != nil {
+		t.Fatalf("Failed to parse CMap: %v", err)
+	}
+
+	// Test lookups
+	tests := []struct {
+		code     uint32
+		expected string
+	}{
+		{0x21, "R"},
+		{0x22, "e"},
+	}
+
+	for _, tt := range tests {
+		result := cmap.Lookup(tt.code)
+		if result != tt.expected {
+			t.Errorf("Lookup(%02x) = %q, want %q", tt.code, result, tt.expected)
+		}
+	}
+}

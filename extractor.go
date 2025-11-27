@@ -310,6 +310,11 @@ func (e *Extractor) Text() (string, error) {
 	// Process each requested page
 	var result strings.Builder
 	for i, pd := range requestedPages {
+		// Check for messy PDF traits on the first page processed
+		if i == 0 {
+			e.CheckMessyPDF(pd.fragments)
+		}
+
 		fragments := pd.fragments
 
 		// Filter headers/footers
@@ -1154,13 +1159,27 @@ func (e *Extractor) assembleText(fragments []text.TextFragment) string {
 	}
 
 	// Sort fragments by position (top to bottom, left to right)
+	// Use stable sort to preserve stream order for overlapping fragments
 	sorted := make([]text.TextFragment, len(fragments))
 	copy(sorted, fragments)
-	sort.Slice(sorted, func(i, j int) bool {
+
+	// Tolerance for X position comparison as fraction of font size.
+	// Handles PDF generators (Word/Quartz) that place fragments in correct stream
+	// order but with slightly overlapping or disordered X coordinates.
+	const xTolerance = 0.25
+
+	sort.SliceStable(sorted, func(i, j int) bool {
 		// Group by Y (with tolerance for same line)
 		yDiff := sorted[i].Y - sorted[j].Y
 		if abs(yDiff) > sorted[i].Height*0.5 {
 			return yDiff > 0 // Higher Y first (PDF coordinates)
+		}
+
+		// Same line - sort by X with tolerance
+		// If X coordinates are very close, consider them equal (preserve stream order)
+		tolerance := sorted[i].FontSize * xTolerance
+		if abs(sorted[i].X-sorted[j].X) < tolerance {
+			return false // Treat as equal, preserve order (i comes before j)
 		}
 		return sorted[i].X < sorted[j].X // Then left to right
 	})

@@ -9,6 +9,11 @@ import (
 	"github.com/tsawler/tabula/text"
 )
 
+// xTolerance is the tolerance for X position comparison as a fraction of font size.
+// Handles PDF generators (Word/Quartz) that place fragments in correct stream
+// order but with slightly overlapping or disordered X coordinates.
+const xTolerance = 0.25
+
 // Column represents a detected text column on a page
 type Column struct {
 	// Bounding box of the column
@@ -747,7 +752,12 @@ func (l *ColumnLayout) getSpanningText() string {
 	var result string
 	for lineIdx, line := range lines {
 		// Sort fragments within line by X (left to right)
-		sort.Slice(line, func(i, j int) bool {
+		// Use stable sort with tolerance for overlapping fragments
+		sort.SliceStable(line, func(i, j int) bool {
+			tolerance := line[i].FontSize * xTolerance
+			if absFloat64(line[i].X-line[j].X) < tolerance {
+				return false // Treat as equal, preserve stream order
+			}
 			return line[i].X < line[j].X
 		})
 
@@ -785,7 +795,12 @@ func (l *ColumnLayout) getColumnText(col Column) string {
 
 	for lineIdx, line := range lines {
 		// Sort fragments within line by X (left to right)
-		sort.Slice(line, func(i, j int) bool {
+		// Use stable sort with tolerance for overlapping fragments
+		sort.SliceStable(line, func(i, j int) bool {
+			tolerance := line[i].FontSize * xTolerance
+			if absFloat64(line[i].X-line[j].X) < tolerance {
+				return false // Treat as equal, preserve stream order
+			}
 			return line[i].X < line[j].X
 		})
 

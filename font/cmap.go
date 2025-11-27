@@ -304,15 +304,34 @@ func (cm *CMap) parseBfRangeSection(section string) error {
 		}
 
 		// Simple format: <start> <end> <unicode>
-		parts := strings.Fields(line)
-		if len(parts) < 3 {
+		// Find all hex strings in the line to handle tight packing like <21><21><0052>
+		hexStrings := make([]string, 0)
+		startIdx := 0
+		for {
+			idx := strings.Index(line[startIdx:], "<")
+			if idx == -1 {
+				break
+			}
+			idx += startIdx
+			endIdx := strings.Index(line[idx:], ">")
+			if endIdx == -1 {
+				break
+			}
+			endIdx += idx
+
+			hexStr := line[idx+1 : endIdx]
+			hexStrings = append(hexStrings, hexStr)
+			startIdx = endIdx + 1
+		}
+
+		if len(hexStrings) < 3 {
 			i++
 			continue
 		}
 
-		startHex := extractHexString(parts[0])
-		endHex := extractHexString(parts[1])
-		dstHex := extractHexString(parts[2])
+		startHex := hexStrings[0]
+		endHex := hexStrings[1]
+		dstHex := hexStrings[2]
 
 		if startHex == "" || endHex == "" || dstHex == "" {
 			i++
@@ -344,13 +363,39 @@ func (cm *CMap) parseBfRangeSection(section string) error {
 // parseBfRangeArray parses array format: <start> <end> [<u1> <u2> ...]
 func (cm *CMap) parseBfRangeArray(line string) {
 	// Extract start and end codes
-	parts := strings.Fields(line)
-	if len(parts) < 3 {
+	// Find hex strings for start/end
+	hexStrings := make([]string, 0)
+	startIdx := 0
+	// Only look before the '['
+	bracketIdx := strings.Index(line, "[")
+	if bracketIdx == -1 {
 		return
 	}
 
-	startHex := extractHexString(parts[0])
-	endHex := extractHexString(parts[1])
+	preBracket := line[:bracketIdx]
+	for {
+		idx := strings.Index(preBracket[startIdx:], "<")
+		if idx == -1 {
+			break
+		}
+		idx += startIdx
+		endIdx := strings.Index(preBracket[idx:], ">")
+		if endIdx == -1 {
+			break
+		}
+		endIdx += idx
+
+		hexStr := preBracket[idx+1 : endIdx]
+		hexStrings = append(hexStrings, hexStr)
+		startIdx = endIdx + 1
+	}
+
+	if len(hexStrings) < 2 {
+		return
+	}
+
+	startHex := hexStrings[0]
+	endHex := hexStrings[1]
 
 	startCode, err1 := parseHexToUint32(startHex)
 	endCode, err2 := parseHexToUint32(endHex)
@@ -367,12 +412,30 @@ func (cm *CMap) parseBfRangeArray(line string) {
 	}
 
 	arrayContent := line[arrayStart+1 : arrayEnd]
-	arrayParts := strings.Fields(arrayContent)
+
+	// Parse hex strings in array content
+	arrayHexStrings := make([]string, 0)
+	startIdx = 0
+	for {
+		idx := strings.Index(arrayContent[startIdx:], "<")
+		if idx == -1 {
+			break
+		}
+		idx += startIdx
+		endIdx := strings.Index(arrayContent[idx:], ">")
+		if endIdx == -1 {
+			break
+		}
+		endIdx += idx
+
+		hexStr := arrayContent[idx+1 : endIdx]
+		arrayHexStrings = append(arrayHexStrings, hexStr)
+		startIdx = endIdx + 1
+	}
 
 	// Map each character code to its Unicode value
 	currentCode := startCode
-	for _, hexStr := range arrayParts {
-		hex := extractHexString(hexStr)
+	for _, hex := range arrayHexStrings {
 		if hex == "" {
 			continue
 		}
@@ -512,7 +575,7 @@ func extractHexString(s string) string {
 
 // parseHexToUint32 parses a hex string to uint32
 func parseHexToUint32(hexStr string) (uint32, error) {
-	// Pad to even length
+	// Pad to even length for malformed PDFs with odd-length hex
 	if len(hexStr)%2 != 0 {
 		hexStr = "0" + hexStr
 	}
@@ -533,7 +596,7 @@ func hexToUnicode(hexStr string) (string, error) {
 	hexStr = strings.ReplaceAll(hexStr, "\n", "")
 	hexStr = strings.ReplaceAll(hexStr, "\r", "")
 
-	// Pad to even length
+	// Pad to even length for malformed PDFs with odd-length hex
 	if len(hexStr)%2 != 0 {
 		hexStr = "0" + hexStr
 	}

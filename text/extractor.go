@@ -2,6 +2,8 @@ package text
 
 import (
 	"fmt"
+	"math"
+	"sort"
 	"strings"
 
 	"github.com/tsawler/tabula/contentstream"
@@ -11,6 +13,11 @@ import (
 	"github.com/tsawler/tabula/model"
 	"github.com/tsawler/tabula/pages"
 )
+
+// xTolerance is the tolerance for X position comparison as a fraction of font size.
+// Handles PDF generators (Word/Quartz) that place fragments in correct stream
+// order but with slightly overlapping or disordered X coordinates.
+const xTolerance = 0.25
 
 // TextFragment represents a piece of extracted text with position
 type TextFragment struct {
@@ -352,21 +359,52 @@ func (e *Extractor) showText(data []byte) {
 	// Detect text direction based on Unicode properties
 	direction := DetectDirection(decodedText)
 
+	// Apply CTM scaling to font size to get device-space size
+	// This ensures that line grouping logic works correctly even if the page is scaled
+	ctm := e.gs.CTM
+	// Calculate Y scaling factor from CTM (magnitude of vertical vector)
+	// CTM is [a b c d e f]
+	// Vertical vector (0, 1) transforms to (c, d)
+	// So vertical scaling factor is sqrt(c^2 + d^2)
+	ctmScale := math.Sqrt(ctm[2]*ctm[2] + ctm[3]*ctm[3])
+	
+	// If CTM is identity (or close to it), scale is 1
+	if ctmScale == 0 {
+		ctmScale = 1.0
+	}
+	
+	deviceFontSize := fontSize * ctmScale
+
 	fragment := TextFragment{
 		Text:      decodedText,
 		X:         x,
 		Y:         y,
-		Width:     width,
-		Height:    fontSize,
+		Width:     width * ctmScale, // Width should also be scaled? X is already transformed.
+		Height:    deviceFontSize,
 		FontName:  fontName,
-		FontSize:  fontSize,
+		FontSize:  deviceFontSize, // Use device font size for layout calculations
 		Direction: direction,
 	}
 
 	e.fragments = append(e.fragments, fragment)
 
 	// Update text position (use original byte length)
-	e.gs.ShowText(string(data))
+	// Use the calculated width to update the graphics state
+	// Note: width is already scaled by font size, but we need to check if it includes horizontal scaling
+	// The GetStringWidth returns width in 1000ths of em.
+	// width = f.GetStringWidth(decodedText) * fontSize / 1000.0
+	// Horizontal scaling is applied in ShowTextWithWidth if we pass the raw width?
+	// No, ShowTextWithWidth expects the width in user space.
+	// Our 'width' variable is: GetStringWidth * fontSize / 1000.0
+	// We should apply horizontal scaling to it before passing, or let ShowTextWithWidth handle it?
+	// ShowTextWithWidth adds Tc and Tw scaled by Th.
+	// It assumes 'width' is the glyph width.
+	// We should apply horizontal scaling to 'width' here because GetStringWidth doesn't know about Th.
+	
+	hScale := e.gs.Text.HorizontalScaling / 100.0
+	scaledWidth := width * hScale
+	
+	e.gs.ShowTextWithWidth(string(data), scaledWidth)
 }
 
 // showTextArray processes text array showing operation
@@ -377,14 +415,23 @@ func (e *Extractor) showTextArray(arr core.Array) {
 			e.showText([]byte(v))
 		case core.Int:
 			// Position adjustment
-			adjustment := -float64(v) * e.gs.GetFontSize() / 1000.0
+			// The number is in thousands of a unit of text space
+			// It is subtracted from the current x coordinate
+			// adjustment = -v * fontSize / 1000
+			// Also need to apply horizontal scaling
+			hScale := e.gs.Text.HorizontalScaling / 100.0
+			adjustment := -float64(v) * e.gs.GetFontSize() * hScale / 1000.0
+			
 			// Update text matrix
 			tm := e.gs.GetTextMatrix()
 			tm[4] += adjustment
+			e.gs.SetTextMatrix(tm)
 		case core.Real:
-			adjustment := -float64(v) * e.gs.GetFontSize() / 1000.0
+			hScale := e.gs.Text.HorizontalScaling / 100.0
+			adjustment := -float64(v) * e.gs.GetFontSize() * hScale / 1000.0
 			tm := e.gs.GetTextMatrix()
 			tm[4] += adjustment
+			e.gs.SetTextMatrix(tm)
 		}
 	}
 }
@@ -668,25 +715,24 @@ func (e *Extractor) reorderFragmentsForReading(fragments []TextFragment, lineDir
 	ordered := make([]TextFragment, len(fragments))
 	copy(ordered, fragments)
 
-	// Sort by X coordinate
-	// For LTR: left to right (ascending X)
-	// For RTL: right to left (descending X)
-	for i := 0; i < len(ordered)-1; i++ {
-		for j := i + 1; j < len(ordered); j++ {
-			shouldSwap := false
-			if lineDir == RTL {
-				// RTL: higher X comes first
-				shouldSwap = ordered[i].X < ordered[j].X
-			} else {
-				// LTR: lower X comes first
-				shouldSwap = ordered[i].X > ordered[j].X
-			}
+	// Use stable sort to preserve stream order for overlapping fragments
+	sort.SliceStable(ordered, func(i, j int) bool {
+		tolerance := ordered[i].FontSize * xTolerance
 
-			if shouldSwap {
-				ordered[i], ordered[j] = ordered[j], ordered[i]
+		// For RTL: right to left (descending X)
+		if lineDir == RTL {
+			if abs(ordered[i].X-ordered[j].X) < tolerance {
+				return false // Treat as equal, preserve order (i comes before j)
 			}
+			return ordered[i].X > ordered[j].X
 		}
-	}
+
+		// For LTR: left to right (ascending X)
+		if abs(ordered[i].X-ordered[j].X) < tolerance {
+			return false // Treat as equal, preserve order (i comes before j)
+		}
+		return ordered[i].X < ordered[j].X
+	})
 
 	return ordered
 }

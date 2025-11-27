@@ -188,12 +188,18 @@ func (d *LineDetector) groupIntoLines(fragments []text.TextFragment) [][]text.Te
 	// Sort fragments by Y (descending, top to bottom in PDF coords) then X
 	sorted := make([]text.TextFragment, len(fragments))
 	copy(sorted, fragments)
-	sort.Slice(sorted, func(i, j int) bool {
+	sort.SliceStable(sorted, func(i, j int) bool {
 		yDiff := sorted[i].Y - sorted[j].Y
 		avgHeight := (sorted[i].Height + sorted[j].Height) / 2
-		tolerance := avgHeight * d.config.LineHeightTolerance
-		if absFloat64(yDiff) > tolerance {
+		yTol := avgHeight * d.config.LineHeightTolerance
+		if absFloat64(yDiff) > yTol {
 			return yDiff > 0 // Higher Y first (top of page)
+		}
+
+		// Same line - sort by X with tolerance
+		xTol := sorted[i].FontSize * xTolerance
+		if absFloat64(sorted[i].X-sorted[j].X) < xTol {
+			return false // Treat as equal, preserve stream order
 		}
 		return sorted[i].X < sorted[j].X // Left to right
 	})
@@ -218,7 +224,12 @@ func (d *LineDetector) groupIntoLines(fragments []text.TextFragment) [][]text.Te
 			currentLine = append(currentLine, frag)
 		} else {
 			// New line - sort current line by X and save it
-			sort.Slice(currentLine, func(i, j int) bool {
+			// Use stable sort with tolerance to handle overlapping fragments (Word/Quartz issue)
+			sort.SliceStable(currentLine, func(i, j int) bool {
+				xTol := currentLine[i].FontSize * xTolerance
+				if absFloat64(currentLine[i].X-currentLine[j].X) < xTol {
+					return false // Treat as equal, preserve stream order
+				}
 				return currentLine[i].X < currentLine[j].X
 			})
 			lines = append(lines, currentLine)
@@ -228,7 +239,11 @@ func (d *LineDetector) groupIntoLines(fragments []text.TextFragment) [][]text.Te
 
 	// Don't forget the last line
 	if len(currentLine) > 0 {
-		sort.Slice(currentLine, func(i, j int) bool {
+		sort.SliceStable(currentLine, func(i, j int) bool {
+			xTol := currentLine[i].FontSize * xTolerance
+			if absFloat64(currentLine[i].X-currentLine[j].X) < xTol {
+				return false // Treat as equal, preserve stream order
+			}
 			return currentLine[i].X < currentLine[j].X
 		})
 		lines = append(lines, currentLine)
