@@ -271,23 +271,17 @@ func (x *XRefParser) parseTraditionalXRef() (*XRefTable, error) {
 
 // parseXRefStream parses an XRef stream (PDF 1.5+)
 func (x *XRefParser) parseXRefStream() (*XRefTable, error) {
-	// Skip past the "num gen obj" line
-	scanner := bufio.NewScanner(x.reader)
-	if !scanner.Scan() {
-		return nil, fmt.Errorf("failed to read object header")
-	}
-	// The line should be "num gen obj", we just skip it
-
-	// Parse the stream object using the object parser
+	// Parse the entire indirect object "num gen obj << ... >> stream ... endstream endobj"
+	// Don't use Scanner here - it buffers ahead and corrupts the reader position
 	parser := NewParser(x.reader)
-	obj, err := parser.ParseObject()
+	indObj, err := parser.ParseIndirectObject()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse xref stream object: %w", err)
 	}
 
-	stream, ok := obj.(*Stream)
+	stream, ok := indObj.Object.(*Stream)
 	if !ok {
-		return nil, fmt.Errorf("xref is not a stream object, got %T", obj)
+		return nil, fmt.Errorf("xref is not a stream object, got %T", indObj.Object)
 	}
 
 	// Verify this is an XRef stream

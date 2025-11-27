@@ -25,13 +25,14 @@ func (v PDFVersion) String() string {
 
 // Reader represents a PDF file reader
 type Reader struct {
-	file      *os.File
-	xrefTable *core.XRefTable
-	trailer   core.Dict
-	version   PDFVersion
-	objCache  map[int]core.Object // Cache for loaded objects
-	fileSize  int64
-	pageTree  *pages.PageTree // Cached page tree
+	file        *os.File
+	xrefTable   *core.XRefTable
+	trailer     core.Dict
+	version     PDFVersion
+	objCache    map[int]core.Object          // Cache for loaded objects
+	objStmCache map[int]*core.ObjectStream   // Cache for object streams
+	fileSize    int64
+	pageTree    *pages.PageTree // Cached page tree
 }
 
 // Ensure Reader implements pages.ObjectResolver
@@ -46,9 +47,10 @@ func NewReader(file *os.File) (*Reader, error) {
 	}
 
 	reader := &Reader{
-		file:     file,
-		objCache: make(map[int]core.Object),
-		fileSize: fileInfo.Size(),
+		file:        file,
+		objCache:    make(map[int]core.Object),
+		objStmCache: make(map[int]*core.ObjectStream),
+		fileSize:    fileInfo.Size(),
 	}
 
 	// Parse PDF header
@@ -164,6 +166,7 @@ func (r *Reader) Trailer() core.Dict {
 
 // GetObject loads an object by its number
 // Uses caching to avoid re-reading objects
+// Supports both uncompressed objects and objects in object streams (PDF 1.5+)
 func (r *Reader) GetObject(objNum int) (core.Object, error) {
 	// Check cache first
 	if obj, ok := r.objCache[objNum]; ok {
@@ -180,6 +183,33 @@ func (r *Reader) GetObject(objNum int) (core.Object, error) {
 		return nil, fmt.Errorf("object %d is not in use", objNum)
 	}
 
+	var obj core.Object
+	var err error
+
+	// Handle based on entry type
+	switch entry.Type {
+	case core.XRefEntryCompressed:
+		// Object is stored in an object stream (PDF 1.5+)
+		obj, err = r.getCompressedObject(objNum, entry)
+	case core.XRefEntryUncompressed:
+		// Standard uncompressed object
+		obj, err = r.getUncompressedObject(objNum, entry)
+	default:
+		return nil, fmt.Errorf("unexpected entry type for object %d: %v", objNum, entry.Type)
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	// Cache the object
+	r.objCache[objNum] = obj
+
+	return obj, nil
+}
+
+// getUncompressedObject reads an object directly from the file
+func (r *Reader) getUncompressedObject(objNum int, entry *core.XRefEntry) (core.Object, error) {
 	// Seek to object position
 	_, err := r.file.Seek(entry.Offset, io.SeekStart)
 	if err != nil {
@@ -198,10 +228,76 @@ func (r *Reader) GetObject(objNum int) (core.Object, error) {
 		return nil, fmt.Errorf("object number mismatch: expected %d, got %d", objNum, indObj.Ref.Number)
 	}
 
-	// Cache the object
-	r.objCache[objNum] = indObj.Object
-
 	return indObj.Object, nil
+}
+
+// getCompressedObject extracts an object from an object stream
+func (r *Reader) getCompressedObject(objNum int, entry *core.XRefEntry) (core.Object, error) {
+	// For compressed entries:
+	// - entry.Offset is the object stream number
+	// - entry.Generation is the index within the object stream
+	objStmNum := int(entry.Offset)
+	index := entry.Generation
+
+	// Get or load the object stream
+	objStm, err := r.getObjectStream(objStmNum)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get object stream %d for object %d: %w", objStmNum, objNum, err)
+	}
+
+	// Extract the object by index
+	obj, extractedObjNum, err := objStm.GetObjectByIndex(index)
+	if err != nil {
+		return nil, fmt.Errorf("failed to extract object %d from stream %d at index %d: %w",
+			objNum, objStmNum, index, err)
+	}
+
+	// Verify the object number matches
+	if extractedObjNum != objNum {
+		return nil, fmt.Errorf("object number mismatch in stream: expected %d, got %d", objNum, extractedObjNum)
+	}
+
+	return obj, nil
+}
+
+// getObjectStream loads and caches an object stream
+func (r *Reader) getObjectStream(objStmNum int) (*core.ObjectStream, error) {
+	// Check cache first
+	if objStm, ok := r.objStmCache[objStmNum]; ok {
+		return objStm, nil
+	}
+
+	// Load the object stream object (must be uncompressed - object streams can't be in other object streams)
+	entry, ok := r.xrefTable.Get(objStmNum)
+	if !ok {
+		return nil, fmt.Errorf("object stream %d not found in xref table", objStmNum)
+	}
+
+	if entry.Type == core.XRefEntryCompressed {
+		return nil, fmt.Errorf("object stream %d cannot be in another object stream", objStmNum)
+	}
+
+	// Load the stream object
+	streamObj, err := r.getUncompressedObject(objStmNum, entry)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load object stream %d: %w", objStmNum, err)
+	}
+
+	stream, ok := streamObj.(*core.Stream)
+	if !ok {
+		return nil, fmt.Errorf("object %d is not a stream (got %T)", objStmNum, streamObj)
+	}
+
+	// Create the ObjectStream wrapper
+	objStm, err := core.NewObjectStream(stream)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create object stream from object %d: %w", objStmNum, err)
+	}
+
+	// Cache the object stream
+	r.objStmCache[objStmNum] = objStm
+
+	return objStm, nil
 }
 
 // ResolveReference resolves an indirect reference
@@ -285,15 +381,21 @@ func (r *Reader) XRefTable() *core.XRefTable {
 	return r.xrefTable
 }
 
-// ClearCache clears the object cache
+// ClearCache clears the object cache and object stream cache
 // Useful for freeing memory when processing large PDFs
 func (r *Reader) ClearCache() {
 	r.objCache = make(map[int]core.Object)
+	r.objStmCache = make(map[int]*core.ObjectStream)
 }
 
 // CacheSize returns the number of cached objects
 func (r *Reader) CacheSize() int {
 	return len(r.objCache)
+}
+
+// ObjectStreamCacheSize returns the number of cached object streams
+func (r *Reader) ObjectStreamCacheSize() int {
+	return len(r.objStmCache)
 }
 
 // Resolve resolves an object if it's an indirect reference, otherwise returns it as-is

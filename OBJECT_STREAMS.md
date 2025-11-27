@@ -1,6 +1,10 @@
-# Object Streams Implementation Plan
+# Object Streams Implementation
 
-This document outlines the implementation of PDF 1.5+ Object Streams (ObjStm) support in tabula.
+This document describes the PDF 1.5+ Object Streams (ObjStm) support in tabula.
+
+## Status: IMPLEMENTED
+
+Object stream support was implemented on 2024-11-27. All phases are complete.
 
 ## Background
 
@@ -41,310 +45,157 @@ In an XRef stream, entries have three types:
 | 1 | Byte offset | Gen number | Uncompressed object |
 | 2 | ObjStm number | Index in stream | **Compressed object** |
 
-Currently, tabula parses Type 2 entries but stores them incorrectly:
-- `Offset` = Object stream number (should be a separate field)
-- `Generation` = Index within stream (generation is always 0 for compressed objects)
+## Implementation Summary
 
-## Current State
-
-### What Works
-- XRef stream detection and parsing (`core/xref.go:245-359`)
-- Binary entry parsing with field widths (`core/xref.go:360-412`)
-- Type 2 entries are recognized (`core/xref.go:401-407`)
-
-### What's Missing
-1. **XRefEntry lacks Type 2 distinction** - No way to know if an entry is compressed
-2. **No object stream parser** - Cannot extract objects from ObjStm
-3. **Reader doesn't handle compressed objects** - Will fail or return wrong data
-4. **No tests with real compressed PDFs**
-
-### Current Code (the TODO)
-
-From `core/xref.go:401-407`:
-```go
-case 2:
-    // Object in object stream (PDF 1.5+)
-    // For now, treat as in-use with special offset encoding
-    // TODO: Full object stream support in a future task
-    entry.InUse = true
-    entry.Offset = field1          // Object stream number
-    entry.Generation = int(field2) // Index within stream
-```
-
-## Implementation Plan
-
-### Phase 1: Data Structure Updates
-
-#### 1.1 Update XRefEntry
+### Phase 1: Data Structure Updates - COMPLETE
 
 **File:** `core/xref.go`
 
-Add fields to distinguish compressed objects:
-
-```go
-type XRefEntry struct {
-    Offset       int64 // Byte offset (Type 1) or object stream number (Type 2)
-    Generation   int   // Generation number (Type 0/1) or index in stream (Type 2)
-    InUse        bool  // true if object is in use
-    Compressed   bool  // true if object is in an object stream (Type 2)
-    ObjStmNum    int   // Object stream number (only valid if Compressed=true)
-    ObjStmIndex  int   // Index within object stream (only valid if Compressed=true)
-}
-```
-
-Alternative (cleaner): Use a type enum:
+Added `XRefEntryType` enum to distinguish entry types:
 
 ```go
 type XRefEntryType int
 
 const (
-    XRefEntryFree       XRefEntryType = 0
+    XRefEntryFree         XRefEntryType = 0
     XRefEntryUncompressed XRefEntryType = 1
     XRefEntryCompressed   XRefEntryType = 2
 )
 
 type XRefEntry struct {
-    Type         XRefEntryType
-    Offset       int64 // Byte offset (uncompressed) or ObjStm number (compressed)
-    Generation   int   // Generation (uncompressed) or index in stream (compressed)
-    InUse        bool  // Derived: Type != XRefEntryFree
+    Type       XRefEntryType // Entry type (free, uncompressed, or compressed)
+    Offset     int64         // Byte offset (uncompressed) or ObjStm number (compressed)
+    Generation int           // Generation (uncompressed) or index in stream (compressed)
+    InUse      bool          // true if object is in use (Type != XRefEntryFree)
 }
 ```
 
-#### 1.2 Update XRef Stream Parsing
+Updated `parseXRefStreamEntry()` and `parseEntry()` to set the `Type` field correctly.
 
-**File:** `core/xref.go`
+### Phase 2: Object Stream Parser - COMPLETE
 
-Update `parseXRefStreamEntry()` to populate new fields correctly:
+**File:** `core/objstm.go` (new file, ~250 lines)
+
+Created `ObjectStream` type with the following API:
 
 ```go
-case 2:
-    entry.Type = XRefEntryCompressed
-    entry.InUse = true
-    entry.Offset = field1      // Object stream number
-    entry.Generation = int(field2) // Index within stream
+// Create from a stream object
+func NewObjectStream(stream *Stream) (*ObjectStream, error)
+
+// Accessors
+func (os *ObjectStream) N() int                    // Number of objects
+func (os *ObjectStream) First() int                // Byte offset to first object
+func (os *ObjectStream) Extends() *IndirectRef     // Optional extension reference
+
+// Object extraction
+func (os *ObjectStream) GetObjectByIndex(index int) (Object, int, error)
+func (os *ObjectStream) GetObjectByNumber(objNum int) (Object, int, error)
+func (os *ObjectStream) ObjectNumbers() ([]int, error)
+func (os *ObjectStream) ContainsObject(objNum int) (bool, error)
 ```
 
-### Phase 2: Object Stream Parser
+Features:
+- Validates /Type, /N, /First parameters
+- Parses header (object number/offset pairs)
+- Extracts objects by index or object number
+- Caches decoded stream data and parsed objects
+- Supports /Extends reference (for chained object streams)
 
-#### 2.1 Create ObjectStream Type
+**File:** `core/objstm_test.go` (new file, ~300 lines)
 
-**File:** `core/objstm.go` (new file)
+Comprehensive tests for:
+- ObjectStream creation and validation
+- Object extraction by index and number
+- Caching behavior
+- Error handling
+- Edge cases
 
-```go
-// ObjectStream represents a PDF Object Stream (Type /ObjStm)
-type ObjectStream struct {
-    Stream  *Stream           // The underlying stream object
-    N       int               // Number of objects in stream
-    First   int               // Byte offset of first object in decoded data
-    Extends *IndirectRef      // Optional reference to another ObjStm
-    objects map[int]Object    // Cached parsed objects (index -> object)
-    offsets []objectOffset    // Parsed offset pairs
-}
+### Phase 3: Reader Integration - COMPLETE
 
-type objectOffset struct {
-    ObjNum int // Object number
-    Offset int // Byte offset within decoded data (after First)
-}
-```
+**File:** `reader/reader.go`
 
-#### 2.2 Implement Object Stream Parsing
-
-```go
-// ParseObjectStream parses an object stream and returns an ObjectStream
-func ParseObjectStream(stream *Stream) (*ObjectStream, error) {
-    // 1. Verify /Type is /ObjStm
-    // 2. Extract /N (number of objects)
-    // 3. Extract /First (offset to first object data)
-    // 4. Extract optional /Extends
-    // 5. Decode the stream data
-    // 6. Parse the header (N pairs of: objNum offset)
-    // 7. Return ObjectStream ready to extract objects
-}
-
-// GetObject extracts an object by its index within the stream
-func (os *ObjectStream) GetObject(index int) (Object, error) {
-    // 1. Check cache
-    // 2. Find offset for this index
-    // 3. Parse object at that offset
-    // 4. Cache and return
-}
-```
-
-#### 2.3 Object Stream Header Format
-
-The decoded stream data has this structure:
-```
-objNum1 offset1 objNum2 offset2 ... objNumN offsetN [object1][object2]...[objectN]
-```
-
-Example (decoded):
-```
-5 0 6 15
-<< /Type /Catalog /Pages 6 0 R >><< /Type /Pages /Kids [7 0 R] /Count 1 >>
-```
-
-- Object 5 is at offset 0 from `/First`
-- Object 6 is at offset 15 from `/First`
-- `/First` points to where `<< /Type /Catalog...` begins
-
-### Phase 3: Reader Integration
-
-#### 3.1 Update Object Resolution
-
-**File:** `reader/reader.go` (or `core/resolver.go`)
-
-The object resolver must handle compressed objects:
-
-```go
-func (r *Reader) ResolveObject(objNum, gen int) (Object, error) {
-    entry := r.xref.GetEntry(objNum)
-    if entry == nil {
-        return nil, fmt.Errorf("object %d not found", objNum)
-    }
-
-    if !entry.InUse {
-        return nil, fmt.Errorf("object %d is free", objNum)
-    }
-
-    if entry.Type == XRefEntryCompressed {
-        return r.resolveCompressedObject(objNum, entry)
-    }
-
-    return r.resolveUncompressedObject(objNum, entry)
-}
-
-func (r *Reader) resolveCompressedObject(objNum int, entry *XRefEntry) (Object, error) {
-    objStmNum := int(entry.Offset)
-    index := entry.Generation
-
-    // Get or parse the object stream
-    objStm, err := r.getObjectStream(objStmNum)
-    if err != nil {
-        return nil, fmt.Errorf("failed to get object stream %d: %w", objStmNum, err)
-    }
-
-    // Extract the object at the given index
-    return objStm.GetObject(index)
-}
-```
-
-#### 3.2 Object Stream Cache
-
-Cache parsed object streams to avoid re-parsing:
+Added `objStmCache` field to cache parsed object streams:
 
 ```go
 type Reader struct {
     // ... existing fields
-    objStmCache map[int]*ObjectStream // Cache of parsed object streams
+    objStmCache map[int]*core.ObjectStream
 }
 ```
 
-### Phase 4: Testing
-
-#### 4.1 Unit Tests
-
-**File:** `core/objstm_test.go`
+Refactored `GetObject()` to handle both entry types:
 
 ```go
-func TestParseObjectStreamHeader(t *testing.T) {
-    // Test parsing "5 0 6 15" header
-}
+func (r *Reader) GetObject(objNum int) (core.Object, error) {
+    // Check cache, lookup XRef entry...
 
-func TestObjectStreamGetObject(t *testing.T) {
-    // Test extracting objects by index
-}
-
-func TestObjectStreamWithExtends(t *testing.T) {
-    // Test /Extends chaining
-}
-```
-
-#### 4.2 Integration Tests
-
-**File:** `reader/reader_objstm_test.go`
-
-```go
-func TestReadCompressedObject(t *testing.T) {
-    // Test reading an object that's in an object stream
-}
-
-func TestMixedCompressedUncompressed(t *testing.T) {
-    // Test PDF with both compressed and uncompressed objects
+    switch entry.Type {
+    case core.XRefEntryCompressed:
+        return r.getCompressedObject(objNum, entry)
+    case core.XRefEntryUncompressed:
+        return r.getUncompressedObject(objNum, entry)
+    }
 }
 ```
 
-#### 4.3 Test PDFs
+Added helper methods:
+- `getUncompressedObject()` - reads object directly from file
+- `getCompressedObject()` - extracts from object stream
+- `getObjectStream()` - loads and caches object streams
+- `ObjectStreamCacheSize()` - returns number of cached streams
 
-Create or obtain test PDFs with object streams:
-- Simple PDF with all objects in one ObjStm
-- PDF with multiple ObjStms
-- PDF with /Extends chains
-- PDF with mixed compressed/uncompressed objects
-- Real-world PDFs from various generators
+Updated `ClearCache()` to clear both object and object stream caches.
 
-### Phase 5: Edge Cases
+### Phase 4: Testing - COMPLETE
 
-#### 5.1 Recursive Object Streams
-
-An object stream cannot contain:
-- Stream objects (including other object streams)
-- Objects with generation number > 0
-- The document's encryption dictionary
-- The document's catalog (usually)
-
-Validate these constraints.
-
-#### 5.2 /Extends Handling
-
-Object streams can extend others:
-```
-<< /Type /ObjStm /N 5 /First 20 /Extends 15 0 R >>
-```
-
-Object 15 is another ObjStm that this one extends. Must handle chains.
-
-#### 5.3 Hybrid PDFs
-
-PDFs can mix:
-- Traditional XRef tables with XRef streams
-- Compressed and uncompressed objects
-- Multiple object streams
-
-Ensure all combinations work.
+All unit tests pass:
+- `core/objstm_test.go` - ObjectStream parsing tests
+- `core/xref_test.go` - Updated to validate Type field
+- `core/xref_stream_test.go` - Updated to validate Type field
+- `reader/reader_test.go` - Existing tests still pass
 
 ## File Changes Summary
 
-| File | Change |
-|------|--------|
-| `core/xref.go` | Add `Type`/`Compressed` fields to XRefEntry |
-| `core/objstm.go` | **New file** - ObjectStream parsing |
-| `core/objstm_test.go` | **New file** - Unit tests |
-| `reader/reader.go` | Update object resolution for compressed objects |
-| `reader/reader_test.go` | Integration tests |
+| File | Change | Lines |
+|------|--------|-------|
+| `core/xref.go` | Added `XRefEntryType` enum, updated `XRefEntry` struct | ~40 |
+| `core/xref_test.go` | Added `TestXRefEntryType`, updated existing tests | ~50 |
+| `core/xref_stream_test.go` | Updated to validate Type field | ~15 |
+| `core/objstm.go` | **New file** - ObjectStream implementation | ~250 |
+| `core/objstm_test.go` | **New file** - Unit tests | ~300 |
+| `reader/reader.go` | Added object stream support to GetObject | ~100 |
 
-## Dependencies
+**Total:** ~755 lines of code
 
-This implementation requires:
-- Working stream decoding (`core/stream.go`) - **Already implemented**
-- Working object parser (`core/parser.go`) - **Already implemented**
-- Working XRef stream parsing (`core/xref.go`) - **Already implemented**
+## How It Works
 
-## Success Criteria
+1. **XRef Parsing**: When parsing XRef streams, Type 2 entries are marked with `XRefEntryCompressed`
+2. **Object Loading**: `Reader.GetObject()` checks the entry type
+3. **Compressed Objects**: For compressed entries:
+   - `entry.Offset` = object stream number
+   - `entry.Generation` = index within stream
+4. **Object Stream Loading**: The reader loads and caches the object stream
+5. **Extraction**: The object is extracted by index from the decoded stream
+6. **Caching**: Both the object stream and extracted objects are cached
 
-1. PDFs with object streams parse correctly
-2. All objects (compressed and uncompressed) are accessible
-3. No performance regression for PDFs without object streams
-4. Test coverage > 80% for new code
-5. Works with real-world PDFs from various generators (Adobe, Chrome print-to-PDF, etc.)
+## Remaining Work
 
-## Estimated Scope
+### Not Yet Implemented
 
-- **XRefEntry updates:** ~20 lines changed
-- **ObjectStream parser:** ~150-200 lines new code
-- **Reader integration:** ~50-100 lines changed
-- **Tests:** ~200-300 lines
-- **Total:** ~400-600 lines of code
+1. **Integration tests with real PDFs** - The current tests use synthetic data. Testing with real-world PDFs from various generators (Adobe, Chrome, etc.) would increase confidence.
+
+### Intentionally Not Implemented
+
+1. **`/Extends` chain following** - The `/Extends` field is parsed and accessible via `ObjectStream.Extends()`, but chains are not automatically followed. This is intentional because:
+   - The XRef table already contains the complete mapping of which object is in which stream
+   - `Reader.GetObject()` uses XRef lookup, not stream traversal
+   - Most PDF libraries (including qpdf) preserve but ignore `/Extends`
+   - Real-world PDFs rarely use `/Extends` chains
+
+### Future Enhancements
+
+1. **PDF Writing** - Add support for writing object streams when creating PDFs
+2. **Memory optimization** - Option to not cache large object streams
 
 ## References
 
@@ -352,16 +203,23 @@ This implementation requires:
   - Section 7.5.7: Object Streams
   - Section 7.5.8: Cross-Reference Streams
   - Table 16: Additional entries specific to an object stream dictionary
-- Existing code:
-  - `core/xref.go:401-407` - Current TODO
-  - `core/stream.go` - Stream decoding
-  - `core/parser.go` - Object parsing
 
-## Post-Implementation
+## Usage
 
-After implementing object streams:
+Object stream support is transparent to users. Simply use `Reader.GetObject()` as usual:
 
-1. Update README claim to be fully accurate
-2. Add object stream support to feature list
-3. Consider adding `/ObjStm` to PDF writing (future enhancement)
-4. Document any limitations discovered during implementation
+```go
+reader, err := reader.Open("document.pdf")
+if err != nil {
+    log.Fatal(err)
+}
+defer reader.Close()
+
+// Works for both compressed and uncompressed objects
+obj, err := reader.GetObject(5)
+if err != nil {
+    log.Fatal(err)
+}
+```
+
+The reader automatically handles the complexity of extracting objects from object streams.
