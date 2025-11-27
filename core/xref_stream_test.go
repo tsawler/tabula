@@ -196,16 +196,28 @@ func TestParseXRefStreamEntry(t *testing.T) {
 				t.Errorf("bytesRead = %d, want %d", bytesRead, tt.wantBytes)
 			}
 
-			// Check entry type based on expected type
+			// Check entry type field
+			var wantEntryType XRefEntryType
 			switch tt.wantType {
-			case 0: // Free
+			case 0:
+				wantEntryType = XRefEntryFree
 				if entry.InUse {
-					t.Errorf("expected free entry, got in-use")
+					t.Errorf("expected free entry (InUse=false), got in-use")
 				}
-			case 1, 2: // In-use or object stream
+			case 1:
+				wantEntryType = XRefEntryUncompressed
 				if !entry.InUse {
-					t.Errorf("expected in-use entry, got free")
+					t.Errorf("expected in-use entry (InUse=true), got free")
 				}
+			case 2:
+				wantEntryType = XRefEntryCompressed
+				if !entry.InUse {
+					t.Errorf("expected in-use entry (InUse=true) for compressed, got free")
+				}
+			}
+
+			if entry.Type != wantEntryType {
+				t.Errorf("Type = %v, want %v", entry.Type, wantEntryType)
 			}
 
 			if entry.Offset != tt.wantField1 {
