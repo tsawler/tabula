@@ -9,8 +9,8 @@ import (
 func TestNewType0Font_BasicFont(t *testing.T) {
 	// Create a minimal CIDFont dictionary
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("HeiseiMin-W3"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -54,8 +54,8 @@ func TestNewType0Font_BasicFont(t *testing.T) {
 
 func TestNewType0Font_VerticalWriting(t *testing.T) {
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("HeiseiMin-W3"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -103,8 +103,8 @@ func TestNewType0Font_NotType0(t *testing.T) {
 
 func TestNewCIDFont_Japanese(t *testing.T) {
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("HeiseiMin-W3"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -156,8 +156,8 @@ func TestNewCIDFont_Chinese(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cidFontDict := core.Dict{
-				"Type":    core.Name("Font"),
-				"Subtype": core.Name("CIDFontType0"),
+				"Type":     core.Name("Font"),
+				"Subtype":  core.Name("CIDFontType0"),
 				"BaseFont": core.Name("STSong-Light"),
 				"CIDSystemInfo": core.Dict{
 					"Registry":   core.String("Adobe"),
@@ -188,8 +188,8 @@ func TestNewCIDFont_Chinese(t *testing.T) {
 
 func TestNewCIDFont_Korean(t *testing.T) {
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("HYSMyeongJo-Medium"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -218,8 +218,8 @@ func TestNewCIDFont_Korean(t *testing.T) {
 
 func TestCIDFont_CIDSystemInfo(t *testing.T) {
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("TestFont"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -259,8 +259,8 @@ func TestCIDFont_CIDSystemInfo(t *testing.T) {
 func TestCIDFont_WidthArray_RangeFormat(t *testing.T) {
 	// W array format: cfirst clast w
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("TestFont"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -298,8 +298,8 @@ func TestCIDFont_WidthArray_RangeFormat(t *testing.T) {
 func TestCIDFont_WidthArray_ArrayFormat(t *testing.T) {
 	// W array format: c [w1 w2 ... wn]
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("TestFont"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -344,8 +344,8 @@ func TestCIDFont_WidthArray_ArrayFormat(t *testing.T) {
 func TestCIDFont_WidthArray_Mixed(t *testing.T) {
 	// W array with both formats
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("TestFont"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -403,8 +403,8 @@ func TestCIDFont_WidthArray_Mixed(t *testing.T) {
 func TestCIDFont_DefaultWidth(t *testing.T) {
 	// Font without W array should use DW
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("TestFont"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -431,8 +431,8 @@ func TestCIDFont_DefaultWidth(t *testing.T) {
 func TestCIDFont_NoDW(t *testing.T) {
 	// Font without DW should use 1000 as default
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("TestFont"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -455,8 +455,8 @@ func TestCIDFont_NoDW(t *testing.T) {
 func TestCIDFont_CIDFontType2(t *testing.T) {
 	// Test CIDFontType2 (TrueType-based CIDFont)
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType2"), // TrueType-based
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType2"), // TrueType-based
 		"BaseFont": core.Name("TestFont"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -506,11 +506,11 @@ func TestType0Font_MissingDescendantFonts(t *testing.T) {
 
 func TestType0Font_EmptyDescendantFonts(t *testing.T) {
 	fontDict := core.Dict{
-		"Type":             core.Name("Font"),
-		"Subtype":          core.Name("Type0"),
-		"BaseFont":         core.Name("TestFont"),
-		"Encoding":         core.Name("Identity-H"),
-		"DescendantFonts":  core.Array{}, // Empty array
+		"Type":            core.Name("Font"),
+		"Subtype":         core.Name("Type0"),
+		"BaseFont":        core.Name("TestFont"),
+		"Encoding":        core.Name("Identity-H"),
+		"DescendantFonts": core.Array{}, // Empty array
 	}
 
 	_, err := NewType0Font(fontDict, mockResolver)
@@ -521,8 +521,8 @@ func TestType0Font_EmptyDescendantFonts(t *testing.T) {
 
 func TestCIDFont_MissingCIDSystemInfo(t *testing.T) {
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("TestFont"),
 		// Missing CIDSystemInfo
 	}
@@ -540,8 +540,8 @@ func TestType0Font_ToUnicode(t *testing.T) {
 	}
 
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("HeiseiMin-W3"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -577,8 +577,8 @@ func TestType0Font_ToUnicode(t *testing.T) {
 
 func TestType0Font_GetWidth(t *testing.T) {
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("TestFont"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -622,8 +622,8 @@ func TestType0Font_GetWidth(t *testing.T) {
 
 func TestCIDFont_VerticalMetrics_DW2(t *testing.T) {
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("TestFont"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -631,7 +631,7 @@ func TestCIDFont_VerticalMetrics_DW2(t *testing.T) {
 			"Supplement": core.Int(2),
 		},
 		"DW2": core.Array{
-			core.Int(880),  // w1y
+			core.Int(880),   // w1y
 			core.Int(-1000), // w1
 		},
 	}
@@ -686,8 +686,8 @@ func TestCIDFont_FontDescriptor(t *testing.T) {
 	}
 
 	cidFontDict := core.Dict{
-		"Type":    core.Name("Font"),
-		"Subtype": core.Name("CIDFontType0"),
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
 		"BaseFont": core.Name("HeiseiMin-W3"),
 		"CIDSystemInfo": core.Dict{
 			"Registry":   core.String("Adobe"),
@@ -738,8 +738,8 @@ func TestCIDFont_CommonCollections(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cidFontDict := core.Dict{
-				"Type":    core.Name("Font"),
-				"Subtype": core.Name("CIDFontType0"),
+				"Type":     core.Name("Font"),
+				"Subtype":  core.Name("CIDFontType0"),
 				"BaseFont": core.Name("TestFont"),
 				"CIDSystemInfo": core.Dict{
 					"Registry":   core.String("Adobe"),

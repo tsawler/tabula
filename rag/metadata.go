@@ -511,3 +511,245 @@ type CollectionStats struct {
 func (cs *CollectionStats) ToJSON() ([]byte, error) {
 	return json.Marshal(cs)
 }
+
+// ============================================================================
+// Markdown Export
+// ============================================================================
+
+// MarkdownOptions configures markdown output generation
+type MarkdownOptions struct {
+	// IncludeMetadata adds metadata comments at the start
+	IncludeMetadata bool
+
+	// IncludeTableOfContents generates a TOC from section headings
+	IncludeTableOfContents bool
+
+	// IncludeChunkSeparators adds horizontal rules between chunks
+	IncludeChunkSeparators bool
+
+	// IncludePageNumbers adds page references
+	IncludePageNumbers bool
+
+	// IncludeChunkIDs adds chunk IDs as HTML comments
+	IncludeChunkIDs bool
+
+	// HeadingLevelOffset adjusts heading levels (e.g., 1 makes H1 -> H2)
+	HeadingLevelOffset int
+
+	// MaxHeadingLevel caps heading depth (default: 6)
+	MaxHeadingLevel int
+
+	// SectionSeparator is text between major sections (default: "\n\n---\n\n")
+	SectionSeparator string
+}
+
+// DefaultMarkdownOptions returns sensible defaults for markdown generation
+func DefaultMarkdownOptions() MarkdownOptions {
+	return MarkdownOptions{
+		IncludeMetadata:        false,
+		IncludeTableOfContents: false,
+		IncludeChunkSeparators: false,
+		IncludePageNumbers:     false,
+		IncludeChunkIDs:        false,
+		HeadingLevelOffset:     0,
+		MaxHeadingLevel:        6,
+		SectionSeparator:       "\n\n---\n\n",
+	}
+}
+
+// RAGOptimizedMarkdownOptions returns options optimized for RAG ingestion
+func RAGOptimizedMarkdownOptions() MarkdownOptions {
+	return MarkdownOptions{
+		IncludeMetadata:        true,
+		IncludeTableOfContents: false,
+		IncludeChunkSeparators: true,
+		IncludePageNumbers:     true,
+		IncludeChunkIDs:        true,
+		HeadingLevelOffset:     0,
+		MaxHeadingLevel:        6,
+		SectionSeparator:       "\n\n---\n\n",
+	}
+}
+
+// ToMarkdown converts a chunk to markdown format
+func (c *Chunk) ToMarkdown() string {
+	return c.ToMarkdownWithOptions(DefaultMarkdownOptions())
+}
+
+// ToMarkdownWithOptions converts a chunk to markdown with custom options
+func (c *Chunk) ToMarkdownWithOptions(opts MarkdownOptions) string {
+	var sb strings.Builder
+
+	// Add chunk ID as HTML comment if requested
+	if opts.IncludeChunkIDs && c.ID != "" {
+		sb.WriteString(fmt.Sprintf("<!-- chunk: %s -->\n", c.ID))
+	}
+
+	// Add section heading if present
+	if c.Metadata.SectionTitle != "" {
+		level := c.Metadata.HeadingLevel
+		if level == 0 {
+			level = 2 // Default to H2 for sections without explicit level
+		}
+		level += opts.HeadingLevelOffset
+		if level < 1 {
+			level = 1
+		}
+		if opts.MaxHeadingLevel > 0 && level > opts.MaxHeadingLevel {
+			level = opts.MaxHeadingLevel
+		}
+		sb.WriteString(strings.Repeat("#", level))
+		sb.WriteString(" ")
+		sb.WriteString(c.Metadata.SectionTitle)
+		sb.WriteString("\n\n")
+	}
+
+	// Add the main content
+	sb.WriteString(c.Text)
+
+	// Add page reference if requested
+	if opts.IncludePageNumbers && c.Metadata.PageStart > 0 {
+		sb.WriteString("\n\n")
+		sb.WriteString(fmt.Sprintf("*%s*", c.Metadata.GetPageRange()))
+	}
+
+	return sb.String()
+}
+
+// ToMarkdown converts all chunks to a combined markdown document
+func (cc *ChunkCollection) ToMarkdown() string {
+	return cc.ToMarkdownWithOptions(DefaultMarkdownOptions())
+}
+
+// ToMarkdownWithOptions converts all chunks to markdown with custom options
+func (cc *ChunkCollection) ToMarkdownWithOptions(opts MarkdownOptions) string {
+	if len(cc.Chunks) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	// Add document metadata header if requested
+	if opts.IncludeMetadata {
+		sb.WriteString("---\n")
+		if cc.Chunks[0].Metadata.DocumentTitle != "" {
+			sb.WriteString(fmt.Sprintf("title: %q\n", cc.Chunks[0].Metadata.DocumentTitle))
+		}
+		stats := cc.Statistics()
+		sb.WriteString(fmt.Sprintf("chunks: %d\n", stats.TotalChunks))
+		sb.WriteString(fmt.Sprintf("words: %d\n", stats.TotalWords))
+		sb.WriteString(fmt.Sprintf("pages: %d-%d\n", stats.PageStart, stats.PageEnd))
+		sb.WriteString("---\n\n")
+	}
+
+	// Add document title if present
+	if cc.Chunks[0].Metadata.DocumentTitle != "" && !opts.IncludeMetadata {
+		sb.WriteString("# ")
+		sb.WriteString(cc.Chunks[0].Metadata.DocumentTitle)
+		sb.WriteString("\n\n")
+	}
+
+	// Add table of contents if requested
+	if opts.IncludeTableOfContents {
+		toc := cc.generateTableOfContents(opts)
+		if toc != "" {
+			sb.WriteString("## Table of Contents\n\n")
+			sb.WriteString(toc)
+			sb.WriteString("\n\n---\n\n")
+		}
+	}
+
+	// Track current section to avoid duplicate headings
+	currentSection := ""
+
+	// Add each chunk
+	for i, chunk := range cc.Chunks {
+		if i > 0 {
+			if opts.IncludeChunkSeparators {
+				sb.WriteString(opts.SectionSeparator)
+			} else {
+				sb.WriteString("\n\n")
+			}
+		}
+
+		// Check if this is a new section
+		isNewSection := chunk.Metadata.SectionTitle != "" && chunk.Metadata.SectionTitle != currentSection
+
+		if isNewSection {
+			currentSection = chunk.Metadata.SectionTitle
+			// Write chunk with section heading
+			sb.WriteString(chunk.ToMarkdownWithOptions(opts))
+		} else {
+			// Write chunk without section heading (to avoid duplicates)
+			chunkOpts := opts
+			// Create a temporary chunk without section title for content-only output
+			sb.WriteString(chunk.contentToMarkdown(chunkOpts))
+		}
+	}
+
+	return sb.String()
+}
+
+// contentToMarkdown outputs just the chunk content without section heading
+func (c *Chunk) contentToMarkdown(opts MarkdownOptions) string {
+	var sb strings.Builder
+
+	// Add chunk ID as HTML comment if requested
+	if opts.IncludeChunkIDs && c.ID != "" {
+		sb.WriteString(fmt.Sprintf("<!-- chunk: %s -->\n", c.ID))
+	}
+
+	// Add the main content
+	sb.WriteString(c.Text)
+
+	// Add page reference if requested
+	if opts.IncludePageNumbers && c.Metadata.PageStart > 0 {
+		sb.WriteString("\n\n")
+		sb.WriteString(fmt.Sprintf("*%s*", c.Metadata.GetPageRange()))
+	}
+
+	return sb.String()
+}
+
+// generateTableOfContents creates a markdown TOC from section titles
+func (cc *ChunkCollection) generateTableOfContents(opts MarkdownOptions) string {
+	var sb strings.Builder
+	seenSections := make(map[string]bool)
+
+	for _, chunk := range cc.Chunks {
+		if chunk.Metadata.SectionTitle == "" || seenSections[chunk.Metadata.SectionTitle] {
+			continue
+		}
+		seenSections[chunk.Metadata.SectionTitle] = true
+
+		// Calculate indent based on heading level
+		level := chunk.Metadata.HeadingLevel
+		if level == 0 {
+			level = 1
+		}
+		indent := strings.Repeat("  ", level-1)
+
+		// Create anchor link (simple slug)
+		anchor := strings.ToLower(chunk.Metadata.SectionTitle)
+		anchor = strings.ReplaceAll(anchor, " ", "-")
+
+		sb.WriteString(fmt.Sprintf("%s- [%s](#%s)\n", indent, chunk.Metadata.SectionTitle, anchor))
+	}
+
+	return sb.String()
+}
+
+// ToMarkdownChunks returns each chunk as a separate markdown string
+// Useful when you need to process chunks individually but want markdown format
+func (cc *ChunkCollection) ToMarkdownChunks() []string {
+	return cc.ToMarkdownChunksWithOptions(DefaultMarkdownOptions())
+}
+
+// ToMarkdownChunksWithOptions returns each chunk as separate markdown strings
+func (cc *ChunkCollection) ToMarkdownChunksWithOptions(opts MarkdownOptions) []string {
+	result := make([]string, len(cc.Chunks))
+	for i, chunk := range cc.Chunks {
+		result[i] = chunk.ToMarkdownWithOptions(opts)
+	}
+	return result
+}

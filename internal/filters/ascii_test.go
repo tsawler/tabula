@@ -40,7 +40,7 @@ func TestASCIIHexDecodeWithWhitespace(t *testing.T) {
 func TestASCIIHexDecodeOddDigits(t *testing.T) {
 	// Odd number - last digit assumed to be followed by 0
 	encoded := []byte("48656C6C6>") // Missing final F
-	expected := []byte("Hell`")      // 6 becomes 60
+	expected := []byte("Hell`")     // 6 becomes 60
 
 	decoded, err := ASCIIHexDecode(encoded)
 	if err != nil {

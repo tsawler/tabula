@@ -491,99 +491,99 @@ var glyphNameToUnicode = map[string]rune{
 	"y": 0x0079, "z": 0x007A,
 
 	// Currency and special symbols
-	"Euro":          0x20AC, // €
-	"bullet":        0x2022, // •
-	"dagger":        0x2020, // †
-	"daggerdbl":     0x2021, // ‡
-	"ellipsis":      0x2026, // …
-	"emdash":        0x2014, // —
-	"endash":        0x2013, // –
-	"trademark":     0x2122, // ™
-	"copyright":     0x00A9, // ©
-	"registered":    0x00AE, // ®
-	"cent":          0x00A2, // ¢
-	"sterling":      0x00A3, // £
-	"yen":           0x00A5, // ¥
-	"florin":        0x0192, // ƒ
-	"section":       0x00A7, // §
-	"paragraph":     0x00B6, // ¶
-	"degree":        0x00B0, // °
-	"exclamdown":    0x00A1, // ¡
-	"questiondown":  0x00BF, // ¿
-	"guillemotleft": 0x00AB, // «
+	"Euro":           0x20AC, // €
+	"bullet":         0x2022, // •
+	"dagger":         0x2020, // †
+	"daggerdbl":      0x2021, // ‡
+	"ellipsis":       0x2026, // …
+	"emdash":         0x2014, // —
+	"endash":         0x2013, // –
+	"trademark":      0x2122, // ™
+	"copyright":      0x00A9, // ©
+	"registered":     0x00AE, // ®
+	"cent":           0x00A2, // ¢
+	"sterling":       0x00A3, // £
+	"yen":            0x00A5, // ¥
+	"florin":         0x0192, // ƒ
+	"section":        0x00A7, // §
+	"paragraph":      0x00B6, // ¶
+	"degree":         0x00B0, // °
+	"exclamdown":     0x00A1, // ¡
+	"questiondown":   0x00BF, // ¿
+	"guillemotleft":  0x00AB, // «
 	"guillemotright": 0x00BB, // »
 	"guilsinglleft":  0x2039, // ‹
 	"guilsinglright": 0x203A, // ›
 
 	// Accented characters - Latin-1 supplement
-	"Agrave":   0x00C0, // À
-	"Aacute":   0x00C1, // Á
+	"Agrave":      0x00C0, // À
+	"Aacute":      0x00C1, // Á
 	"Acircumflex": 0x00C2, // Â
-	"Atilde":   0x00C3, // Ã
-	"Adieresis": 0x00C4, // Ä
-	"Aring":    0x00C5, // Å
-	"AE":       0x00C6, // Æ
-	"Ccedilla": 0x00C7, // Ç
-	"Egrave":   0x00C8, // È
-	"Eacute":   0x00C9, // É
+	"Atilde":      0x00C3, // Ã
+	"Adieresis":   0x00C4, // Ä
+	"Aring":       0x00C5, // Å
+	"AE":          0x00C6, // Æ
+	"Ccedilla":    0x00C7, // Ç
+	"Egrave":      0x00C8, // È
+	"Eacute":      0x00C9, // É
 	"Ecircumflex": 0x00CA, // Ê
-	"Edieresis": 0x00CB, // Ë
-	"Igrave":   0x00CC, // Ì
-	"Iacute":   0x00CD, // Í
+	"Edieresis":   0x00CB, // Ë
+	"Igrave":      0x00CC, // Ì
+	"Iacute":      0x00CD, // Í
 	"Icircumflex": 0x00CE, // Î
-	"Idieresis": 0x00CF, // Ï
-	"Eth":      0x00D0, // Ð
-	"Ntilde":   0x00D1, // Ñ
-	"Ograve":   0x00D2, // Ò
-	"Oacute":   0x00D3, // Ó
+	"Idieresis":   0x00CF, // Ï
+	"Eth":         0x00D0, // Ð
+	"Ntilde":      0x00D1, // Ñ
+	"Ograve":      0x00D2, // Ò
+	"Oacute":      0x00D3, // Ó
 	"Ocircumflex": 0x00D4, // Ô
-	"Otilde":   0x00D5, // Õ
-	"Odieresis": 0x00D6, // Ö
-	"Oslash":   0x00D8, // Ø
-	"Ugrave":   0x00D9, // Ù
-	"Uacute":   0x00DA, // Ú
+	"Otilde":      0x00D5, // Õ
+	"Odieresis":   0x00D6, // Ö
+	"Oslash":      0x00D8, // Ø
+	"Ugrave":      0x00D9, // Ù
+	"Uacute":      0x00DA, // Ú
 	"Ucircumflex": 0x00DB, // Û
-	"Udieresis": 0x00DC, // Ü
-	"Yacute":   0x00DD, // Ý
-	"Thorn":    0x00DE, // Þ
-	"germandbls": 0x00DF, // ß
+	"Udieresis":   0x00DC, // Ü
+	"Yacute":      0x00DD, // Ý
+	"Thorn":       0x00DE, // Þ
+	"germandbls":  0x00DF, // ß
 
-	"agrave":   0x00E0, // à
-	"aacute":   0x00E1, // á
+	"agrave":      0x00E0, // à
+	"aacute":      0x00E1, // á
 	"acircumflex": 0x00E2, // â
-	"atilde":   0x00E3, // ã
-	"adieresis": 0x00E4, // ä
-	"aring":    0x00E5, // å
-	"ae":       0x00E6, // æ
-	"ccedilla": 0x00E7, // ç
-	"egrave":   0x00E8, // è
-	"eacute":   0x00E9, // é
+	"atilde":      0x00E3, // ã
+	"adieresis":   0x00E4, // ä
+	"aring":       0x00E5, // å
+	"ae":          0x00E6, // æ
+	"ccedilla":    0x00E7, // ç
+	"egrave":      0x00E8, // è
+	"eacute":      0x00E9, // é
 	"ecircumflex": 0x00EA, // ê
-	"edieresis": 0x00EB, // ë
-	"igrave":   0x00EC, // ì
-	"iacute":   0x00ED, // í
+	"edieresis":   0x00EB, // ë
+	"igrave":      0x00EC, // ì
+	"iacute":      0x00ED, // í
 	"icircumflex": 0x00EE, // î
-	"idieresis": 0x00EF, // ï
-	"eth":      0x00F0, // ð
-	"ntilde":   0x00F1, // ñ
-	"ograve":   0x00F2, // ò
-	"oacute":   0x00F3, // ó
+	"idieresis":   0x00EF, // ï
+	"eth":         0x00F0, // ð
+	"ntilde":      0x00F1, // ñ
+	"ograve":      0x00F2, // ò
+	"oacute":      0x00F3, // ó
 	"ocircumflex": 0x00F4, // ô
-	"otilde":   0x00F5, // õ
-	"odieresis": 0x00F6, // ö
-	"oslash":   0x00F8, // ø
-	"ugrave":   0x00F9, // ù
-	"uacute":   0x00FA, // ú
+	"otilde":      0x00F5, // õ
+	"odieresis":   0x00F6, // ö
+	"oslash":      0x00F8, // ø
+	"ugrave":      0x00F9, // ù
+	"uacute":      0x00FA, // ú
 	"ucircumflex": 0x00FB, // û
-	"udieresis": 0x00FC, // ü
-	"yacute":   0x00FD, // ý
-	"thorn":    0x00FE, // þ
-	"ydieresis": 0x00FF, // ÿ
+	"udieresis":   0x00FC, // ü
+	"yacute":      0x00FD, // ý
+	"thorn":       0x00FE, // þ
+	"ydieresis":   0x00FF, // ÿ
 
 	// Fractions
-	"fraction":     0x2044, // ⁄
-	"onehalf":      0x00BD, // ½
-	"onequarter":   0x00BC, // ¼
+	"fraction":      0x2044, // ⁄
+	"onehalf":       0x00BD, // ½
+	"onequarter":    0x00BC, // ¼
 	"threequarters": 0x00BE, // ¾
 
 	// Math and technical

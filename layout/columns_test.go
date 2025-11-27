@@ -267,11 +267,11 @@ func TestColumnDetector_PartialVerticalGap(t *testing.T) {
 
 func TestColumnDetector_CustomConfig(t *testing.T) {
 	config := ColumnConfig{
-		MinColumnWidth:    30.0,  // Allow narrower columns
-		MinGapWidth:       10.0,  // Allow narrower gaps
-		MinGapHeightRatio: 0.3,   // Lower vertical threshold
-		MaxColumns:        4,     // Limit to 4 columns
-		MergeThreshold:    5.0,   // Tighter merging
+		MinColumnWidth:    30.0, // Allow narrower columns
+		MinGapWidth:       10.0, // Allow narrower gaps
+		MinGapHeightRatio: 0.3,  // Lower vertical threshold
+		MaxColumns:        4,    // Limit to 4 columns
+		MergeThreshold:    5.0,  // Tighter merging
 	}
 
 	detector := NewColumnDetectorWithConfig(config)

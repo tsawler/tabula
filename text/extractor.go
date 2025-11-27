@@ -367,12 +367,12 @@ func (e *Extractor) showText(data []byte) {
 	// Vertical vector (0, 1) transforms to (c, d)
 	// So vertical scaling factor is sqrt(c^2 + d^2)
 	ctmScale := math.Sqrt(ctm[2]*ctm[2] + ctm[3]*ctm[3])
-	
+
 	// If CTM is identity (or close to it), scale is 1
 	if ctmScale == 0 {
 		ctmScale = 1.0
 	}
-	
+
 	deviceFontSize := fontSize * ctmScale
 
 	fragment := TextFragment{
@@ -400,10 +400,10 @@ func (e *Extractor) showText(data []byte) {
 	// ShowTextWithWidth adds Tc and Tw scaled by Th.
 	// It assumes 'width' is the glyph width.
 	// We should apply horizontal scaling to 'width' here because GetStringWidth doesn't know about Th.
-	
+
 	hScale := e.gs.Text.HorizontalScaling / 100.0
 	scaledWidth := width * hScale
-	
+
 	e.gs.ShowTextWithWidth(string(data), scaledWidth)
 }
 
@@ -421,7 +421,7 @@ func (e *Extractor) showTextArray(arr core.Array) {
 			// Also need to apply horizontal scaling
 			hScale := e.gs.Text.HorizontalScaling / 100.0
 			adjustment := -float64(v) * e.gs.GetFontSize() * hScale / 1000.0
-			
+
 			// Update text matrix
 			tm := e.gs.GetTextMatrix()
 			tm[4] += adjustment
@@ -493,13 +493,13 @@ func (e *Extractor) GetText() string {
 
 // lineMetrics holds computed metrics for a line to enable smart spacing decisions
 type lineMetrics struct {
-	isCharacterLevel       bool    // True if fragments are single/few characters each
-	hasExplicitSpaces      bool    // True if line has explicit space character fragments
-	avgFragmentLen         float64 // Average number of characters per fragment
-	medianGap              float64 // Median gap between fragments (for character-level)
-	avgGap                 float64 // Average gap between fragments
-	maxNonSpaceGap         float64 // Maximum gap between non-space fragments
-	typicalCharGap         float64 // Typical inter-character gap (25th percentile)
+	isCharacterLevel  bool    // True if fragments are single/few characters each
+	hasExplicitSpaces bool    // True if line has explicit space character fragments
+	avgFragmentLen    float64 // Average number of characters per fragment
+	medianGap         float64 // Median gap between fragments (for character-level)
+	avgGap            float64 // Average gap between fragments
+	maxNonSpaceGap    float64 // Maximum gap between non-space fragments
+	typicalCharGap    float64 // Typical inter-character gap (25th percentile)
 }
 
 // calculateLineMetrics computes metrics for a line to enable smart spacing

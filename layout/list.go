@@ -15,12 +15,12 @@ import (
 type ListType int
 
 const (
-	ListTypeUnknown ListType = iota
-	ListTypeBullet           // Bullet points (•, -, *, etc.)
-	ListTypeNumbered         // Numbered (1., 2., 3.)
-	ListTypeLettered         // Lettered (a., b., c. or A., B., C.)
-	ListTypeRoman            // Roman numerals (i., ii., iii. or I., II., III.)
-	ListTypeCheckbox         // Checkbox lists (☐, ☑, ✓)
+	ListTypeUnknown  ListType = iota
+	ListTypeBullet            // Bullet points (•, -, *, etc.)
+	ListTypeNumbered          // Numbered (1., 2., 3.)
+	ListTypeLettered          // Lettered (a., b., c. or A., B., C.)
+	ListTypeRoman             // Roman numerals (i., ii., iii. or I., II., III.)
+	ListTypeCheckbox          // Checkbox lists (☐, ☑, ✓)
 )
 
 // String returns a string representation of the list type
@@ -45,16 +45,16 @@ func (t ListType) String() string {
 type BulletStyle int
 
 const (
-	BulletStyleUnknown BulletStyle = iota
-	BulletStyleDisc               // • (filled circle)
-	BulletStyleCircle             // ○ (empty circle)
-	BulletStyleSquare             // ■ (filled square)
-	BulletStyleDash               // - (dash)
-	BulletStyleAsterisk           // * (asterisk)
-	BulletStyleArrow              // → or ▶ (arrow)
-	BulletStyleTriangle           // ▪ or ▸ (triangle)
-	BulletStyleCheckEmpty         // ☐ (empty checkbox)
-	BulletStyleCheckFilled        // ☑ or ✓ (checked)
+	BulletStyleUnknown     BulletStyle = iota
+	BulletStyleDisc                    // • (filled circle)
+	BulletStyleCircle                  // ○ (empty circle)
+	BulletStyleSquare                  // ■ (filled square)
+	BulletStyleDash                    // - (dash)
+	BulletStyleAsterisk                // * (asterisk)
+	BulletStyleArrow                   // → or ▶ (arrow)
+	BulletStyleTriangle                // ▪ or ▸ (triangle)
+	BulletStyleCheckEmpty              // ☐ (empty checkbox)
+	BulletStyleCheckFilled             // ☑ or ✓ (checked)
 )
 
 // String returns a string representation of the bullet style

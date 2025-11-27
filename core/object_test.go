@@ -49,10 +49,10 @@ func TestNull(t *testing.T) {
 // TestBool tests the Bool object
 func TestBool(t *testing.T) {
 	tests := []struct {
-		name   string
-		value  Bool
-		wantS  string
-		wantT  ObjectType
+		name  string
+		value Bool
+		wantS string
+		wantT ObjectType
 	}{
 		{"true", Bool(true), "true", ObjBool},
 		{"false", Bool(false), "false", ObjBool},
@@ -279,7 +279,7 @@ func TestArray(t *testing.T) {
 func TestDict(t *testing.T) {
 	t.Run("basic operations", func(t *testing.T) {
 		dict := Dict{
-			"Type": Name("Page"),
+			"Type":  Name("Page"),
 			"Count": Int(10),
 		}
 

@@ -337,7 +337,6 @@ func (p *Parser) parseStream(dict Dict) (*Stream, error) {
 		return nil, fmt.Errorf("expected 'stream' keyword")
 	}
 
-
 	// Get the length from the dictionary
 	lengthObj := dict.Get("Length")
 	if lengthObj == nil {
@@ -386,7 +385,6 @@ func (p *Parser) parseStream(dict Dict) (*Stream, error) {
 		}
 		data = append(data, moreData...)
 	}
-
 
 	// After the stream data, there should be an 'endstream' keyword
 	// The lexer is now positioned right after the binary data

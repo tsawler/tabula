@@ -92,7 +92,7 @@ func TestBoundaryDetector_isListIntro(t *testing.T) {
 	detector := NewBoundaryDetector()
 
 	tests := []struct {
-		text   string
+		text    string
 		isIntro bool
 	}{
 		{"The following features:", true},
@@ -129,11 +129,11 @@ func TestIsSentenceEnd(t *testing.T) {
 		{"Hello world. How are you?", 11, true},
 		{"Hello world? I'm fine.", 11, true},
 		{"Hello world! Great.", 11, true},
-		{"Mr. Smith is here.", 2, false},    // Abbreviation
-		{"Dr. Jones arrived.", 2, false},    // Abbreviation
-		{"e.g. this example", 3, false},     // Abbreviation
-		{"The value is 3.14", 14, false},    // Decimal number
-		{"Hello", 4, false},                 // No punctuation
+		{"Mr. Smith is here.", 2, false}, // Abbreviation
+		{"Dr. Jones arrived.", 2, false}, // Abbreviation
+		{"e.g. this example", 3, false},  // Abbreviation
+		{"The value is 3.14", 14, false}, // Decimal number
+		{"Hello", 4, false},              // No punctuation
 	}
 
 	for _, tt := range tests {
@@ -365,12 +365,12 @@ func TestIsWithinAtomicBlock(t *testing.T) {
 	}{
 		{0, false},
 		{1, false},
-		{2, true},  // Start of first atomic
-		{3, true},  // Middle of first atomic
-		{4, true},  // End of first atomic
+		{2, true}, // Start of first atomic
+		{3, true}, // Middle of first atomic
+		{4, true}, // End of first atomic
 		{5, false},
 		{6, false},
-		{7, true},  // Single-element atomic
+		{7, true}, // Single-element atomic
 		{8, false},
 	}
 

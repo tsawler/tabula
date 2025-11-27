@@ -21,14 +21,14 @@ type TrueTypeFont struct {
 	ToUnicode      *core.Stream // CMap for character code to Unicode mapping
 
 	// TrueType font program data
-	FontProgram []byte          // Raw font program from FontFile2
+	FontProgram []byte            // Raw font program from FontFile2
 	Tables      map[string][]byte // Parsed TrueType tables
 
 	// Parsed table data
-	unitsPerEm   uint16
-	glyphWidths  map[uint16]uint16 // Glyph ID -> width
-	cmapTable    *CMapTable        // Character to glyph mapping
-	isSubset     bool              // Whether this is a subset font
+	unitsPerEm  uint16
+	glyphWidths map[uint16]uint16 // Glyph ID -> width
+	cmapTable   *CMapTable        // Character to glyph mapping
+	isSubset    bool              // Whether this is a subset font
 }
 
 // CMapTable represents a TrueType cmap table

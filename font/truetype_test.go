@@ -41,9 +41,9 @@ func TestNewTrueTypeFont_WithWidths(t *testing.T) {
 		"FirstChar": core.Int(32),  // Space
 		"LastChar":  core.Int(126), // Tilde
 		"Widths": core.Array{
-			core.Int(278),  // Space width
-			core.Int(278),  // ! width
-			core.Int(355),  // " width
+			core.Int(278), // Space width
+			core.Int(278), // ! width
+			core.Int(355), // " width
 		},
 	}
 

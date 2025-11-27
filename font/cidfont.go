@@ -13,9 +13,9 @@ type Type0Font struct {
 
 	// Type0-specific fields
 	Encoding       string
-	DescendantFont *CIDFont       // The actual CIDFont
-	ToUnicode      *core.Stream   // CMap for CID to Unicode mapping
-	IsVertical     bool           // true for Identity-V, false for Identity-H
+	DescendantFont *CIDFont     // The actual CIDFont
+	ToUnicode      *core.Stream // CMap for CID to Unicode mapping
+	IsVertical     bool         // true for Identity-V, false for Identity-H
 }
 
 // CIDFont represents a CIDFont (Character ID keyed font)
@@ -25,11 +25,11 @@ type CIDFont struct {
 	Subtype        string // CIDFontType0 or CIDFontType2
 	CIDSystemInfo  *CIDSystemInfo
 	FontDescriptor *FontDescriptor
-	DW             float64            // Default width
-	W              []WidthRange       // Width specifications
-	DW2            [2]float64         // Default width for vertical writing [w1y w1]
-	W2             []VerticalMetrics  // Vertical metrics
-	CIDToGIDMap    *core.Stream       // CID to GID mapping (for CIDFontType2)
+	DW             float64           // Default width
+	W              []WidthRange      // Width specifications
+	DW2            [2]float64        // Default width for vertical writing [w1y w1]
+	W2             []VerticalMetrics // Vertical metrics
+	CIDToGIDMap    *core.Stream      // CID to GID mapping (for CIDFontType2)
 }
 
 // CIDSystemInfo identifies a character collection
@@ -51,9 +51,9 @@ type WidthRange struct {
 type VerticalMetrics struct {
 	StartCID int
 	EndCID   int
-	W1Y      float64   // Position vector y component
-	W1       float64   // Vertical width
-	Metrics  []Metric  // Individual metrics (if W1Y == 0 && W1 == 0)
+	W1Y      float64  // Position vector y component
+	W1       float64  // Vertical width
+	Metrics  []Metric // Individual metrics (if W1Y == 0 && W1 == 0)
 }
 
 // Metric represents a single vertical metric

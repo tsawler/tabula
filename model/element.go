@@ -59,10 +59,10 @@ type Paragraph struct {
 	ZOrder    int
 }
 
-func (p *Paragraph) Type() ElementType      { return ElementTypeParagraph }
-func (p *Paragraph) BoundingBox() BBox      { return p.BBox }
-func (p *Paragraph) ZIndex() int            { return p.ZOrder }
-func (p *Paragraph) GetText() string        { return p.Text }
+func (p *Paragraph) Type() ElementType { return ElementTypeParagraph }
+func (p *Paragraph) BoundingBox() BBox { return p.BBox }
+func (p *Paragraph) ZIndex() int       { return p.ZOrder }
+func (p *Paragraph) GetText() string   { return p.Text }
 
 // Heading represents a heading
 type Heading struct {
@@ -75,22 +75,22 @@ type Heading struct {
 	ZOrder   int
 }
 
-func (h *Heading) Type() ElementType   { return ElementTypeHeading }
-func (h *Heading) BoundingBox() BBox   { return h.BBox }
-func (h *Heading) ZIndex() int         { return h.ZOrder }
-func (h *Heading) GetText() string     { return h.Text }
+func (h *Heading) Type() ElementType { return ElementTypeHeading }
+func (h *Heading) BoundingBox() BBox { return h.BBox }
+func (h *Heading) ZIndex() int       { return h.ZOrder }
+func (h *Heading) GetText() string   { return h.Text }
 
 // List represents a list (ordered or unordered)
 type List struct {
-	Items     []ListItem
-	Ordered   bool
-	BBox      BBox
-	ZOrder    int
+	Items   []ListItem
+	Ordered bool
+	BBox    BBox
+	ZOrder  int
 }
 
-func (l *List) Type() ElementType   { return ElementTypeList }
-func (l *List) BoundingBox() BBox   { return l.BBox }
-func (l *List) ZIndex() int         { return l.ZOrder }
+func (l *List) Type() ElementType { return ElementTypeList }
+func (l *List) BoundingBox() BBox { return l.BBox }
+func (l *List) ZIndex() int       { return l.ZOrder }
 func (l *List) GetText() string {
 	var text string
 	for _, item := range l.Items {
@@ -101,26 +101,26 @@ func (l *List) GetText() string {
 
 // ListItem represents a single list item
 type ListItem struct {
-	Text     string
-	BBox     BBox
-	Bullet   string
-	Level    int
+	Text   string
+	BBox   BBox
+	Bullet string
+	Level  int
 }
 
 // Image represents an embedded image
 type Image struct {
-	Data      []byte
-	Format    ImageFormat
-	BBox      BBox
-	DPI       float64
-	ZOrder    int
+	Data   []byte
+	Format ImageFormat
+	BBox   BBox
+	DPI    float64
+	ZOrder int
 	// Alt text if available
-	AltText   string
+	AltText string
 }
 
-func (i *Image) Type() ElementType   { return ElementTypeImage }
-func (i *Image) BoundingBox() BBox   { return i.BBox }
-func (i *Image) ZIndex() int         { return i.ZOrder }
+func (i *Image) Type() ElementType { return ElementTypeImage }
+func (i *Image) BoundingBox() BBox { return i.BBox }
+func (i *Image) ZIndex() int       { return i.ZOrder }
 
 // ImageFormat represents image format
 type ImageFormat int
@@ -169,10 +169,10 @@ type TextFragment struct {
 
 // Line represents a geometric line or rectangle
 type Line struct {
-	Start     Point
-	End       Point
-	Width     float64
-	Color     Color
-	IsRect    bool
-	RectFill  bool
+	Start    Point
+	End      Point
+	Width    float64
+	Color    Color
+	IsRect   bool
+	RectFill bool
 }

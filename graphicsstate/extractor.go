@@ -12,9 +12,9 @@ type GraphicsExtractor struct {
 	pathExtractor *PathExtractor
 
 	// Minimum dimensions for filtering
-	MinLineLength    float64
-	MinRectWidth     float64
-	MinRectHeight    float64
+	MinLineLength float64
+	MinRectWidth  float64
+	MinRectHeight float64
 }
 
 // NewGraphicsExtractor creates a new graphics extractor
@@ -23,9 +23,9 @@ func NewGraphicsExtractor() *GraphicsExtractor {
 	return &GraphicsExtractor{
 		gs:            gs,
 		pathExtractor: NewPathExtractor(gs),
-		MinLineLength: 1.0,   // Minimum 1 point line
-		MinRectWidth:  1.0,   // Minimum 1 point wide rectangle
-		MinRectHeight: 1.0,   // Minimum 1 point tall rectangle
+		MinLineLength: 1.0, // Minimum 1 point line
+		MinRectWidth:  1.0, // Minimum 1 point wide rectangle
+		MinRectHeight: 1.0, // Minimum 1 point tall rectangle
 	}
 }
 
@@ -387,12 +387,12 @@ func (ge *GraphicsExtractor) GetGridLines() GridLines {
 
 // Statistics provides statistics about extracted graphics
 type GraphicsStatistics struct {
-	TotalLines       int
-	HorizontalLines  int
-	VerticalLines    int
-	DiagonalLines    int
-	TotalRectangles  int
-	FilledRectangles int
+	TotalLines        int
+	HorizontalLines   int
+	VerticalLines     int
+	DiagonalLines     int
+	TotalRectangles   int
+	FilledRectangles  int
 	StrokedRectangles int
 }
 

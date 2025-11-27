@@ -11,36 +11,36 @@ func TestGetCharDirection(t *testing.T) {
 		want Direction
 	}{
 		// Arabic
-		{"Arabic alif", 'ا', RTL},       // U+0627
-		{"Arabic baa", 'ب', RTL},        // U+0628
-		{"Arabic seen", 'س', RTL},       // U+0633
-		{"Arabic lam", 'ل', RTL},        // U+0644
-		{"Arabic meem", 'م', RTL},       // U+0645
+		{"Arabic alif", 'ا', RTL}, // U+0627
+		{"Arabic baa", 'ب', RTL},  // U+0628
+		{"Arabic seen", 'س', RTL}, // U+0633
+		{"Arabic lam", 'ل', RTL},  // U+0644
+		{"Arabic meem", 'م', RTL}, // U+0645
 
 		// Hebrew
-		{"Hebrew alef", 'א', RTL},       // U+05D0
-		{"Hebrew bet", 'ב', RTL},        // U+05D1
-		{"Hebrew shin", 'ש', RTL},       // U+05E9
+		{"Hebrew alef", 'א', RTL}, // U+05D0
+		{"Hebrew bet", 'ב', RTL},  // U+05D1
+		{"Hebrew shin", 'ש', RTL}, // U+05E9
 
 		// Latin (LTR)
 		{"Latin A", 'A', LTR},
 		{"Latin a", 'a', LTR},
 		{"Latin Z", 'Z', LTR},
-		{"Latin é", 'é', LTR},           // U+00E9
+		{"Latin é", 'é', LTR}, // U+00E9
 
 		// Cyrillic (LTR)
-		{"Cyrillic А", 'А', LTR},        // U+0410
-		{"Cyrillic я", 'я', LTR},        // U+044F
+		{"Cyrillic А", 'А', LTR}, // U+0410
+		{"Cyrillic я", 'я', LTR}, // U+044F
 
 		// Greek (LTR)
-		{"Greek Alpha", 'Α', LTR},       // U+0391
-		{"Greek Omega", 'Ω', LTR},       // U+03A9
+		{"Greek Alpha", 'Α', LTR}, // U+0391
+		{"Greek Omega", 'Ω', LTR}, // U+03A9
 
 		// CJK (LTR in modern usage)
-		{"CJK 中", '中', LTR},            // U+4E2D
-		{"CJK 文", '文', LTR},            // U+6587
-		{"Hiragana あ", 'あ', LTR},       // U+3042
-		{"Katakana ア", 'ア', LTR},       // U+30A2
+		{"CJK 中", '中', LTR},      // U+4E2D
+		{"CJK 文", '文', LTR},      // U+6587
+		{"Hiragana あ", 'あ', LTR}, // U+3042
+		{"Katakana ア", 'ア', LTR}, // U+30A2
 
 		// Neutral characters
 		{"Space", ' ', Neutral},
@@ -81,8 +81,8 @@ func TestDetectDirection(t *testing.T) {
 		{"Hebrew shalom", "שלום", RTL},         // Hello
 
 		// Bidirectional (mixed)
-		{"English with Arabic", "Hello مرحبا World", LTR},  // More English
-		{"Arabic with English", "مرحبا Hello عليكم", RTL},  // More Arabic
+		{"English with Arabic", "Hello مرحبا World", LTR}, // More English
+		{"Arabic with English", "مرحبا Hello عليكم", RTL}, // More Arabic
 
 		// Neutral only
 		{"Numbers only", "12345", Neutral},
@@ -243,8 +243,8 @@ func TestReorderFragmentsForReading(t *testing.T) {
 		{
 			name: "RTL - visual right-to-left",
 			fragments: []TextFragment{
-				{Text: "العالم", X: 10, Width: 30},  // "world" on left visually
-				{Text: "مرحبا", X: 50, Width: 30},   // "hello" on right visually
+				{Text: "العالم", X: 10, Width: 30}, // "world" on left visually
+				{Text: "مرحبا", X: 50, Width: 30},  // "hello" on right visually
 			},
 			direction: RTL,
 			wantOrder: []string{"مرحبا", "العالم"}, // Reading order: right to left
@@ -252,8 +252,8 @@ func TestReorderFragmentsForReading(t *testing.T) {
 		{
 			name: "RTL - already in reading order",
 			fragments: []TextFragment{
-				{Text: "مرحبا", X: 50, Width: 30},   // "hello" on right
-				{Text: "العالم", X: 10, Width: 30},  // "world" on left
+				{Text: "مرحبا", X: 50, Width: 30},  // "hello" on right
+				{Text: "العالم", X: 10, Width: 30}, // "world" on left
 			},
 			direction: RTL,
 			wantOrder: []string{"مرحبا", "العالم"}, // Reading order maintained
@@ -301,8 +301,8 @@ func TestCalculateHorizontalDistance(t *testing.T) {
 		},
 		{
 			name:     "RTL - normal gap",
-			frag:     TextFragment{X: 50, Width: 20},       // Current fragment (reading from right)
-			nextFrag: TextFragment{X: 20, Width: 15},       // Next fragment (to the left)
+			frag:     TextFragment{X: 50, Width: 20}, // Current fragment (reading from right)
+			nextFrag: TextFragment{X: 20, Width: 15}, // Next fragment (to the left)
 			lineDir:  RTL,
 			want:     15.0, // 50 - (20 + 15) = 15
 		},

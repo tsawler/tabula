@@ -56,11 +56,11 @@ type LayoutStats struct {
 
 // ColumnInfo contains information about a detected column
 type ColumnInfo struct {
-	Index  int     // Column index (0-based, left to right)
-	Left   float64 // Left edge X coordinate
-	Right  float64 // Right edge X coordinate
-	Width  float64 // Column width
-	BBox   BBox    // Bounding box of column content
+	Index int     // Column index (0-based, left to right)
+	Left  float64 // Left edge X coordinate
+	Right float64 // Right edge X coordinate
+	Width float64 // Column width
+	BBox  BBox    // Bounding box of column content
 }
 
 // BlockInfo contains information about a detected text block
@@ -146,12 +146,12 @@ type ListInfo struct {
 type ListType int
 
 const (
-	ListTypeUnknown ListType = iota
-	ListTypeBullet           // Bullet points (•, -, *, etc.)
-	ListTypeNumbered         // Numbered (1, 2, 3)
-	ListTypeLettered         // Lettered (a, b, c or A, B, C)
-	ListTypeRoman            // Roman numerals (i, ii, iii or I, II, III)
-	ListTypeCheckbox         // Checkboxes (☐, ☑, ✓)
+	ListTypeUnknown  ListType = iota
+	ListTypeBullet            // Bullet points (•, -, *, etc.)
+	ListTypeNumbered          // Numbered (1, 2, 3)
+	ListTypeLettered          // Lettered (a, b, c or A, B, C)
+	ListTypeRoman             // Roman numerals (i, ii, iii or I, II, III)
+	ListTypeCheckbox          // Checkboxes (☐, ☑, ✓)
 )
 
 func (lt ListType) String() string {

@@ -665,9 +665,9 @@ func ConvertSize(value int, from, to SizeUnit) int {
 // SmallChunkConfig returns config for small chunks (good for precise retrieval)
 func SmallChunkConfig() SizeConfig {
 	return SizeConfig{
-		Target: SizeLimit{Value: 500, Unit: SizeUnitCharacters, Type: LimitTypeSoft},
-		Min:    SizeLimit{Value: 100, Unit: SizeUnitCharacters, Type: LimitTypeSoft},
-		Max:    SizeLimit{Value: 800, Unit: SizeUnitCharacters, Type: LimitTypeHard},
+		Target:                      SizeLimit{Value: 500, Unit: SizeUnitCharacters, Type: LimitTypeSoft},
+		Min:                         SizeLimit{Value: 100, Unit: SizeUnitCharacters, Type: LimitTypeSoft},
+		Max:                         SizeLimit{Value: 800, Unit: SizeUnitCharacters, Type: LimitTypeHard},
 		TokensPerChar:               0.25,
 		AllowExceedForAtomicContent: true,
 		MergeSmallChunks:            true,
@@ -683,9 +683,9 @@ func MediumChunkConfig() SizeConfig {
 // LargeChunkConfig returns config for large chunks (good for context)
 func LargeChunkConfig() SizeConfig {
 	return SizeConfig{
-		Target: SizeLimit{Value: 2000, Unit: SizeUnitCharacters, Type: LimitTypeSoft},
-		Min:    SizeLimit{Value: 500, Unit: SizeUnitCharacters, Type: LimitTypeSoft},
-		Max:    SizeLimit{Value: 4000, Unit: SizeUnitCharacters, Type: LimitTypeHard},
+		Target:                      SizeLimit{Value: 2000, Unit: SizeUnitCharacters, Type: LimitTypeSoft},
+		Min:                         SizeLimit{Value: 500, Unit: SizeUnitCharacters, Type: LimitTypeSoft},
+		Max:                         SizeLimit{Value: 4000, Unit: SizeUnitCharacters, Type: LimitTypeHard},
 		TokensPerChar:               0.25,
 		AllowExceedForAtomicContent: true,
 		MergeSmallChunks:            true,

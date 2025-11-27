@@ -9,20 +9,20 @@ import (
 
 // DocumentChunker provides RAG chunking for Document objects
 type DocumentChunker struct {
-	config      ChunkerConfig
-	sizeConfig  SizeConfig
-	boundaries  *BoundaryDetector
-	listHandler *ListCoherenceAnalyzer
+	config       ChunkerConfig
+	sizeConfig   SizeConfig
+	boundaries   *BoundaryDetector
+	listHandler  *ListCoherenceAnalyzer
 	tableHandler *TableFigureHandler
 }
 
 // NewDocumentChunker creates a new document chunker with default configuration
 func NewDocumentChunker() *DocumentChunker {
 	return &DocumentChunker{
-		config:      DefaultChunkerConfig(),
-		sizeConfig:  DefaultSizeConfig(),
-		boundaries:  NewBoundaryDetector(),
-		listHandler: NewListCoherenceAnalyzer(),
+		config:       DefaultChunkerConfig(),
+		sizeConfig:   DefaultSizeConfig(),
+		boundaries:   NewBoundaryDetector(),
+		listHandler:  NewListCoherenceAnalyzer(),
 		tableHandler: NewTableFigureHandler(),
 	}
 }
@@ -30,10 +30,10 @@ func NewDocumentChunker() *DocumentChunker {
 // NewDocumentChunkerWithConfig creates a document chunker with custom configuration
 func NewDocumentChunkerWithConfig(config ChunkerConfig, sizeConfig SizeConfig) *DocumentChunker {
 	return &DocumentChunker{
-		config:      config,
-		sizeConfig:  sizeConfig,
-		boundaries:  NewBoundaryDetector(),
-		listHandler: NewListCoherenceAnalyzer(),
+		config:       config,
+		sizeConfig:   sizeConfig,
+		boundaries:   NewBoundaryDetector(),
+		listHandler:  NewListCoherenceAnalyzer(),
 		tableHandler: NewTableFigureHandler(),
 	}
 }

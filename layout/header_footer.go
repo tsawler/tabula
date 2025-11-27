@@ -76,11 +76,11 @@ type HeaderFooterConfig struct {
 // DefaultHeaderFooterConfig returns sensible default configuration
 func DefaultHeaderFooterConfig() HeaderFooterConfig {
 	return HeaderFooterConfig{
-		HeaderRegionHeight: 72.0,  // 1 inch
-		FooterRegionHeight: 72.0,  // 1 inch
-		MinOccurrenceRatio: 0.5,   // 50% of pages
-		PositionTolerance:  5.0,   // 5 points
-		XPositionTolerance: 10.0,  // 10 points
+		HeaderRegionHeight: 72.0, // 1 inch
+		FooterRegionHeight: 72.0, // 1 inch
+		MinOccurrenceRatio: 0.5,  // 50% of pages
+		PositionTolerance:  5.0,  // 5 points
+		XPositionTolerance: 10.0, // 10 points
 		MinPages:           2,
 	}
 }
@@ -566,17 +566,17 @@ func normalizeForComparison(text string) string {
 func isPageNumberPattern(normalizedText string) bool {
 	// Common page number patterns (after normalization)
 	patterns := []string{
-		"#",                  // Just a number
-		"Page #",             // "Page 1"
-		"page #",             // "page 1"
-		"- # -",              // "- 1 -"
-		"# of #",             // "1 of 10"
-		"Page # of #",        // "Page 1 of 10"
-		"#/#",                // "1/10"
-		"p. #",               // "p. 1"
-		"p.#",                // "p.1"
-		"pg #",               // "pg 1"
-		"pg. #",              // "pg. 1"
+		"#",           // Just a number
+		"Page #",      // "Page 1"
+		"page #",      // "page 1"
+		"- # -",       // "- 1 -"
+		"# of #",      // "1 of 10"
+		"Page # of #", // "Page 1 of 10"
+		"#/#",         // "1/10"
+		"p. #",        // "p. 1"
+		"p.#",         // "p.1"
+		"pg #",        // "pg 1"
+		"pg. #",       // "pg. 1"
 	}
 
 	trimmed := strings.TrimSpace(normalizedText)

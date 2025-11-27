@@ -9,10 +9,10 @@ import (
 // ObjectResolver resolves indirect references in PDF objects
 // It can recursively resolve references in dictionaries and arrays
 type ObjectResolver struct {
-	reader      ObjectReader
-	visited     map[int]bool // Cycle detection
-	maxDepth    int          // Maximum recursion depth
-	currentDepth int         // Current recursion depth
+	reader       ObjectReader
+	visited      map[int]bool // Cycle detection
+	maxDepth     int          // Maximum recursion depth
+	currentDepth int          // Current recursion depth
 }
 
 // ObjectReader interface allows the resolver to work with any reader

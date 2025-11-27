@@ -157,7 +157,7 @@ type Cell struct {
 	ColSpan  int
 	IsHeader bool
 	// Cell styling
-	Style    CellStyle
+	Style CellStyle
 }
 
 // CellStyle represents cell styling

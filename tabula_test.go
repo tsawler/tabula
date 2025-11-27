@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tsawler/tabula/rag"
 )
 
 // testPDFPath returns the path to a test PDF file
@@ -258,5 +260,262 @@ func TestCloseIdempotent(t *testing.T) {
 	err = ext.Close()
 	if err != nil {
 		t.Errorf("second close failed: %v", err)
+	}
+}
+
+func TestDocument(t *testing.T) {
+	pdfPath := testPDFPath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	doc, warnings, err := Open(pdfPath).Document()
+	if err != nil {
+		t.Fatalf("failed to extract document: %v", err)
+	}
+
+	// Document should not be nil
+	if doc == nil {
+		t.Fatal("expected non-nil document")
+	}
+
+	// Document should have at least one page
+	if doc.PageCount() == 0 {
+		t.Error("expected at least one page")
+	}
+
+	// First page should have layout info
+	page := doc.GetPage(1)
+	if page == nil {
+		t.Fatal("expected to get page 1")
+	}
+
+	// Log warnings for debugging
+	if len(warnings) > 0 {
+		t.Logf("warnings: %v", warnings)
+	}
+}
+
+func TestDocumentWithOptions(t *testing.T) {
+	pdfPath := testPDFPath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	// Extract only page 1
+	doc, _, err := Open(pdfPath).Pages(1).Document()
+	if err != nil {
+		t.Fatalf("failed to extract document: %v", err)
+	}
+
+	// Document should have exactly one page
+	if doc.PageCount() != 1 {
+		t.Errorf("expected 1 page, got %d", doc.PageCount())
+	}
+}
+
+func TestDocumentWithHeaderFooterExclusion(t *testing.T) {
+	pdfPath := testPDFPath("header-footer-column.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	// Extract with header/footer exclusion
+	doc, _, err := Open(pdfPath).ExcludeHeadersAndFooters().Document()
+	if err != nil {
+		t.Fatalf("failed to extract document: %v", err)
+	}
+
+	if doc == nil {
+		t.Fatal("expected non-nil document")
+	}
+
+	if doc.PageCount() == 0 {
+		t.Error("expected at least one page")
+	}
+}
+
+func TestChunks(t *testing.T) {
+	pdfPath := testPDFPath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	chunks, warnings, err := Open(pdfPath).Chunks()
+	if err != nil {
+		t.Fatalf("failed to extract chunks: %v", err)
+	}
+
+	// Chunks should not be nil
+	if chunks == nil {
+		t.Fatal("expected non-nil chunk collection")
+	}
+
+	// Should have at least one chunk
+	if len(chunks.Chunks) == 0 {
+		t.Error("expected at least one chunk")
+	}
+
+	// Each chunk should have non-empty text
+	for i, chunk := range chunks.Chunks {
+		if chunk.Text == "" {
+			t.Errorf("chunk %d has empty text", i)
+		}
+		if chunk.ID == "" {
+			t.Errorf("chunk %d has empty ID", i)
+		}
+	}
+
+	// Log warnings for debugging
+	if len(warnings) > 0 {
+		t.Logf("warnings: %v", warnings)
+	}
+}
+
+func TestChunksWithOptions(t *testing.T) {
+	pdfPath := testPDFPath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	// Extract chunks with header/footer exclusion
+	chunks, _, err := Open(pdfPath).
+		ExcludeHeadersAndFooters().
+		Chunks()
+	if err != nil {
+		t.Fatalf("failed to extract chunks: %v", err)
+	}
+
+	if chunks == nil {
+		t.Fatal("expected non-nil chunk collection")
+	}
+
+	if len(chunks.Chunks) == 0 {
+		t.Error("expected at least one chunk")
+	}
+}
+
+func TestChunksWithConfig(t *testing.T) {
+	pdfPath := testPDFPath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	// Create custom config with smaller chunk size
+	config := rag.ChunkerConfig{
+		TargetChunkSize: 200,
+		MaxChunkSize:    500,
+		MinChunkSize:    50,
+		OverlapSize:     20,
+	}
+	sizeConfig := rag.DefaultSizeConfig()
+
+	chunks, _, err := Open(pdfPath).
+		Pages(1).
+		ChunksWithConfig(config, sizeConfig)
+	if err != nil {
+		t.Fatalf("failed to extract chunks with config: %v", err)
+	}
+
+	if chunks == nil {
+		t.Fatal("expected non-nil chunk collection")
+	}
+
+	// With smaller max chunk size, we might get more chunks
+	// but at minimum we should have at least one
+	if len(chunks.Chunks) == 0 {
+		t.Error("expected at least one chunk")
+	}
+}
+
+func TestDocumentErrorHandling(t *testing.T) {
+	// Test with non-existent file
+	_, _, err := Open("nonexistent.pdf").Document()
+	if err == nil {
+		t.Error("expected error for non-existent file")
+	}
+}
+
+func TestChunksErrorHandling(t *testing.T) {
+	// Test with non-existent file
+	_, _, err := Open("nonexistent.pdf").Chunks()
+	if err == nil {
+		t.Error("expected error for non-existent file")
+	}
+}
+
+func TestToMarkdown(t *testing.T) {
+	pdfPath := testPDFPath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	md, warnings, err := Open(pdfPath).ToMarkdown()
+	if err != nil {
+		t.Fatalf("failed to extract markdown: %v", err)
+	}
+
+	// Markdown should not be empty
+	if md == "" {
+		t.Error("expected non-empty markdown")
+	}
+
+	// Log warnings for debugging
+	if len(warnings) > 0 {
+		t.Logf("warnings: %v", warnings)
+	}
+}
+
+func TestToMarkdownWithOptions(t *testing.T) {
+	pdfPath := testPDFPath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	opts := rag.MarkdownOptions{
+		IncludePageNumbers: true,
+		IncludeMetadata:    true,
+	}
+
+	md, _, err := Open(pdfPath).
+		Pages(1).
+		ToMarkdownWithOptions(opts)
+	if err != nil {
+		t.Fatalf("failed to extract markdown: %v", err)
+	}
+
+	if md == "" {
+		t.Error("expected non-empty markdown")
+	}
+
+	// Should have YAML front matter when metadata is enabled
+	if !strings.Contains(md, "---") {
+		t.Error("expected YAML front matter with IncludeMetadata option")
+	}
+}
+
+func TestToMarkdownWithHeaderFooterExclusion(t *testing.T) {
+	pdfPath := testPDFPath("header-footer-column.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	md, _, err := Open(pdfPath).
+		ExcludeHeadersAndFooters().
+		ToMarkdown()
+	if err != nil {
+		t.Fatalf("failed to extract markdown: %v", err)
+	}
+
+	if md == "" {
+		t.Error("expected non-empty markdown")
+	}
+}
+
+func TestToMarkdownErrorHandling(t *testing.T) {
+	// Test with non-existent file
+	_, _, err := Open("nonexistent.pdf").ToMarkdown()
+	if err == nil {
+		t.Error("expected error for non-existent file")
 	}
 }

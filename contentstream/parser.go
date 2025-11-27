@@ -11,15 +11,15 @@ import (
 // Operation represents a single content stream operation
 // consisting of an operator and its operands
 type Operation struct {
-	Operator string         // The operator (e.g., "Tj", "Tm", "q")
-	Operands []core.Object  // The operands
+	Operator string        // The operator (e.g., "Tj", "Tm", "q")
+	Operands []core.Object // The operands
 }
 
 // Parser parses PDF content streams
 type Parser struct {
-	data   []byte
-	pos    int
-	ops    []Operation
+	data []byte
+	pos  int
+	ops  []Operation
 }
 
 // NewParser creates a new content stream parser

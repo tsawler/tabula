@@ -122,10 +122,10 @@ func TestNewType1Font_WithCustomEncoding(t *testing.T) {
 		"Type":         core.Name("Encoding"),
 		"BaseEncoding": core.Name("WinAnsiEncoding"),
 		"Differences": core.Array{
-			core.Int(39),        // Starting at character code 39
+			core.Int(39),             // Starting at character code 39
 			core.Name("quotesingle"), // Replace with quotesingle glyph
-			core.Int(96),        // Starting at character code 96
-			core.Name("grave"),  // Replace with grave glyph
+			core.Int(96),             // Starting at character code 96
+			core.Name("grave"),       // Replace with grave glyph
 		},
 	}
 
@@ -359,20 +359,20 @@ func TestCharacterWidthCalculation(t *testing.T) {
 func TestFontDescriptorFlags(t *testing.T) {
 	// Test common font descriptor flags
 	tests := []struct {
-		name     string
-		flags    int
+		name         string
+		flags        int
 		isFixedPitch bool
 		isSerif      bool
 		isSymbolic   bool
 		isItalic     bool
 		isBold       bool
 	}{
-		{"Proportional Sans", 0x20, false, false, false, false, false},  // Bit 6: Nonsymbolic
-		{"Fixed Pitch", 0x21, true, false, false, false, false},         // Bits 1,6
-		{"Serif", 0x22, false, true, false, false, false},               // Bits 2,6
-		{"Symbolic", 0x04, false, false, true, false, false},            // Bit 3
-		{"Italic", 0x40, false, false, false, true, false},              // Bit 7
-		{"Bold", 0x40000, false, false, false, false, true},             // Bit 19
+		{"Proportional Sans", 0x20, false, false, false, false, false}, // Bit 6: Nonsymbolic
+		{"Fixed Pitch", 0x21, true, false, false, false, false},        // Bits 1,6
+		{"Serif", 0x22, false, true, false, false, false},              // Bits 2,6
+		{"Symbolic", 0x04, false, false, true, false, false},           // Bit 3
+		{"Italic", 0x40, false, false, false, true, false},             // Bit 7
+		{"Bold", 0x40000, false, false, false, false, true},            // Bit 19
 	}
 
 	for _, tt := range tests {
@@ -410,11 +410,11 @@ func TestFontDescriptorFlags(t *testing.T) {
 func TestEncodingDifferences(t *testing.T) {
 	// Test the differences array parsing
 	diffs := core.Array{
-		core.Int(39),              // Start at code 39
-		core.Name("quotesingle"),  // Map to quotesingle
-		core.Name("quoteright"),   // Map to quoteright (code 40)
-		core.Int(96),              // Start at code 96
-		core.Name("grave"),        // Map to grave
+		core.Int(39),             // Start at code 39
+		core.Name("quotesingle"), // Map to quotesingle
+		core.Name("quoteright"),  // Map to quoteright (code 40)
+		core.Int(96),             // Start at code 96
+		core.Name("grave"),       // Map to grave
 	}
 
 	t1 := &Type1Font{

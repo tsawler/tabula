@@ -5,8 +5,11 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/tsawler/tabula/core"
 	"github.com/tsawler/tabula/layout"
+	"github.com/tsawler/tabula/model"
 	"github.com/tsawler/tabula/pages"
+	"github.com/tsawler/tabula/rag"
 	"github.com/tsawler/tabula/reader"
 	"github.com/tsawler/tabula/text"
 )
@@ -414,6 +417,41 @@ func (e *Extractor) extractWithParagraphs(fragments []text.TextFragment, page *p
 	}
 
 	return result.String()
+}
+
+// ToMarkdown extracts content and returns it as a markdown-formatted string.
+// This preserves document structure including headings, paragraphs, and lists.
+// This is a terminal operation that closes the underlying reader.
+//
+// Returns the markdown text, any warnings encountered during processing,
+// and an error if extraction failed.
+//
+// Example:
+//
+//	md, warnings, err := tabula.Open("document.pdf").
+//	    ExcludeHeadersAndFooters().
+//	    ToMarkdown()
+func (e *Extractor) ToMarkdown() (string, []Warning, error) {
+	return e.ToMarkdownWithOptions(rag.DefaultMarkdownOptions())
+}
+
+// ToMarkdownWithOptions extracts content and returns it as markdown with custom options.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	opts := rag.MarkdownOptions{
+//	    IncludeTableOfContents: true,
+//	    IncludePageNumbers:     true,
+//	}
+//	md, warnings, err := tabula.Open("document.pdf").ToMarkdownWithOptions(opts)
+func (e *Extractor) ToMarkdownWithOptions(opts rag.MarkdownOptions) (string, []Warning, error) {
+	chunks, warnings, err := e.Chunks()
+	if err != nil {
+		return "", warnings, err
+	}
+
+	return chunks.ToMarkdownWithOptions(opts), warnings, nil
 }
 
 // Fragments extracts and returns text fragments with position information.
@@ -1037,6 +1075,272 @@ func (e *Extractor) Elements() ([]layout.LayoutElement, error) {
 		return nil, err
 	}
 	return result.Elements, nil
+}
+
+// Document extracts content and returns a model.Document structure
+// suitable for RAG chunking and other document processing workflows.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	doc, warnings, err := tabula.Open("document.pdf").
+//	    ExcludeHeadersAndFooters().
+//	    Document()
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	// Use doc for chunking or other processing
+func (e *Extractor) Document() (*model.Document, []Warning, error) {
+	if e.err != nil {
+		return nil, nil, e.err
+	}
+
+	if err := e.ensureReader(); err != nil {
+		return nil, nil, err
+	}
+	defer e.Close()
+
+	pageIndices, err := e.resolvePages()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if len(pageIndices) == 0 {
+		return nil, nil, fmt.Errorf("no pages to process")
+	}
+
+	// Create new document
+	doc := model.NewDocument()
+
+	// Try to get metadata from the PDF info dictionary
+	if e.reader != nil {
+		if info, err := e.reader.GetInfo(); err == nil && info != nil {
+			if title := info.Get("Title"); title != nil {
+				if s, ok := title.(core.String); ok {
+					doc.Metadata.Title = string(s)
+				}
+			}
+			if author := info.Get("Author"); author != nil {
+				if s, ok := author.(core.String); ok {
+					doc.Metadata.Author = string(s)
+				}
+			}
+			if subject := info.Get("Subject"); subject != nil {
+				if s, ok := subject.(core.String); ok {
+					doc.Metadata.Subject = string(s)
+				}
+			}
+			if creator := info.Get("Creator"); creator != nil {
+				if s, ok := creator.(core.String); ok {
+					doc.Metadata.Creator = string(s)
+				}
+			}
+			if producer := info.Get("Producer"); producer != nil {
+				if s, ok := producer.(core.String); ok {
+					doc.Metadata.Producer = string(s)
+				}
+			}
+			if keywords := info.Get("Keywords"); keywords != nil {
+				if s, ok := keywords.(core.String); ok {
+					doc.Metadata.Keywords = strings.Split(string(s), ",")
+					for i, kw := range doc.Metadata.Keywords {
+						doc.Metadata.Keywords[i] = strings.TrimSpace(kw)
+					}
+				}
+			}
+		}
+	}
+
+	// Detect headers/footers if needed (requires ALL pages for pattern detection)
+	var headerFooterResult *layout.HeaderFooterResult
+	if e.options.excludeHeaders || e.options.excludeFooters {
+		allPages, err := e.collectAllPages()
+		if err == nil && len(allPages) > 0 {
+			headerFooterResult = e.detectHeaderFooter(allPages)
+		}
+	}
+
+	roDetector := layout.NewReadingOrderDetector()
+	paraDetector := layout.NewParagraphDetector()
+	headingDetector := layout.NewHeadingDetector()
+	listDetector := layout.NewListDetector()
+
+	for _, pageNum := range pageIndices {
+		page, err := e.reader.GetPage(pageNum)
+		if err != nil {
+			return nil, nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		fragments, err := e.reader.ExtractTextFragments(page)
+		if err != nil {
+			return nil, nil, fmt.Errorf("page %d: %w", pageNum+1, err)
+		}
+
+		// Check for messy PDF traits on the first page processed
+		if pageNum == pageIndices[0] {
+			e.checkMessyPDF(fragments)
+		}
+
+		// Filter headers/footers if requested
+		if headerFooterResult != nil {
+			height, _ := page.Height()
+			fragments = headerFooterResult.FilterFragments(pageNum, fragments, height)
+		}
+
+		width, _ := page.Width()
+		height, _ := page.Height()
+
+		// Create model page
+		modelPage := model.NewPage(width, height)
+		modelPage.Number = pageNum + 1
+
+		// Perform layout analysis
+		roResult := roDetector.Detect(fragments, width, height)
+
+		// Get lines for paragraph detection
+		var lines []layout.Line
+		if roResult != nil && len(roResult.Lines) > 0 {
+			lines = roResult.Lines
+		}
+
+		// Detect paragraphs
+		var paragraphs []model.ParagraphInfo
+		if len(lines) > 0 {
+			paraLayout := paraDetector.Detect(lines, width, height)
+			for _, para := range paraLayout.Paragraphs {
+				paragraphs = append(paragraphs, model.ParagraphInfo{
+					BBox:      model.BBox{X: para.BBox.X, Y: para.BBox.Y, Width: para.BBox.Width, Height: para.BBox.Height},
+					Text:      para.Text,
+					LineCount: len(para.Lines),
+				})
+			}
+		}
+
+		// Detect headings
+		var headings []model.HeadingInfo
+		headingResult := headingDetector.DetectFromFragments(fragments, width, height)
+		if headingResult != nil {
+			for _, h := range headingResult.Headings {
+				headings = append(headings, model.HeadingInfo{
+					Level:      int(h.Level),
+					Text:       h.Text,
+					BBox:       model.BBox{X: h.BBox.X, Y: h.BBox.Y, Width: h.BBox.Width, Height: h.BBox.Height},
+					FontSize:   h.FontSize,
+					Confidence: h.Confidence,
+				})
+			}
+		}
+
+		// Detect lists
+		var lists []model.ListInfo
+		listResult := listDetector.DetectFromFragments(fragments, width, height)
+		if listResult != nil {
+			for _, l := range listResult.Lists {
+				listInfo := model.ListInfo{
+					Type:   convertListType(l.Type),
+					BBox:   model.BBox{X: l.BBox.X, Y: l.BBox.Y, Width: l.BBox.Width, Height: l.BBox.Height},
+					Nested: l.Level > 0, // Consider nested if level > 0
+				}
+				for _, item := range l.Items {
+					listInfo.Items = append(listInfo.Items, model.ListItem{
+						Text:   item.Text,
+						Level:  item.Level,
+						Bullet: item.Prefix,
+					})
+				}
+				lists = append(lists, listInfo)
+			}
+		}
+
+		// Create layout info
+		modelPage.Layout = &model.PageLayout{
+			Paragraphs: paragraphs,
+			Headings:   headings,
+			Lists:      lists,
+			Stats: model.LayoutStats{
+				FragmentCount:  len(fragments),
+				ParagraphCount: len(paragraphs),
+				HeadingCount:   len(headings),
+				ListCount:      len(lists),
+			},
+		}
+
+		// Add elements to page
+		for _, h := range headings {
+			modelPage.AddElement(&model.Heading{
+				Level: h.Level,
+				Text:  h.Text,
+				BBox:  h.BBox,
+			})
+		}
+		for _, p := range paragraphs {
+			modelPage.AddElement(&model.Paragraph{
+				Text: p.Text,
+				BBox: p.BBox,
+			})
+		}
+		for _, l := range lists {
+			modelPage.AddElement(&model.List{
+				Items:   l.Items,
+				Ordered: l.Type == model.ListTypeNumbered || l.Type == model.ListTypeLettered || l.Type == model.ListTypeRoman,
+				BBox:    l.BBox,
+			})
+		}
+
+		doc.AddPage(modelPage)
+	}
+
+	return doc, e.warnings, nil
+}
+
+// Chunks extracts content and returns semantic chunks for RAG workflows.
+// This method combines document extraction with RAG chunking in a single call.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	chunks, warnings, err := tabula.Open("document.pdf").
+//	    ExcludeHeadersAndFooters().
+//	    Chunks()
+//	if err != nil {
+//	    log.Fatal(err)
+//	}
+//	for _, chunk := range chunks.Chunks {
+//	    fmt.Printf("[%s] %s\n", chunk.Metadata.SectionTitle, chunk.Text[:50])
+//	}
+func (e *Extractor) Chunks() (*rag.ChunkCollection, []Warning, error) {
+	doc, warnings, err := e.Document()
+	if err != nil {
+		return nil, warnings, err
+	}
+
+	chunks := rag.ChunkDocument(doc)
+	return chunks, warnings, nil
+}
+
+// ChunksWithConfig extracts content and returns semantic chunks using custom configuration.
+// This allows fine-tuning of chunk sizes, overlap, and other parameters.
+// This is a terminal operation that closes the underlying reader.
+//
+// Example:
+//
+//	config := rag.ChunkerConfig{
+//	    TargetChunkSize: 500,
+//	    MaxChunkSize:    1000,
+//	    OverlapSize:     50,
+//	}
+//	sizeConfig := rag.DefaultSizeConfig()
+//	chunks, warnings, err := tabula.Open("document.pdf").
+//	    ExcludeHeadersAndFooters().
+//	    ChunksWithConfig(config, sizeConfig)
+func (e *Extractor) ChunksWithConfig(config rag.ChunkerConfig, sizeConfig rag.SizeConfig) (*rag.ChunkCollection, []Warning, error) {
+	doc, warnings, err := e.Document()
+	if err != nil {
+		return nil, warnings, err
+	}
+
+	chunks := rag.ChunkDocumentWithConfig(doc, config, sizeConfig)
+	return chunks, warnings, nil
 }
 
 // ============================================================================

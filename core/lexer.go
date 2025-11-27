@@ -14,17 +14,17 @@ const (
 	TokenEOF TokenType = iota
 	TokenWhitespace
 	TokenComment
-	TokenKeyword      // true, false, null, obj, endobj, stream, endstream, etc.
-	TokenInteger      // 123
-	TokenReal         // 3.14
-	TokenString       // (hello)
-	TokenHexString    // <48656C6C6F>
-	TokenName         // /Type
-	TokenArrayStart   // [
-	TokenArrayEnd     // ]
-	TokenDictStart    // <<
-	TokenDictEnd      // >>
-	TokenIndirectRef  // R (after two numbers)
+	TokenKeyword     // true, false, null, obj, endobj, stream, endstream, etc.
+	TokenInteger     // 123
+	TokenReal        // 3.14
+	TokenString      // (hello)
+	TokenHexString   // <48656C6C6F>
+	TokenName        // /Type
+	TokenArrayStart  // [
+	TokenArrayEnd    // ]
+	TokenDictStart   // <<
+	TokenDictEnd     // >>
+	TokenIndirectRef // R (after two numbers)
 )
 
 // Token represents a lexical token

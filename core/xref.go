@@ -391,7 +391,7 @@ func (x *XRefParser) parseXRefStreamEntry(data []byte, w []int) (*XRefEntry, int
 	case 0:
 		// Free entry
 		entry.InUse = false
-		entry.Offset = field1      // Next free object number
+		entry.Offset = field1          // Next free object number
 		entry.Generation = int(field2) // Generation if reused
 	case 1:
 		// In-use uncompressed entry
@@ -403,7 +403,7 @@ func (x *XRefParser) parseXRefStreamEntry(data []byte, w []int) (*XRefEntry, int
 		// For now, treat as in-use with special offset encoding
 		// TODO: Full object stream support in a future task
 		entry.InUse = true
-		entry.Offset = field1      // Object stream number
+		entry.Offset = field1          // Object stream number
 		entry.Generation = int(field2) // Index within stream
 	default:
 		return nil, 0, fmt.Errorf("invalid xref entry type: %d", entryType)

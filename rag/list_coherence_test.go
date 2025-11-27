@@ -745,7 +745,7 @@ func TestListCoherenceAnalyzer_AnalyzeListCoherence(t *testing.T) {
 
 	t.Run("list with intro", func(t *testing.T) {
 		blocks := []ContentBlock{
-			{Type: 1, Text: "The following features:"}, // Paragraph (intro)
+			{Type: 1, Text: "The following features:"},  // Paragraph (intro)
 			{Type: 5, Text: "• Feature 1\n• Feature 2"}, // List
 		}
 

@@ -108,31 +108,31 @@ func TestGetSpaceWidth(t *testing.T) {
 	e.RegisterFont("/TestFont", "Helvetica", "Type1")
 
 	tests := []struct {
-		name         string
-		fontName     string
-		fontSize     float64
-		wantMin      float64
-		wantMax      float64
+		name     string
+		fontName string
+		fontSize float64
+		wantMin  float64
+		wantMax  float64
 	}{
 		{
 			name:     "Helvetica 12pt",
 			fontName: "/TestFont",
 			fontSize: 12.0,
-			wantMin:  3.0,  // Space width should be around 3.3 points
+			wantMin:  3.0, // Space width should be around 3.3 points
 			wantMax:  3.5,
 		},
 		{
 			name:     "Helvetica 24pt",
 			fontName: "/TestFont",
 			fontSize: 24.0,
-			wantMin:  6.0,  // Space width scales with font size
+			wantMin:  6.0, // Space width scales with font size
 			wantMax:  7.0,
 		},
 		{
 			name:     "Unknown font - fallback",
 			fontName: "/UnknownFont",
 			fontSize: 12.0,
-			wantMin:  2.5,  // Fallback is 25% of font size
+			wantMin:  2.5, // Fallback is 25% of font size
 			wantMax:  3.5,
 		},
 	}

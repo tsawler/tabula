@@ -115,7 +115,7 @@ func TestPNGPredictorUp(t *testing.T) {
 	// Encoded Row 2: [5, 5, 5] (differences from row 1)
 	data := []byte{
 		0, 10, 20, 30, // Row 1: predictor=0 (None)
-		2, 5, 5, 5,    // Row 2: predictor=2 (Up), differences
+		2, 5, 5, 5, // Row 2: predictor=2 (Up), differences
 	}
 
 	compressed := zlibCompress(data)
@@ -143,7 +143,7 @@ func TestPNGPredictorAverage(t *testing.T) {
 	// Average predictor: each byte is the difference from the average of left and up
 	data := []byte{
 		0, 10, 20, 30, // Row 1: predictor=0 (None)
-		3, 5, 5, 5,    // Row 2: predictor=3 (Average)
+		3, 5, 5, 5, // Row 2: predictor=3 (Average)
 	}
 
 	compressed := zlibCompress(data)
@@ -178,7 +178,7 @@ func TestPNGPredictorPaeth(t *testing.T) {
 	// Paeth predictor: uses Paeth algorithm to predict from left, up, and upper-left
 	data := []byte{
 		0, 10, 20, 30, // Row 1: predictor=0 (None)
-		4, 0, 0, 0,    // Row 2: predictor=4 (Paeth)
+		4, 0, 0, 0, // Row 2: predictor=4 (Paeth)
 	}
 
 	compressed := zlibCompress(data)
@@ -238,8 +238,8 @@ func TestPaethPredictor(t *testing.T) {
 		// a=left, b=up, c=upper-left
 		// p = a + b - c
 		// Choose a, b, or c based on which has smallest abs(p - value)
-		{"left closest", 10, 20, 15, 15},    // p=15, pa=5, pb=5, pc=0 -> c
-		{"up closest", 20, 10, 15, 15},      // p=15, pa=5, pb=5, pc=0 -> c
+		{"left closest", 10, 20, 15, 15},       // p=15, pa=5, pb=5, pc=0 -> c
+		{"up closest", 20, 10, 15, 15},         // p=15, pa=5, pb=5, pc=0 -> c
 		{"upper-left closest", 15, 20, 10, 20}, // p=25, pa=10, pb=5, pc=15 -> b
 		{"all zero", 0, 0, 0, 0},
 		{"all same", 10, 10, 10, 10},

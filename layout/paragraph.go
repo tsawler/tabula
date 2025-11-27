@@ -134,10 +134,10 @@ func DefaultParagraphConfig() ParagraphConfig {
 		MinParagraphLines:    1,
 		BlockQuoteIndent:     30.0,
 		ListItemPatterns: []string{
-			`^[\•\-\*\→\►\◦\‣]\s`,    // Bullet points
-			`^\d+[\.\)]\s`,            // Numbered: 1. or 1)
-			`^[a-zA-Z][\.\)]\s`,       // Lettered: a. or a)
-			`^[ivxIVX]+[\.\)]\s`,      // Roman numerals
+			`^[\•\-\*\→\►\◦\‣]\s`, // Bullet points
+			`^\d+[\.\)]\s`,        // Numbered: 1. or 1)
+			`^[a-zA-Z][\.\)]\s`,   // Lettered: a. or a)
+			`^[ivxIVX]+[\.\)]\s`,  // Roman numerals
 		},
 	}
 }

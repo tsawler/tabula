@@ -276,7 +276,7 @@ func (gs *GraphicsState) ShowTextArray(array []interface{}) (dx, dy float64) {
 func (gs *GraphicsState) GetTextPosition() (x, y float64) {
 	// Transform text position by text matrix and CTM
 	tm := gs.Text.TextMatrix
-	x = tm[4] // E component
+	x = tm[4]                // E component
 	y = tm[5] + gs.Text.Rise // F component + rise
 
 	// Apply CTM
@@ -303,7 +303,7 @@ func (gs *GraphicsState) GetEffectiveFontSize() float64 {
 	// For vertical scaling (typical font size), we use element d (index 3)
 	// For horizontal scaling, we use element a (index 0)
 	// We take the maximum to handle both cases
-	verticalScale := abs(gs.Text.TextMatrix[3]) // d component
+	verticalScale := abs(gs.Text.TextMatrix[3])   // d component
 	horizontalScale := abs(gs.Text.TextMatrix[0]) // a component
 
 	// Use the larger of the two scales

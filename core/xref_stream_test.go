@@ -121,7 +121,7 @@ func TestParseXRefStreamEntry(t *testing.T) {
 		name       string
 		data       []byte
 		w          []int
-		wantType   int   // 0=free, 1=in-use, 2=in object stream
+		wantType   int // 0=free, 1=in-use, 2=in object stream
 		wantField1 int64
 		wantField2 int
 		wantBytes  int
@@ -231,8 +231,8 @@ func TestParseXRefStream_Skip(t *testing.T) {
 	// Entry 2: In-use (type 1), offset=100, gen=0
 	xrefData := []byte{
 		0x00, 0x00, 0x00, 0xFF, 0xFF, // Entry 0: free
-		0x01, 0x00, 0x0F, 0x00,       // Entry 1: offset 15, gen 0
-		0x01, 0x00, 0x64, 0x00,       // Entry 2: offset 100, gen 0
+		0x01, 0x00, 0x0F, 0x00, // Entry 1: offset 15, gen 0
+		0x01, 0x00, 0x64, 0x00, // Entry 2: offset 100, gen 0
 	}
 
 	// Compress the data

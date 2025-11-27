@@ -286,8 +286,8 @@ func (d Dict) Keys() []string {
 
 // Stream represents a PDF stream object
 type Stream struct {
-	Dict   Dict
-	Data   []byte
+	Dict    Dict
+	Data    []byte
 	decoded []byte
 }
 

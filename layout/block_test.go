@@ -356,7 +356,7 @@ func TestBlockDetector_MixedFontSizes(t *testing.T) {
 	detector := NewBlockDetector()
 	// Title followed by body text
 	fragments := []text.TextFragment{
-		makeBlockFragment("Title", 100, 700, 100, 24, 24),       // Large title
+		makeBlockFragment("Title", 100, 700, 100, 24, 24),          // Large title
 		makeBlockFragment("Body text here", 100, 660, 120, 12, 12), // Normal body (40 point gap)
 	}
 
@@ -420,7 +420,7 @@ func TestBlockDetector_MinimumBlockSize(t *testing.T) {
 
 	detector := NewBlockDetectorWithConfig(config)
 	fragments := []text.TextFragment{
-		makeBlockFragment("A", 100, 700, 5, 8, 8), // Too small
+		makeBlockFragment("A", 100, 700, 5, 8, 8),                    // Too small
 		makeBlockFragment("Valid block text", 200, 700, 100, 12, 12), // Valid
 	}
 

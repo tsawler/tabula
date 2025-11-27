@@ -12,30 +12,30 @@ type Type1Font struct {
 	*Font // Embed basic font
 
 	// Type1-specific fields
-	FirstChar int
-	LastChar  int
-	Widths    []float64
+	FirstChar      int
+	LastChar       int
+	Widths         []float64
 	FontDescriptor *FontDescriptor
-	ToUnicode *core.Stream // CMap for character code to Unicode mapping
+	ToUnicode      *core.Stream // CMap for character code to Unicode mapping
 }
 
 // FontDescriptor contains font metrics and properties
 type FontDescriptor struct {
-	FontName   string
-	Flags      int
-	FontBBox   [4]float64 // [llx lly urx ury]
-	ItalicAngle float64
-	Ascent     float64
-	Descent    float64
-	CapHeight  float64
-	StemV      float64
-	StemH      float64
-	AvgWidth   float64
-	MaxWidth   float64
+	FontName     string
+	Flags        int
+	FontBBox     [4]float64 // [llx lly urx ury]
+	ItalicAngle  float64
+	Ascent       float64
+	Descent      float64
+	CapHeight    float64
+	StemV        float64
+	StemH        float64
+	AvgWidth     float64
+	MaxWidth     float64
 	MissingWidth float64
-	FontFile   *core.Stream // Type1 font program
-	FontFile2  *core.Stream // TrueType font program
-	FontFile3  *core.Stream // Type1C or CIDFont program
+	FontFile     *core.Stream // Type1 font program
+	FontFile2    *core.Stream // TrueType font program
+	FontFile3    *core.Stream // Type1C or CIDFont program
 }
 
 // NewType1Font creates a Type1 font from a PDF font dictionary

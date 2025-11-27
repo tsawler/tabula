@@ -25,13 +25,13 @@ func (v PDFVersion) String() string {
 
 // Reader represents a PDF file reader
 type Reader struct {
-	file       *os.File
-	xrefTable  *core.XRefTable
-	trailer    core.Dict
-	version    PDFVersion
-	objCache   map[int]core.Object // Cache for loaded objects
-	fileSize   int64
-	pageTree   *pages.PageTree // Cached page tree
+	file      *os.File
+	xrefTable *core.XRefTable
+	trailer   core.Dict
+	version   PDFVersion
+	objCache  map[int]core.Object // Cache for loaded objects
+	fileSize  int64
+	pageTree  *pages.PageTree // Cached page tree
 }
 
 // Ensure Reader implements pages.ObjectResolver

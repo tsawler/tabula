@@ -225,12 +225,12 @@ startxref
 		wantGen    int
 		wantInUse  bool
 	}{
-		{0, 0, 65535, false},  // Free entry
-		{1, 17, 0, true},      // In-use entry
-		{2, 81, 0, true},      // In-use entry
-		{3, 0, 7, false},      // Free entry
-		{4, 331, 0, true},     // In-use entry
-		{5, 409, 0, true},     // In-use entry
+		{0, 0, 65535, false}, // Free entry
+		{1, 17, 0, true},     // In-use entry
+		{2, 81, 0, true},     // In-use entry
+		{3, 0, 7, false},     // Free entry
+		{4, 331, 0, true},    // In-use entry
+		{5, 409, 0, true},    // In-use entry
 	}
 
 	for _, tt := range tests {
@@ -427,12 +427,12 @@ func TestMergeXRefTables(t *testing.T) {
 // TestParseTrailer tests parsing trailer dictionaries
 func TestParseTrailer(t *testing.T) {
 	tests := []struct {
-		name      string
-		input     string
-		wantSize  int
-		wantRoot  int
-		wantPrev  int
-		hasPrev   bool
+		name     string
+		input    string
+		wantSize int
+		wantRoot int
+		wantPrev int
+		hasPrev  bool
 	}{
 		{
 			"basic trailer",

@@ -501,7 +501,7 @@ func TestComplexStructure(t *testing.T) {
 	})
 
 	root := core.Dict{
-		"Top": core.IndirectRef{Number: 203},
+		"Top":    core.IndirectRef{Number: 203},
 		"Direct": core.String("DirectValue"),
 	}
 

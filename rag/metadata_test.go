@@ -1081,3 +1081,413 @@ func findSubstring(s, substr string) bool {
 	}
 	return false
 }
+
+// Tests for ToMarkdown methods
+
+func TestDefaultMarkdownOptions(t *testing.T) {
+	opts := DefaultMarkdownOptions()
+
+	if opts.IncludeMetadata {
+		t.Error("Expected IncludeMetadata to be false by default")
+	}
+	if opts.IncludeTableOfContents {
+		t.Error("Expected IncludeTableOfContents to be false by default")
+	}
+	if opts.IncludeChunkSeparators {
+		t.Error("Expected IncludeChunkSeparators to be false by default")
+	}
+	if opts.IncludePageNumbers {
+		t.Error("Expected IncludePageNumbers to be false by default")
+	}
+	if opts.IncludeChunkIDs {
+		t.Error("Expected IncludeChunkIDs to be false by default")
+	}
+	if opts.MaxHeadingLevel != 6 {
+		t.Errorf("Expected MaxHeadingLevel 6, got %d", opts.MaxHeadingLevel)
+	}
+}
+
+func TestRAGOptimizedMarkdownOptions(t *testing.T) {
+	opts := RAGOptimizedMarkdownOptions()
+
+	if !opts.IncludeMetadata {
+		t.Error("Expected IncludeMetadata to be true for RAG")
+	}
+	if !opts.IncludeChunkSeparators {
+		t.Error("Expected IncludeChunkSeparators to be true for RAG")
+	}
+	if !opts.IncludePageNumbers {
+		t.Error("Expected IncludePageNumbers to be true for RAG")
+	}
+	if !opts.IncludeChunkIDs {
+		t.Error("Expected IncludeChunkIDs to be true for RAG")
+	}
+}
+
+func TestChunk_ToMarkdown_Basic(t *testing.T) {
+	chunk := &Chunk{
+		ID:   "chunk_1",
+		Text: "This is the content of the chunk.",
+		Metadata: ChunkMetadata{
+			SectionTitle: "Introduction",
+			HeadingLevel: 2,
+			PageStart:    1,
+			PageEnd:      1,
+		},
+	}
+
+	md := chunk.ToMarkdown()
+
+	// Should include section heading
+	if !containsString(md, "## Introduction") {
+		t.Error("Expected markdown to contain section heading")
+	}
+
+	// Should include content
+	if !containsString(md, "This is the content of the chunk.") {
+		t.Error("Expected markdown to contain chunk content")
+	}
+}
+
+func TestChunk_ToMarkdownWithOptions(t *testing.T) {
+	chunk := &Chunk{
+		ID:   "chunk_1",
+		Text: "Test content.",
+		Metadata: ChunkMetadata{
+			SectionTitle: "Methods",
+			HeadingLevel: 2,
+			PageStart:    5,
+			PageEnd:      7,
+		},
+	}
+
+	t.Run("with chunk IDs", func(t *testing.T) {
+		opts := MarkdownOptions{IncludeChunkIDs: true}
+		md := chunk.ToMarkdownWithOptions(opts)
+
+		if !containsString(md, "<!-- chunk: chunk_1 -->") {
+			t.Error("Expected chunk ID comment in markdown")
+		}
+	})
+
+	t.Run("with page numbers", func(t *testing.T) {
+		opts := MarkdownOptions{IncludePageNumbers: true}
+		md := chunk.ToMarkdownWithOptions(opts)
+
+		if !containsString(md, "*pp. 5-7*") {
+			t.Error("Expected page range in markdown")
+		}
+	})
+
+	t.Run("with heading level offset", func(t *testing.T) {
+		opts := MarkdownOptions{HeadingLevelOffset: 1}
+		md := chunk.ToMarkdownWithOptions(opts)
+
+		if !containsString(md, "### Methods") {
+			t.Error("Expected H3 heading with offset 1")
+		}
+	})
+
+	t.Run("with max heading level", func(t *testing.T) {
+		opts := MarkdownOptions{HeadingLevelOffset: 5, MaxHeadingLevel: 4}
+		md := chunk.ToMarkdownWithOptions(opts)
+
+		// Level 2 + offset 5 = 7, capped at 4
+		if !containsString(md, "#### Methods") {
+			t.Error("Expected H4 heading (capped at MaxHeadingLevel)")
+		}
+	})
+}
+
+func TestChunk_ToMarkdown_NoSection(t *testing.T) {
+	chunk := &Chunk{
+		ID:   "chunk_1",
+		Text: "Content without section.",
+		Metadata: ChunkMetadata{
+			PageStart: 1,
+			PageEnd:   1,
+		},
+	}
+
+	md := chunk.ToMarkdown()
+
+	// Should just have content, no heading
+	if containsString(md, "#") {
+		t.Error("Expected no heading when section title is empty")
+	}
+	if !containsString(md, "Content without section.") {
+		t.Error("Expected content in markdown")
+	}
+}
+
+func TestChunkCollection_ToMarkdown_Basic(t *testing.T) {
+	chunks := []*Chunk{
+		{
+			ID:   "1",
+			Text: "First chunk content.",
+			Metadata: ChunkMetadata{
+				SectionTitle: "Introduction",
+				HeadingLevel: 1,
+				PageStart:    1,
+				PageEnd:      1,
+			},
+		},
+		{
+			ID:   "2",
+			Text: "Second chunk content.",
+			Metadata: ChunkMetadata{
+				SectionTitle: "Methods",
+				HeadingLevel: 2,
+				PageStart:    2,
+				PageEnd:      2,
+			},
+		},
+	}
+
+	cc := NewChunkCollection(chunks)
+	md := cc.ToMarkdown()
+
+	// Should include both section headings
+	if !containsString(md, "# Introduction") {
+		t.Error("Expected Introduction heading")
+	}
+	if !containsString(md, "## Methods") {
+		t.Error("Expected Methods heading")
+	}
+
+	// Should include both contents
+	if !containsString(md, "First chunk content.") {
+		t.Error("Expected first chunk content")
+	}
+	if !containsString(md, "Second chunk content.") {
+		t.Error("Expected second chunk content")
+	}
+}
+
+func TestChunkCollection_ToMarkdownWithOptions_Metadata(t *testing.T) {
+	chunks := []*Chunk{
+		{
+			ID:   "1",
+			Text: "Content here.",
+			Metadata: ChunkMetadata{
+				DocumentTitle: "Test Document",
+				SectionTitle:  "Section",
+				PageStart:     1,
+				PageEnd:       5,
+				WordCount:     100,
+			},
+		},
+	}
+
+	cc := NewChunkCollection(chunks)
+	opts := MarkdownOptions{IncludeMetadata: true}
+	md := cc.ToMarkdownWithOptions(opts)
+
+	// Should have YAML front matter
+	if !containsString(md, "---") {
+		t.Error("Expected YAML front matter delimiters")
+	}
+	if !containsString(md, "title:") {
+		t.Error("Expected title in metadata")
+	}
+	if !containsString(md, "chunks:") {
+		t.Error("Expected chunks count in metadata")
+	}
+}
+
+func TestChunkCollection_ToMarkdownWithOptions_TOC(t *testing.T) {
+	chunks := []*Chunk{
+		{
+			ID:   "1",
+			Text: "Intro content.",
+			Metadata: ChunkMetadata{
+				SectionTitle: "Introduction",
+				HeadingLevel: 1,
+			},
+		},
+		{
+			ID:   "2",
+			Text: "Methods content.",
+			Metadata: ChunkMetadata{
+				SectionTitle: "Methods",
+				HeadingLevel: 2,
+			},
+		},
+	}
+
+	cc := NewChunkCollection(chunks)
+	opts := MarkdownOptions{IncludeTableOfContents: true}
+	md := cc.ToMarkdownWithOptions(opts)
+
+	// Should have TOC
+	if !containsString(md, "## Table of Contents") {
+		t.Error("Expected Table of Contents heading")
+	}
+	if !containsString(md, "[Introduction]") {
+		t.Error("Expected Introduction in TOC")
+	}
+	if !containsString(md, "[Methods]") {
+		t.Error("Expected Methods in TOC")
+	}
+}
+
+func TestChunkCollection_ToMarkdownWithOptions_ChunkSeparators(t *testing.T) {
+	chunks := []*Chunk{
+		{ID: "1", Text: "First."},
+		{ID: "2", Text: "Second."},
+	}
+
+	cc := NewChunkCollection(chunks)
+	opts := MarkdownOptions{
+		IncludeChunkSeparators: true,
+		SectionSeparator:       "\n\n===\n\n",
+	}
+	md := cc.ToMarkdownWithOptions(opts)
+
+	if !containsString(md, "===") {
+		t.Error("Expected custom separator between chunks")
+	}
+}
+
+func TestChunkCollection_ToMarkdown_DuplicateSections(t *testing.T) {
+	// Multiple chunks in same section shouldn't repeat the heading
+	chunks := []*Chunk{
+		{
+			ID:   "1",
+			Text: "First paragraph.",
+			Metadata: ChunkMetadata{
+				SectionTitle: "Results",
+				HeadingLevel: 2,
+			},
+		},
+		{
+			ID:   "2",
+			Text: "Second paragraph.",
+			Metadata: ChunkMetadata{
+				SectionTitle: "Results", // Same section
+				HeadingLevel: 2,
+			},
+		},
+	}
+
+	cc := NewChunkCollection(chunks)
+	md := cc.ToMarkdown()
+
+	// Count occurrences of "## Results"
+	count := 0
+	for i := 0; i <= len(md)-10; i++ {
+		if md[i:i+10] == "## Results" {
+			count++
+		}
+	}
+
+	if count != 1 {
+		t.Errorf("Expected section heading once, got %d occurrences", count)
+	}
+}
+
+func TestChunkCollection_ToMarkdown_Empty(t *testing.T) {
+	cc := NewChunkCollection(nil)
+	md := cc.ToMarkdown()
+
+	if md != "" {
+		t.Errorf("Expected empty string for empty collection, got %q", md)
+	}
+}
+
+func TestChunkCollection_ToMarkdownChunks(t *testing.T) {
+	chunks := []*Chunk{
+		{ID: "1", Text: "First.", Metadata: ChunkMetadata{SectionTitle: "A"}},
+		{ID: "2", Text: "Second.", Metadata: ChunkMetadata{SectionTitle: "B"}},
+		{ID: "3", Text: "Third.", Metadata: ChunkMetadata{SectionTitle: "C"}},
+	}
+
+	cc := NewChunkCollection(chunks)
+	mdChunks := cc.ToMarkdownChunks()
+
+	if len(mdChunks) != 3 {
+		t.Errorf("Expected 3 markdown chunks, got %d", len(mdChunks))
+	}
+
+	// Each should be independent
+	if !containsString(mdChunks[0], "A") {
+		t.Error("First chunk should have section A")
+	}
+	if !containsString(mdChunks[1], "B") {
+		t.Error("Second chunk should have section B")
+	}
+}
+
+func TestChunkCollection_ToMarkdownChunksWithOptions(t *testing.T) {
+	chunks := []*Chunk{
+		{
+			ID:   "1",
+			Text: "Content.",
+			Metadata: ChunkMetadata{
+				SectionTitle: "Section",
+				PageStart:    1,
+				PageEnd:      1,
+			},
+		},
+	}
+
+	cc := NewChunkCollection(chunks)
+	opts := MarkdownOptions{
+		IncludeChunkIDs:    true,
+		IncludePageNumbers: true,
+	}
+	mdChunks := cc.ToMarkdownChunksWithOptions(opts)
+
+	if len(mdChunks) != 1 {
+		t.Fatal("Expected 1 chunk")
+	}
+
+	if !containsString(mdChunks[0], "<!-- chunk: 1 -->") {
+		t.Error("Expected chunk ID in markdown")
+	}
+	if !containsString(mdChunks[0], "*p. 1*") {
+		t.Error("Expected page number in markdown")
+	}
+}
+
+func BenchmarkChunk_ToMarkdown(b *testing.B) {
+	chunk := &Chunk{
+		ID:   "chunk_1",
+		Text: "This is the content of the chunk with some reasonable length text that would be typical in a document.",
+		Metadata: ChunkMetadata{
+			SectionTitle:  "Test Section",
+			HeadingLevel:  2,
+			PageStart:     1,
+			PageEnd:       1,
+			DocumentTitle: "Test Document",
+		},
+	}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		chunk.ToMarkdown()
+	}
+}
+
+func BenchmarkChunkCollection_ToMarkdown(b *testing.B) {
+	chunks := make([]*Chunk, 100)
+	for i := range chunks {
+		chunks[i] = &Chunk{
+			ID:   "chunk",
+			Text: "This is chunk content with some text.",
+			Metadata: ChunkMetadata{
+				SectionTitle: "Section",
+				HeadingLevel: 2,
+				PageStart:    i + 1,
+				PageEnd:      i + 1,
+			},
+		}
+	}
+
+	cc := NewChunkCollection(chunks)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		cc.ToMarkdown()
+	}
+}

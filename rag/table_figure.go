@@ -631,13 +631,13 @@ type TableFigureResult struct {
 
 // TableFigureStats contains statistics about table/figure processing
 type TableFigureStats struct {
-	TotalTables       int
-	TotalFigures      int
-	TablesWithCaption int
+	TotalTables        int
+	TotalFigures       int
+	TablesWithCaption  int
 	FiguresWithCaption int
-	SplitTables       int
-	TotalTableRows    int
-	TotalTableCols    int
+	SplitTables        int
+	TotalTableRows     int
+	TotalTableCols     int
 }
 
 // ProcessBlocks processes content blocks to extract tables and figures

@@ -268,12 +268,12 @@ type Analyzer struct {
 	config AnalyzerConfig
 
 	// Detectors
-	columnDetector      *ColumnDetector
-	lineDetector        *LineDetector
-	blockDetector       *BlockDetector
-	paragraphDetector   *ParagraphDetector
-	headingDetector     *HeadingDetector
-	listDetector        *ListDetector
+	columnDetector       *ColumnDetector
+	lineDetector         *LineDetector
+	blockDetector        *BlockDetector
+	paragraphDetector    *ParagraphDetector
+	headingDetector      *HeadingDetector
+	listDetector         *ListDetector
 	readingOrderDetector *ReadingOrderDetector
 }
 

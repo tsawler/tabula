@@ -136,7 +136,7 @@ func TestGraphicsExtractor_GraphicsState(t *testing.T) {
 	ge := NewGraphicsExtractor()
 
 	ops := []contentstream.Operation{
-		{Operator: "w", Operands: []core.Object{core.Real(2.5)}},  // Line width
+		{Operator: "w", Operands: []core.Object{core.Real(2.5)}},                            // Line width
 		{Operator: "RG", Operands: []core.Object{core.Real(1), core.Real(0), core.Real(0)}}, // Red stroke
 		{Operator: "m", Operands: []core.Object{core.Real(0), core.Real(0)}},
 		{Operator: "l", Operands: []core.Object{core.Real(100), core.Real(0)}},
@@ -166,13 +166,13 @@ func TestGraphicsExtractor_SaveRestore(t *testing.T) {
 	ge := NewGraphicsExtractor()
 
 	ops := []contentstream.Operation{
-		{Operator: "w", Operands: []core.Object{core.Real(1)}},   // Line width = 1
-		{Operator: "q", Operands: nil},                            // Save state
-		{Operator: "w", Operands: []core.Object{core.Real(5)}},   // Line width = 5
+		{Operator: "w", Operands: []core.Object{core.Real(1)}}, // Line width = 1
+		{Operator: "q", Operands: nil},                         // Save state
+		{Operator: "w", Operands: []core.Object{core.Real(5)}}, // Line width = 5
 		{Operator: "m", Operands: []core.Object{core.Real(0), core.Real(0)}},
 		{Operator: "l", Operands: []core.Object{core.Real(100), core.Real(0)}},
 		{Operator: "S", Operands: nil},
-		{Operator: "Q", Operands: nil},                            // Restore state
+		{Operator: "Q", Operands: nil}, // Restore state
 		{Operator: "m", Operands: []core.Object{core.Real(0), core.Real(50)}},
 		{Operator: "l", Operands: []core.Object{core.Real(100), core.Real(50)}},
 		{Operator: "S", Operands: nil},

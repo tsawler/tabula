@@ -54,7 +54,7 @@ func TestGetStringWidth(t *testing.T) {
 // TestStandardFonts tests Standard 14 font detection
 func TestStandardFonts(t *testing.T) {
 	tests := []struct {
-		baseFont  string
+		baseFont   string
 		isStandard bool
 	}{
 		{"Helvetica", true},
@@ -189,8 +189,8 @@ func TestIsVerticalEncoding(t *testing.T) {
 		{"StandardEncoding", false},
 		{"PDFDocEncoding", false},
 		{"", false},
-		{"identity-v", false},      // Case-sensitive
-		{"IDENTITY-V", false},      // Case-sensitive
+		{"identity-v", false}, // Case-sensitive
+		{"IDENTITY-V", false}, // Case-sensitive
 	}
 
 	for _, tt := range tests {

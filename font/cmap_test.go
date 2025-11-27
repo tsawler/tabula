@@ -38,11 +38,11 @@ end
 		code     uint32
 		expected string
 	}{
-		{0x0003, " "},      // Space
-		{0x0004, "A"},      // A
-		{0x0005, "B"},      // B
-		{0x0006, "C"},      // C
-		{0x0007, ""},       // Not mapped, should return empty (caller handles fallback)
+		{0x0003, " "}, // Space
+		{0x0004, "A"}, // A
+		{0x0005, "B"}, // B
+		{0x0006, "C"}, // C
+		{0x0007, ""},  // Not mapped, should return empty (caller handles fallback)
 	}
 
 	for _, tt := range tests {
@@ -83,9 +83,9 @@ end
 		code     uint32
 		expected string
 	}{
-		{0x0020, " "},      // Space (start of range)
-		{0x0041, "A"},      // A (middle of range)
-		{0x007E, "~"},      // ~ (end of range)
+		{0x0020, " "},                  // Space (start of range)
+		{0x0041, "A"},                  // A (middle of range)
+		{0x007E, "~"},                  // ~ (end of range)
 		{0x00A0, string(rune(0x00A0))}, // Non-breaking space
 		{0x00A1, string(rune(0x00A1))}, // ¡
 		{0x00A2, string(rune(0x00A2))}, // ¢
@@ -353,13 +353,13 @@ func TestHexToUnicode(t *testing.T) {
 		expected string
 		wantErr  bool
 	}{
-		{"0041", "A", false},                    // Single character UTF-16BE
-		{"3042", "あ", false},                    // Hiragana A
-		{"004100420043", "ABC", false},           // Multiple characters
-		{"FEFF0041", "A", false},                 // With BOM
-		{"D83DDE00", "😀", false},                // Emoji (surrogate pair)
-		{"41", "A", false},                       // Single byte (padded)
-		{"", "", true},                           // Empty
+		{"0041", "A", false},           // Single character UTF-16BE
+		{"3042", "あ", false},           // Hiragana A
+		{"004100420043", "ABC", false}, // Multiple characters
+		{"FEFF0041", "A", false},       // With BOM
+		{"D83DDE00", "😀", false},       // Emoji (surrogate pair)
+		{"41", "A", false},             // Single byte (padded)
+		{"", "", true},                 // Empty
 	}
 
 	for _, tt := range tests {

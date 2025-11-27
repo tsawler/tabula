@@ -111,7 +111,7 @@ func TestLineDetector_LineSpacing(t *testing.T) {
 	// Lines with consistent 15-point spacing
 	fragments := []text.TextFragment{
 		makeLineFragment("Line one", 100, 700, 60, 12, 12),
-		makeLineFragment("Line two", 100, 685, 60, 12, 12), // 15 points below
+		makeLineFragment("Line two", 100, 685, 60, 12, 12),   // 15 points below
 		makeLineFragment("Line three", 100, 670, 70, 12, 12), // 15 points below
 	}
 
@@ -179,8 +179,8 @@ func TestLineDetector_Alignment_Center(t *testing.T) {
 	// Use widths that are clearly not justified (< 90% of max width)
 	centerX := 306.0 // Center of 612-width page
 	fragments := []text.TextFragment{
-		makeLineFragment("Short", centerX-25, 700, 50, 12, 12),    // 50 wide, center at 306
-		makeLineFragment("Medium", centerX-40, 685, 80, 12, 12),   // 80 wide, center at 306
+		makeLineFragment("Short", centerX-25, 700, 50, 12, 12),          // 50 wide, center at 306
+		makeLineFragment("Medium", centerX-40, 685, 80, 12, 12),         // 80 wide, center at 306
 		makeLineFragment("Longest line", centerX-100, 670, 200, 12, 12), // 200 wide, center at 306
 	}
 
@@ -206,8 +206,8 @@ func TestLineDetector_Alignment_Right(t *testing.T) {
 	// Use widths that are clearly not justified (< 90% of max width)
 	rightEdge := 540.0
 	fragments := []text.TextFragment{
-		makeLineFragment("Short", rightEdge-50, 700, 50, 12, 12),    // 50 wide
-		makeLineFragment("Medium", rightEdge-80, 685, 80, 12, 12),   // 80 wide
+		makeLineFragment("Short", rightEdge-50, 700, 50, 12, 12),          // 50 wide
+		makeLineFragment("Medium", rightEdge-80, 685, 80, 12, 12),         // 80 wide
 		makeLineFragment("Longest line", rightEdge-200, 670, 200, 12, 12), // 200 wide
 	}
 

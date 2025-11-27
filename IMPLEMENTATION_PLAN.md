@@ -1284,10 +1284,29 @@ Phase 2 will add advanced text extraction with layout preservation, including:
 - Filled/stroked classification
 - Bounding box extraction
 
-#### Task 3.4: Grid Line Detection (8 hours)
-- [ ] Detect aligned lines
-- [ ] Build grid hypothesis
-- [ ] Write grid detection tests
+#### Task 3.4: Grid Line Detection (8 hours) ✅ COMPLETE
+- [x] Detect aligned lines
+- [x] Build grid hypothesis
+- [x] Write grid detection tests
+
+**Deliverable**: Grid detection from extracted graphics lines ✅
+**Acceptance**: Can detect table grid structures from PDF lines ✅
+**Completed**: November 27, 2024
+
+**Implementation** (`tables/grid.go` - ~430 lines):
+- GridDetector with configurable tolerance and thresholds
+- AlignedLineGroup for clustering aligned lines
+- GridHypothesis representing potential table structures
+- Line filtering by minimum length
+- Line grouping by alignment (within tolerance)
+- Grid bounds calculation from line positions
+- Border detection (top, bottom, left, right)
+- Confidence scoring based on regularity and coverage
+- ToTableGrid() conversion to model.TableGrid
+- DetectGrids() convenience function
+
+**Tests**: 15+ test cases in `tables/grid_test.go`
+**Coverage**: 38.9% (includes untested geometric.go)
 
 ### Week 10: Geometric Table Detector (Already Implemented!)
 

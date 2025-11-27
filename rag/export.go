@@ -894,11 +894,11 @@ func (ee *EmbeddingExporter) ExportForWeaviate(chunks []*Chunk, embeddings [][]f
 
 	for i, chunk := range chunks {
 		props := map[string]interface{}{
-			"content":        chunk.Text,
-			"documentTitle":  chunk.Metadata.DocumentTitle,
-			"pageStart":      chunk.Metadata.PageStart,
-			"sectionTitle":   chunk.Metadata.SectionTitle,
-			"chunkIndex":     chunk.Metadata.ChunkIndex,
+			"content":       chunk.Text,
+			"documentTitle": chunk.Metadata.DocumentTitle,
+			"pageStart":     chunk.Metadata.PageStart,
+			"sectionTitle":  chunk.Metadata.SectionTitle,
+			"chunkIndex":    chunk.Metadata.ChunkIndex,
 		}
 
 		obj := WeaviateObject{
