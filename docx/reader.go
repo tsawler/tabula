@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/tsawler/tabula/model"
@@ -14,18 +15,29 @@ import (
 
 // Reader provides access to DOCX document content.
 type Reader struct {
-	file          *os.File
-	zipReader     *zip.ReadCloser
-	document      *documentXML
-	styles        *stylesXML
-	numbering     *numberingXML
-	rels          *relationshipsXML
-	coreProps     *corePropertiesXML
-	appProps      *appPropertiesXML
-	styleResolver *StyleResolver
-	tableParser   *TableParser
-	paragraphs    []parsedParagraph
-	tables        []ParsedTable
+	file              *os.File
+	zipReader         *zip.ReadCloser
+	document          *documentXML
+	styles            *stylesXML
+	numbering         *numberingXML
+	rels              *relationshipsXML
+	coreProps         *corePropertiesXML
+	appProps          *appPropertiesXML
+	styleResolver     *StyleResolver
+	numberingResolver *NumberingResolver
+	tableParser       *TableParser
+	listParser        *ListParser
+	paragraphs        []parsedParagraph
+	tables            []ParsedTable
+	lists             []ParsedList
+	elements          []parsedElement // Elements in document order
+}
+
+// parsedElement represents a parsed element (paragraph or table) with its type.
+type parsedElement struct {
+	Type      string           // "paragraph" or "table"
+	Paragraph *parsedParagraph // Non-nil if Type == "paragraph"
+	Table     *ParsedTable     // Non-nil if Type == "table"
 }
 
 // parsedParagraph holds a parsed paragraph with resolved styles.
@@ -35,6 +47,11 @@ type parsedParagraph struct {
 	StyleName string
 	IsHeading bool
 	Level     int // heading level (1-9) or 0 for non-headings
+
+	// List properties
+	IsListItem bool
+	NumID      string // Numbering ID (empty if not a list item)
+	ListLevel  int    // List indentation level (0-based)
 
 	// Paragraph properties
 	Alignment   string  // left, center, right, both
@@ -102,9 +119,14 @@ func Open(filename string) (*Reader, error) {
 	}
 
 	// Parse numbering.xml (optional)
-	if err := r.parseNumbering(); err != nil {
-		// Numbering is optional - just continue without it
-	}
+	_ = r.parseNumbering() // Numbering is optional
+
+	// Create numbering resolver and list parser
+	r.numberingResolver = NewNumberingResolver(r.numbering)
+	r.listParser = NewListParser(r.numberingResolver)
+
+	// Extract lists from paragraphs
+	r.lists = r.listParser.ExtractLists(r.paragraphs)
 
 	// Parse metadata (optional)
 	r.parseCoreProperties()
@@ -176,7 +198,7 @@ func (r *Reader) PageCount() (int, error) {
 }
 
 // Text extracts and returns all text content from the document.
-// This includes text from paragraphs and tables.
+// This includes text from paragraphs, lists, and tables in document order.
 func (r *Reader) Text() (string, error) {
 	if r.document == nil {
 		return "", fmt.Errorf("document not parsed")
@@ -184,12 +206,36 @@ func (r *Reader) Text() (string, error) {
 
 	var result strings.Builder
 
-	// Add paragraph text
+	// Track list item counters for ordered lists (per numID and level)
+	listCounters := make(map[string]map[int]int) // numID -> level -> count
+
+	// If we have ordered elements, use them for correct document order
+	if len(r.elements) > 0 {
+		for i, elem := range r.elements {
+			if i > 0 {
+				result.WriteString("\n")
+			}
+
+			switch elem.Type {
+			case "paragraph":
+				if elem.Paragraph != nil {
+					r.writeParagraphText(&result, elem.Paragraph, listCounters)
+				}
+			case "table":
+				if elem.Table != nil {
+					result.WriteString(elem.Table.ToText())
+				}
+			}
+		}
+		return result.String(), nil
+	}
+
+	// Fallback: output paragraphs then tables (old behavior)
 	for i, para := range r.paragraphs {
 		if i > 0 {
 			result.WriteString("\n")
 		}
-		result.WriteString(para.Text)
+		r.writeParagraphText(&result, &para, listCounters)
 	}
 
 	// Add table text
@@ -201,6 +247,254 @@ func (r *Reader) Text() (string, error) {
 	}
 
 	return result.String(), nil
+}
+
+// Markdown returns the document content as a Markdown-formatted string.
+// It converts:
+//   - Headings to # notation (level 1-6)
+//   - Lists to - (bullet) or 1. (numbered) notation
+//   - Tables to markdown table format
+//   - Paragraphs to plain text
+func (r *Reader) Markdown() (string, error) {
+	if len(r.elements) == 0 && len(r.paragraphs) == 0 {
+		return "", nil
+	}
+
+	var result strings.Builder
+
+	// Track list state for grouping
+	var inList bool
+	var lastNumID string
+	listCounters := make(map[string]map[int]int)
+
+	// Process elements in order
+	for i, elem := range r.elements {
+		switch elem.Type {
+		case "paragraph":
+			para := elem.Paragraph
+			if para == nil {
+				continue
+			}
+
+			// Add separator between elements (except first)
+			if i > 0 && result.Len() > 0 {
+				// Check if we're transitioning out of a list
+				if inList && (!para.IsListItem || para.NumID != lastNumID) {
+					result.WriteString("\n")
+					inList = false
+				}
+			}
+
+			if para.IsHeading {
+				// Render as markdown heading
+				level := para.Level
+				if level < 1 {
+					level = 1
+				}
+				if level > 6 {
+					level = 6
+				}
+				result.WriteString(strings.Repeat("#", level))
+				result.WriteString(" ")
+				result.WriteString(para.Text)
+				result.WriteString("\n\n")
+				inList = false
+			} else if para.IsListItem && para.NumID != "" && para.NumID != "0" {
+				// Render as markdown list item
+				r.writeMarkdownListItem(&result, para, listCounters)
+				inList = true
+				lastNumID = para.NumID
+			} else if para.Text != "" {
+				// Regular paragraph
+				result.WriteString(para.Text)
+				result.WriteString("\n\n")
+				inList = false
+			}
+
+		case "table":
+			if inList {
+				result.WriteString("\n")
+				inList = false
+			}
+			if elem.Table != nil {
+				result.WriteString(elem.Table.ToMarkdown())
+				result.WriteString("\n")
+			}
+		}
+	}
+
+	return strings.TrimSpace(result.String()), nil
+}
+
+// writeMarkdownListItem writes a list item in markdown format.
+func (r *Reader) writeMarkdownListItem(sb *strings.Builder, para *parsedParagraph, listCounters map[string]map[int]int) {
+	// Add indentation for nested lists (2 spaces per level)
+	for j := 0; j < para.ListLevel; j++ {
+		sb.WriteString("  ")
+	}
+
+	// Get or initialize counter for this list
+	if listCounters[para.NumID] == nil {
+		listCounters[para.NumID] = make(map[int]int)
+	}
+
+	// Reset child level counters when going back to a parent level
+	lastLevel, hasLast := listCounters[para.NumID][-1] // Use -1 to store last level
+	if hasLast && para.ListLevel <= lastLevel {
+		// Clear counters for all levels deeper than current
+		for lvl := range listCounters[para.NumID] {
+			if lvl > para.ListLevel {
+				delete(listCounters[para.NumID], lvl)
+			}
+		}
+	}
+	listCounters[para.NumID][-1] = para.ListLevel // Track last level
+
+	// Determine list type
+	listType, _, startAt := r.getListFormat(para.NumID, para.ListLevel)
+
+	if listType == ListTypeOrdered {
+		// Numbered list
+		listCounters[para.NumID][para.ListLevel]++
+		num := startAt + listCounters[para.NumID][para.ListLevel] - 1
+		sb.WriteString(fmt.Sprintf("%d. ", num))
+	} else {
+		// Bullet list
+		sb.WriteString("- ")
+	}
+
+	sb.WriteString(para.Text)
+	sb.WriteString("\n")
+}
+
+// writeParagraphText writes a paragraph's text to the builder with list formatting.
+func (r *Reader) writeParagraphText(sb *strings.Builder, para *parsedParagraph, listCounters map[string]map[int]int) {
+	if para.IsListItem {
+		// Add indentation for nested lists
+		for j := 0; j < para.ListLevel; j++ {
+			sb.WriteString("  ")
+		}
+
+		// Get or initialize counter for this list
+		if listCounters[para.NumID] == nil {
+			listCounters[para.NumID] = make(map[int]int)
+		}
+
+		// Determine list type and format bullet/number
+		listType, bullet, startAt := r.getListFormat(para.NumID, para.ListLevel)
+
+		if listType == ListTypeOrdered {
+			// Increment counter for this level
+			listCounters[para.NumID][para.ListLevel]++
+			num := startAt + listCounters[para.NumID][para.ListLevel] - 1
+			sb.WriteString(formatNumber(num, para.NumID, para.ListLevel, r.numberingResolver))
+			sb.WriteString(". ")
+		} else {
+			// Bullet list
+			if bullet == "" {
+				bullet = getBulletChar("", para.ListLevel)
+			}
+			sb.WriteString(bullet)
+			sb.WriteString(" ")
+		}
+	}
+
+	sb.WriteString(para.Text)
+}
+
+// getListFormat returns list formatting info for a numID and level.
+func (r *Reader) getListFormat(numID string, level int) (ListType, string, int) {
+	if r.numberingResolver == nil {
+		return ListTypeUnordered, "•", 1
+	}
+	return r.numberingResolver.ResolveLevel(numID, level)
+}
+
+// formatNumber formats a list number based on the numbering format.
+func formatNumber(num int, numID string, level int, resolver *NumberingResolver) string {
+	if resolver == nil {
+		return fmt.Sprintf("%d", num)
+	}
+
+	// Get the format type from resolver
+	abstractID, ok := resolver.numMappings[numID]
+	if !ok {
+		return fmt.Sprintf("%d", num)
+	}
+
+	abstractNum, ok := resolver.abstractNums[abstractID]
+	if !ok {
+		return fmt.Sprintf("%d", num)
+	}
+
+	levelStr := fmt.Sprintf("%d", level)
+	for _, lvl := range abstractNum.Levels {
+		if lvl.ILvl == levelStr {
+			switch lvl.NumFmt.Val {
+			case "lowerLetter":
+				return toLowerLetter(num)
+			case "upperLetter":
+				return toUpperLetter(num)
+			case "lowerRoman":
+				return toLowerRoman(num)
+			case "upperRoman":
+				return toUpperRoman(num)
+			default:
+				return fmt.Sprintf("%d", num)
+			}
+		}
+	}
+
+	return fmt.Sprintf("%d", num)
+}
+
+// toLowerLetter converts a number to lowercase letter (1=a, 2=b, etc.)
+func toLowerLetter(n int) string {
+	if n < 1 {
+		return "a"
+	}
+	result := ""
+	for n > 0 {
+		n-- // Make it 0-indexed
+		result = string(rune('a'+n%26)) + result
+		n /= 26
+	}
+	return result
+}
+
+// toUpperLetter converts a number to uppercase letter (1=A, 2=B, etc.)
+func toUpperLetter(n int) string {
+	return strings.ToUpper(toLowerLetter(n))
+}
+
+// toLowerRoman converts a number to lowercase Roman numerals.
+func toLowerRoman(n int) string {
+	return strings.ToLower(toUpperRoman(n))
+}
+
+// toUpperRoman converts a number to uppercase Roman numerals.
+func toUpperRoman(n int) string {
+	if n < 1 || n > 3999 {
+		return fmt.Sprintf("%d", n)
+	}
+
+	romanNumerals := []struct {
+		value  int
+		symbol string
+	}{
+		{1000, "M"}, {900, "CM"}, {500, "D"}, {400, "CD"},
+		{100, "C"}, {90, "XC"}, {50, "L"}, {40, "XL"},
+		{10, "X"}, {9, "IX"}, {5, "V"}, {4, "IV"}, {1, "I"},
+	}
+
+	result := ""
+	for _, rn := range romanNumerals {
+		for n >= rn.value {
+			result += rn.symbol
+			n -= rn.value
+		}
+	}
+	return result
 }
 
 // Document returns a model.Document representation of the DOCX content.
@@ -227,61 +521,153 @@ func (r *Reader) Document() (*model.Document, error) {
 	page := model.NewPage(612, 792) // Standard US Letter dimensions
 	page.Number = 1
 
-	// Add elements
+	// Process elements in document order, grouping list items
 	yPos := 750.0 // Start near top of page
-	for _, para := range r.paragraphs {
-		if para.Text == "" {
-			continue
-		}
 
-		estimatedHeight := 14.0 // Default line height
-		if para.IsHeading {
-			estimatedHeight = float64(24 - para.Level*2) // Larger for higher-level headings
-		}
+	// Track current list being built
+	var currentList *model.List
+	var currentListNumID string
+	var currentListStartY float64
+	var listLevelCounters map[int]int // Counter per level for ordered lists
+	var lastListLevel int             // Track last item's level to reset child counters
 
-		bbox := model.BBox{
-			X:      72,  // 1 inch margin
-			Y:      yPos,
-			Width:  468, // 6.5 inch text width
-			Height: estimatedHeight,
-		}
-
-		if para.IsHeading {
-			heading := &model.Heading{
-				Level: para.Level,
-				Text:  para.Text,
-				BBox:  bbox,
-			}
-			page.AddElement(heading)
-		} else {
-			paragraph := &model.Paragraph{
-				Text: para.Text,
-				BBox: bbox,
-			}
-			page.AddElement(paragraph)
-		}
-
-		yPos -= estimatedHeight + 4 // Move down for next element
-	}
-
-	// Add tables
-	for _, tbl := range r.tables {
-		modelTable := tbl.ToModelTable()
-		if modelTable.RowCount() > 0 {
-			// Estimate table height
-			tableHeight := float64(modelTable.RowCount()) * 20.0
-
-			modelTable.BBox = model.BBox{
+	// Helper to finalize and add the current list
+	finalizeList := func() {
+		if currentList != nil && len(currentList.Items) > 0 {
+			listHeight := float64(len(currentList.Items)) * 14.0
+			currentList.BBox = model.BBox{
 				X:      72,
-				Y:      yPos,
+				Y:      currentListStartY,
 				Width:  468,
-				Height: tableHeight,
+				Height: listHeight,
+			}
+			page.AddElement(currentList)
+			yPos -= listHeight + 4
+		}
+		currentList = nil
+		currentListNumID = ""
+		listLevelCounters = nil
+		lastListLevel = 0
+	}
+
+	for _, elem := range r.elements {
+		switch elem.Type {
+		case "paragraph":
+			para := elem.Paragraph
+			if para == nil || para.Text == "" {
+				continue
 			}
 
-			page.AddElement(modelTable)
-			yPos -= tableHeight + 10
+			// Check if this is a list item
+			if para.IsListItem && para.NumID != "" && para.NumID != "0" {
+				// Determine if we need to start a new list
+				if currentList == nil || para.NumID != currentListNumID {
+					// Finalize previous list if any
+					finalizeList()
+
+					// Start new list
+					listType, _, _ := r.numberingResolver.ResolveLevel(para.NumID, para.ListLevel)
+					currentList = &model.List{
+						Ordered: listType == ListTypeOrdered,
+					}
+					currentListNumID = para.NumID
+					currentListStartY = yPos
+					listLevelCounters = make(map[int]int)
+				}
+
+				// Reset child level counters when going back to a parent level
+				if para.ListLevel <= lastListLevel {
+					// Clear counters for all levels deeper than current
+					for lvl := range listLevelCounters {
+						if lvl > para.ListLevel {
+							delete(listLevelCounters, lvl)
+						}
+					}
+				}
+
+				// Get bullet/number for this item
+				_, bullet, startAt := r.numberingResolver.ResolveLevel(para.NumID, para.ListLevel)
+				if currentList.Ordered && bullet == "" {
+					// Increment counter for this level
+					listLevelCounters[para.ListLevel]++
+					itemNum := startAt + listLevelCounters[para.ListLevel] - 1
+					bullet = formatNumber(itemNum, para.NumID, para.ListLevel, r.numberingResolver) + "."
+				}
+				if !currentList.Ordered && bullet == "" {
+					bullet = getBulletChar("", para.ListLevel)
+				}
+
+				lastListLevel = para.ListLevel
+
+				// Add item to current list
+				currentList.Items = append(currentList.Items, model.ListItem{
+					Text:   para.Text,
+					Level:  para.ListLevel,
+					Bullet: bullet,
+				})
+				continue
+			}
+
+			// Not a list item - finalize any pending list
+			finalizeList()
+
+			estimatedHeight := 14.0 // Default line height
+			if para.IsHeading {
+				estimatedHeight = float64(24 - para.Level*2) // Larger for higher-level headings
+			}
+
+			bbox := model.BBox{
+				X:      72,  // 1 inch margin
+				Y:      yPos,
+				Width:  468, // 6.5 inch text width
+				Height: estimatedHeight,
+			}
+
+			if para.IsHeading {
+				heading := &model.Heading{
+					Level: para.Level,
+					Text:  para.Text,
+					BBox:  bbox,
+				}
+				page.AddElement(heading)
+			} else {
+				paragraph := &model.Paragraph{
+					Text: para.Text,
+					BBox: bbox,
+				}
+				page.AddElement(paragraph)
+			}
+
+			yPos -= estimatedHeight + 4 // Move down for next element
+
+		case "table":
+			// Finalize any pending list before adding table
+			finalizeList()
+
+			if elem.Table == nil {
+				continue
+			}
+
+			modelTable := elem.Table.ToModelTable()
+			if modelTable.RowCount() > 0 {
+				// Estimate table height
+				tableHeight := float64(modelTable.RowCount()) * 20.0
+
+				modelTable.BBox = model.BBox{
+					X:      72,
+					Y:      yPos,
+					Width:  468,
+					Height: tableHeight,
+				}
+
+				page.AddElement(modelTable)
+				yPos -= tableHeight + 10
+			}
 		}
 	}
+
+	// Finalize any remaining list
+	finalizeList()
 
 	doc.AddPage(page)
 	return doc, nil
@@ -345,8 +731,70 @@ func (r *Reader) parseDocument() error {
 		return fmt.Errorf("unmarshaling document.xml: %w", err)
 	}
 
-	// Process paragraphs
-	r.processParagraphs()
+	// Parse elements in order using xml.Decoder
+	if err := r.parseBodyElementsInOrder(data); err != nil {
+		return fmt.Errorf("parsing body elements in order: %w", err)
+	}
+
+	// Process elements in document order
+	r.processElementsInOrder()
+
+	return nil
+}
+
+// parseBodyElementsInOrder parses body elements maintaining document order.
+func (r *Reader) parseBodyElementsInOrder(data []byte) error {
+	if r.document.Body == nil {
+		return nil
+	}
+
+	decoder := xml.NewDecoder(strings.NewReader(string(data)))
+	var inBody bool
+	var paraIndex, tableIndex int
+
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			// Check if we're entering the body
+			if t.Name.Local == "body" {
+				inBody = true
+				continue
+			}
+
+			if !inBody {
+				continue
+			}
+
+			// Track elements in order
+			switch t.Name.Local {
+			case "p":
+				if paraIndex < len(r.document.Body.Paragraphs) {
+					r.document.Body.Elements = append(r.document.Body.Elements, bodyElement{
+						Type:      "paragraph",
+						Paragraph: &r.document.Body.Paragraphs[paraIndex],
+					})
+					paraIndex++
+				}
+			case "tbl":
+				if tableIndex < len(r.document.Body.Tables) {
+					r.document.Body.Elements = append(r.document.Body.Elements, bodyElement{
+						Type:  "table",
+						Table: &r.document.Body.Tables[tableIndex],
+					})
+					tableIndex++
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "body" {
+				inBody = false
+			}
+		}
+	}
 
 	return nil
 }
@@ -435,6 +883,47 @@ func (r *Reader) processTables() {
 	}
 }
 
+// processElementsInOrder processes body elements in document order.
+func (r *Reader) processElementsInOrder() {
+	if r.document == nil || r.document.Body == nil {
+		return
+	}
+
+	// If no Elements were parsed (fallback for simple parsing), use old method
+	if len(r.document.Body.Elements) == 0 {
+		r.processParagraphs()
+		return
+	}
+
+	// Process elements in order
+	r.elements = make([]parsedElement, 0, len(r.document.Body.Elements))
+	r.paragraphs = make([]parsedParagraph, 0, len(r.document.Body.Paragraphs))
+	r.tables = make([]ParsedTable, 0, len(r.document.Body.Tables))
+
+	for _, elem := range r.document.Body.Elements {
+		switch elem.Type {
+		case "paragraph":
+			if elem.Paragraph != nil {
+				parsed := r.processParagraph(*elem.Paragraph)
+				r.paragraphs = append(r.paragraphs, parsed)
+				r.elements = append(r.elements, parsedElement{
+					Type:      "paragraph",
+					Paragraph: &r.paragraphs[len(r.paragraphs)-1],
+				})
+			}
+		case "table":
+			if elem.Table != nil && r.tableParser != nil {
+				parsed := r.tableParser.ParseTable(*elem.Table)
+				r.tables = append(r.tables, parsed)
+				r.elements = append(r.elements, parsedElement{
+					Type:  "table",
+					Table: &r.tables[len(r.tables)-1],
+				})
+			}
+		}
+	}
+}
+
 // processParagraph processes a single paragraph.
 func (r *Reader) processParagraph(p paragraphXML) parsedParagraph {
 	parsed := parsedParagraph{
@@ -491,6 +980,13 @@ func (r *Reader) processParagraph(p paragraphXML) parsedParagraph {
 		}
 	}
 
+	// Check for list item (numbering properties)
+	if ppr.NumPr.NumID.Val != "" && ppr.NumPr.NumID.Val != "0" {
+		parsed.IsListItem = true
+		parsed.NumID = ppr.NumPr.NumID.Val
+		parsed.ListLevel = parseListLevel(ppr.NumPr.ILvl.Val)
+	}
+
 	// Extract text from runs with resolved formatting
 	var textParts []string
 	for _, run := range p.Runs {
@@ -544,6 +1040,20 @@ func (r *Reader) extractRunText(run runXML) string {
 		parts = append(parts, t.Value)
 	}
 
+	// Handle symbol characters (emoji and special symbols)
+	for _, sym := range run.Symbols {
+		if char := parseSymbolChar(sym.Char); char != "" {
+			parts = append(parts, char)
+		}
+	}
+
+	// Handle AlternateContent fallbacks (used for emoji in newer Word versions)
+	for _, ac := range run.AlternateContent {
+		for _, t := range ac.Fallback.Text {
+			parts = append(parts, t.Value)
+		}
+	}
+
 	// Handle tab characters
 	for range run.Tabs {
 		parts = append(parts, "\t")
@@ -559,6 +1069,27 @@ func (r *Reader) extractRunText(run runXML) string {
 	}
 
 	return strings.Join(parts, "")
+}
+
+// parseSymbolChar converts a hex character code to its Unicode character.
+func parseSymbolChar(hexCode string) string {
+	if hexCode == "" {
+		return ""
+	}
+
+	// Parse the hex code
+	code, err := strconv.ParseInt(hexCode, 16, 32)
+	if err != nil {
+		return ""
+	}
+
+	// Convert to rune and then to string
+	// Handle surrogate pairs for emoji (codes > 0xFFFF)
+	if code > 0 && code <= 0x10FFFF {
+		return string(rune(code))
+	}
+
+	return ""
 }
 
 // isHeadingStyle determines if a style ID represents a heading.
@@ -611,4 +1142,32 @@ func parseOutlineLevel(s string) int {
 		return level
 	}
 	return -1
+}
+
+// parseListLevel parses a list level string to an integer (0-based).
+func parseListLevel(s string) int {
+	if s == "" {
+		return 0
+	}
+	level := 0
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			level = level*10 + int(c-'0')
+		}
+	}
+	return level
+}
+
+// Lists returns all parsed lists from the document.
+func (r *Reader) Lists() []ParsedList {
+	return r.lists
+}
+
+// ModelLists returns lists converted to model.List format.
+func (r *Reader) ModelLists() []*model.List {
+	result := make([]*model.List, len(r.lists))
+	for i := range r.lists {
+		result[i] = r.lists[i].ToModelList()
+	}
+	return result
 }

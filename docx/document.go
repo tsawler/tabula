@@ -18,9 +18,19 @@ type documentXML struct {
 }
 
 // bodyXML represents the document body.
+// Note: Paragraphs and Tables are collected separately by xml.Unmarshal.
+// Use Elements for ordered access (populated by custom parsing).
 type bodyXML struct {
 	Paragraphs []paragraphXML `xml:"p"`
 	Tables     []tableXML     `xml:"tbl"`
+	Elements   []bodyElement  `xml:"-"` // Populated manually to preserve order
+}
+
+// bodyElement represents an element in the document body (paragraph or table).
+type bodyElement struct {
+	Type      string         // "paragraph" or "table"
+	Paragraph *paragraphXML
+	Table     *tableXML
 }
 
 // paragraphXML represents a paragraph element (<w:p>).
@@ -90,12 +100,30 @@ type outlineLvlXML struct {
 
 // runXML represents a text run (<w:r>).
 type runXML struct {
-	XMLName    xml.Name      `xml:"r"`
-	Properties runPropsXML   `xml:"rPr"`
-	Text       []textXML     `xml:"t"`
-	Tabs       []tabXML      `xml:"tab"`
-	Breaks     []breakXML    `xml:"br"`
-	Drawing    []drawingXML  `xml:"drawing"`
+	XMLName          xml.Name             `xml:"r"`
+	Properties       runPropsXML          `xml:"rPr"`
+	Text             []textXML            `xml:"t"`
+	Tabs             []tabXML             `xml:"tab"`
+	Breaks           []breakXML           `xml:"br"`
+	Drawing          []drawingXML         `xml:"drawing"`
+	Symbols          []symXML             `xml:"sym"`
+	AlternateContent []alternateContentXML `xml:"AlternateContent"`
+}
+
+// symXML represents a symbol character (<w:sym>).
+type symXML struct {
+	Font string `xml:"font,attr"` // Font name (e.g., "Segoe UI Emoji")
+	Char string `xml:"char,attr"` // Hex character code
+}
+
+// alternateContentXML represents mc:AlternateContent for emoji fallbacks.
+type alternateContentXML struct {
+	Fallback fallbackXML `xml:"Fallback"`
+}
+
+// fallbackXML represents mc:Fallback containing text.
+type fallbackXML struct {
+	Text []textXML `xml:"t"`
 }
 
 // runPropsXML represents run properties (<w:rPr>).

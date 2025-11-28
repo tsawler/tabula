@@ -47,11 +47,8 @@ func (dc *DocumentChunker) ChunkDocument(doc *model.Document) *ChunkCollection {
 	var chunks []*Chunk
 	chunkIndex := 0
 
-	// Extract document title
+	// Extract document title (leave empty if not set)
 	docTitle := doc.Metadata.Title
-	if docTitle == "" {
-		docTitle = "Untitled Document"
-	}
 
 	// Build section context from headings
 	toc := doc.TableOfContents()
@@ -80,21 +77,26 @@ func (dc *DocumentChunker) chunkPage(page *model.Page, docTitle string, currentS
 		return chunks
 	}
 
-	// Group elements by type for better chunking
-	var textBlocks []textBlock
+	// Process elements maintaining document order
 	var currentBlock textBlock
 	currentBlock.pageNum = page.Number
+
+	// Helper to flush current text block as chunks
+	flushTextBlock := func() {
+		if currentBlock.text != "" {
+			blockChunks := dc.textBlockToChunks(currentBlock, docTitle, chunkIndex)
+			chunks = append(chunks, blockChunks...)
+			currentBlock = textBlock{pageNum: page.Number}
+		}
+	}
 
 	for _, elem := range page.Elements {
 		switch e := elem.(type) {
 		case *model.Paragraph:
 			// Update section context if this is a heading-like paragraph
 			if isHeadingElement(e.Text, toc, page.Number) {
-				// Save current block if non-empty
-				if currentBlock.text != "" {
-					textBlocks = append(textBlocks, currentBlock)
-					currentBlock = textBlock{pageNum: page.Number}
-				}
+				// Flush current block before heading
+				flushTextBlock()
 
 				// Update section path
 				headingLevel := getHeadingLevel(e.Text, toc, page.Number)
@@ -114,11 +116,8 @@ func (dc *DocumentChunker) chunkPage(page *model.Page, docTitle string, currentS
 			}
 
 		case *model.Heading:
-			// Save current block
-			if currentBlock.text != "" {
-				textBlocks = append(textBlocks, currentBlock)
-				currentBlock = textBlock{pageNum: page.Number}
-			}
+			// Flush current block before heading
+			flushTextBlock()
 
 			// Update section path
 			updateSectionPath(currentSection, currentHeadingLevel, e.Level, e.Text)
@@ -128,33 +127,24 @@ func (dc *DocumentChunker) chunkPage(page *model.Page, docTitle string, currentS
 			chunks = append(chunks, chunk)
 
 		case *model.List:
-			// Save current block
-			if currentBlock.text != "" {
-				textBlocks = append(textBlocks, currentBlock)
-				currentBlock = textBlock{pageNum: page.Number}
-			}
+			// Flush current block before list
+			flushTextBlock()
 
 			// Create list chunk
 			chunk := dc.createListChunk(e, docTitle, *currentSection, page.Number, chunkIndex)
 			chunks = append(chunks, chunk)
 
 		case *model.Table:
-			// Save current block
-			if currentBlock.text != "" {
-				textBlocks = append(textBlocks, currentBlock)
-				currentBlock = textBlock{pageNum: page.Number}
-			}
+			// Flush current block before table
+			flushTextBlock()
 
 			// Create table chunk
 			chunk := dc.createTableChunk(e, docTitle, *currentSection, page.Number, chunkIndex)
 			chunks = append(chunks, chunk)
 
 		case *model.Image:
-			// Save current block
-			if currentBlock.text != "" {
-				textBlocks = append(textBlocks, currentBlock)
-				currentBlock = textBlock{pageNum: page.Number}
-			}
+			// Flush current block before image
+			flushTextBlock()
 
 			// Create image chunk if it has alt text
 			if e.AltText != "" {
@@ -164,16 +154,8 @@ func (dc *DocumentChunker) chunkPage(page *model.Page, docTitle string, currentS
 		}
 	}
 
-	// Save final block
-	if currentBlock.text != "" {
-		textBlocks = append(textBlocks, currentBlock)
-	}
-
-	// Convert text blocks to chunks with size handling
-	for _, block := range textBlocks {
-		blockChunks := dc.textBlockToChunks(block, docTitle, chunkIndex)
-		chunks = append(chunks, blockChunks...)
-	}
+	// Flush final block
+	flushTextBlock()
 
 	return chunks
 }
@@ -304,13 +286,32 @@ func (dc *DocumentChunker) createChunkFromHeading(h *model.Heading, docTitle str
 
 // createListChunk creates a chunk from a List element
 func (dc *DocumentChunker) createListChunk(list *model.List, docTitle string, sectionPath []string, pageNum int, chunkIndex *int) *Chunk {
-	// Format list as text
+	// Format list as markdown with proper indentation for nesting
 	var sb strings.Builder
-	for i, item := range list.Items {
+	levelCounters := make(map[int]int) // Track counters per level for ordered lists
+	lastLevel := -1
+
+	for _, item := range list.Items {
+		// Reset child counters when going back to parent level
+		if item.Level <= lastLevel {
+			for lvl := range levelCounters {
+				if lvl > item.Level {
+					delete(levelCounters, lvl)
+				}
+			}
+		}
+		lastLevel = item.Level
+
+		// Add indentation (2 spaces per level)
+		for j := 0; j < item.Level; j++ {
+			sb.WriteString("  ")
+		}
+
 		if list.Ordered {
-			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, item.Text))
+			levelCounters[item.Level]++
+			sb.WriteString(fmt.Sprintf("%d. %s\n", levelCounters[item.Level], item.Text))
 		} else {
-			sb.WriteString(fmt.Sprintf("• %s\n", item.Text))
+			sb.WriteString(fmt.Sprintf("- %s\n", item.Text))
 		}
 	}
 	text := strings.TrimSpace(sb.String())

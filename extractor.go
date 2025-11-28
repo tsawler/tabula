@@ -488,6 +488,19 @@ func (e *Extractor) ToMarkdown() (string, []Warning, error) {
 //	}
 //	md, warnings, err := tabula.Open("document.pdf").ToMarkdownWithOptions(opts)
 func (e *Extractor) ToMarkdownWithOptions(opts rag.MarkdownOptions) (string, []Warning, error) {
+	// For DOCX files, use the native markdown method which preserves document order
+	if e.format == format.DOCX {
+		if err := e.ensureReader(); err != nil {
+			return "", nil, err
+		}
+		md, err := e.docxReader.Markdown()
+		if err != nil {
+			return "", nil, err
+		}
+		return md, nil, nil
+	}
+
+	// For PDF files, use the RAG chunking pipeline
 	chunks, warnings, err := e.Chunks()
 	if err != nil {
 		return "", warnings, err

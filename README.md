@@ -1,12 +1,13 @@
 # Tabula
 
-A pure-Go PDF text extraction library with a fluent API, designed for RAG (Retrieval-Augmented Generation) workflows.
+A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval-Augmented Generation) workflows. Supports PDF and docx files.
 
 ## Features
 
 - **Fluent API** - Chain methods for clean, readable code
-- **Layout Analysis** - Detect headings, paragraphs, lists, and columns
-- **Header/Footer Detection** - Automatically identify and exclude repeating content
+- **Multi-Format Support** - PDF (.pdf) and Word (.docx) files
+- **Layout Analysis** - Detect headings, paragraphs, lists, and tables
+- **Header/Footer Detection** - Automatically identify and exclude repeating content (PDF)
 - **RAG-Ready Chunking** - Semantic document chunking with metadata
 - **Markdown Export** - Convert extracted content to markdown
 - **PDF 1.0-1.7 Support** - Including modern XRef streams (PDF 1.5+)
@@ -33,7 +34,9 @@ import (
 )
 
 func main() {
+    // Works with both PDF and DOCX files
     text, warnings, err := tabula.Open("document.pdf").Text()
+    // text, warnings, err := tabula.Open("document.docx").Text()
     if err != nil {
         log.Fatal(err)
     }
@@ -46,22 +49,26 @@ func main() {
 }
 ```
 
-### Extract with Options
+### Extract with Options (PDF)
 
 ```go
 text, warnings, err := tabula.Open("document.pdf").
-    Pages(1, 2, 3).              // Specific pages
-    ExcludeHeadersAndFooters().  // Remove repeating headers/footers
-    JoinParagraphs().            // Join text into paragraphs
+    Pages(1, 2, 3).              // Specific pages (PDF only)
+    ExcludeHeadersAndFooters().  // Remove repeating headers/footers (PDF only)
+    JoinParagraphs().            // Join text into paragraphs (PDF only)
     Text()
 ```
 
 ### Extract as Markdown
 
 ```go
+// PDF with header/footer exclusion
 markdown, warnings, err := tabula.Open("document.pdf").
     ExcludeHeadersAndFooters().
     ToMarkdown()
+
+// DOCX (preserves headings, lists, tables)
+markdown, warnings, err := tabula.Open("document.docx").ToMarkdown()
 ```
 
 ### RAG Chunking
@@ -77,9 +84,9 @@ import (
 )
 
 func main() {
-    chunks, warnings, err := tabula.Open("document.pdf").
-        ExcludeHeadersAndFooters().
-        Chunks()
+    // Works with both PDF and DOCX
+    chunks, warnings, err := tabula.Open("document.pdf").Chunks()
+    // chunks, warnings, err := tabula.Open("document.docx").Chunks()
     if err != nil {
         log.Fatal(err)
     }
@@ -93,6 +100,11 @@ func main() {
             chunk.Metadata.EstimatedTokens)
         fmt.Println(chunk.Text)
         fmt.Println("---")
+    }
+
+    // Warnings are non-fatal issues
+    for _, w := range warnings {
+        fmt.Println("Warning:", w.Message)
     }
 }
 ```
@@ -119,51 +131,52 @@ for i, md := range mdChunks {
 
 ## API Reference
 
-### Opening a PDF
+### Opening Documents
 
 ```go
-// From file path
+// From file path (format auto-detected by extension)
 ext := tabula.Open("document.pdf")
+ext := tabula.Open("document.docx")
 
-// From existing reader
+// From existing PDF reader (PDF only)
 r, _ := reader.Open("document.pdf")
 ext := tabula.FromReader(r)
 ```
 
 ### Fluent Options
 
-| Method | Description |
-|--------|-------------|
-| `Pages(1, 2, 3)` | Extract specific pages (1-indexed) |
-| `PageRange(1, 10)` | Extract page range (inclusive) |
-| `ExcludeHeaders()` | Exclude detected headers |
-| `ExcludeFooters()` | Exclude detected footers |
-| `ExcludeHeadersAndFooters()` | Exclude both |
-| `JoinParagraphs()` | Join text fragments into paragraphs |
-| `ByColumn()` | Process multi-column layouts column by column |
-| `PreserveLayout()` | Maintain spatial positioning |
+| Method | Description | Formats |
+|--------|-------------|---------|
+| `Pages(1, 2, 3)` | Extract specific pages (1-indexed) | PDF |
+| `PageRange(1, 10)` | Extract page range (inclusive) | PDF |
+| `ExcludeHeaders()` | Exclude detected headers | PDF |
+| `ExcludeFooters()` | Exclude detected footers | PDF |
+| `ExcludeHeadersAndFooters()` | Exclude both | PDF |
+| `JoinParagraphs()` | Join text fragments into paragraphs | PDF |
+| `ByColumn()` | Process multi-column layouts column by column | PDF |
+| `PreserveLayout()` | Maintain spatial positioning | PDF |
 
 ### Terminal Operations
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `Text()` | `string` | Plain text content |
-| `ToMarkdown()` | `string` | Markdown-formatted content |
-| `ToMarkdownWithOptions(opts)` | `string` | Markdown with custom options |
-| `Fragments()` | `[]text.TextFragment` | Raw text fragments with positions |
-| `Lines()` | `[]layout.Line` | Detected text lines |
-| `Paragraphs()` | `[]layout.Paragraph` | Detected paragraphs |
-| `Headings()` | `[]layout.Heading` | Detected headings (H1-H6) |
-| `Lists()` | `[]layout.List` | Detected lists |
-| `Blocks()` | `[]layout.Block` | Text blocks |
-| `Elements()` | `[]layout.LayoutElement` | All elements in reading order |
-| `Document()` | `*model.Document` | Full document structure |
-| `Chunks()` | `*rag.ChunkCollection` | Semantic chunks for RAG |
-| `ChunksWithConfig(config, sizeConfig)` | `*rag.ChunkCollection` | Chunks with custom sizing |
-| `Analyze()` | `*layout.AnalysisResult` | Complete layout analysis |
-| `PageCount()` | `int` | Number of pages |
+| Method | Returns | Description | Formats |
+|--------|---------|-------------|---------|
+| `Text()` | `string` | Plain text content | PDF, DOCX |
+| `ToMarkdown()` | `string` | Markdown-formatted content | PDF, DOCX |
+| `ToMarkdownWithOptions(opts)` | `string` | Markdown with custom options | PDF |
+| `Document()` | `*model.Document` | Full document structure | PDF, DOCX |
+| `Chunks()` | `*rag.ChunkCollection` | Semantic chunks for RAG | PDF, DOCX |
+| `ChunksWithConfig(config, sizeConfig)` | `*rag.ChunkCollection` | Chunks with custom sizing | PDF, DOCX |
+| `PageCount()` | `int` | Number of pages | PDF, DOCX |
+| `Fragments()` | `[]text.TextFragment` | Raw text fragments with positions | PDF |
+| `Lines()` | `[]layout.Line` | Detected text lines | PDF |
+| `Paragraphs()` | `[]layout.Paragraph` | Detected paragraphs | PDF |
+| `Headings()` | `[]layout.Heading` | Detected headings (H1-H6) | PDF |
+| `Lists()` | `[]layout.List` | Detected lists | PDF |
+| `Blocks()` | `[]layout.Block` | Text blocks | PDF |
+| `Elements()` | `[]layout.LayoutElement` | All elements in reading order | PDF |
+| `Analyze()` | `*layout.AnalysisResult` | Complete layout analysis | PDF |
 
-### Inspection Methods (non-terminal)
+### Inspection Methods (non-terminal, PDF only)
 
 ```go
 ext := tabula.Open("document.pdf")
@@ -171,7 +184,7 @@ defer ext.Close()
 
 isCharLevel, _ := ext.IsCharacterLevel()  // Detect character-level PDFs
 isMultiCol, _ := ext.IsMultiColumn()      // Detect multi-column layouts
-pageCount, _ := ext.PageCount()           // Get page count
+pageCount, _ := ext.PageCount()           // Get page count (works with DOCX too)
 ```
 
 ## RAG Integration

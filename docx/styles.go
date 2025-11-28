@@ -70,9 +70,14 @@ type numberingXML struct {
 
 // abstractNumXML represents an abstract numbering definition.
 type abstractNumXML struct {
-	AbstractNumID string        `xml:"abstractNumId,attr"`
-	Levels        []lvlXML      `xml:"lvl"`
-	NumStyleLink  string        `xml:"numStyleLink>val,attr"`
+	AbstractNumID string          `xml:"abstractNumId,attr"`
+	Levels        []lvlXML        `xml:"lvl"`
+	NumStyleLink  numStyleLinkXML `xml:"numStyleLink"`
+}
+
+// numStyleLinkXML represents a style link for numbering.
+type numStyleLinkXML struct {
+	Val string `xml:"val,attr"`
 }
 
 // lvlXML represents a numbering level.
