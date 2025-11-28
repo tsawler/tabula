@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 
 	"github.com/tsawler/tabula/model"
@@ -14,18 +15,29 @@ import (
 
 // Reader provides access to DOCX document content.
 type Reader struct {
-	file          *os.File
-	zipReader     *zip.ReadCloser
-	document      *documentXML
-	styles        *stylesXML
-	numbering     *numberingXML
-	rels          *relationshipsXML
-	coreProps     *corePropertiesXML
-	appProps      *appPropertiesXML
-	styleResolver *StyleResolver
-	tableParser   *TableParser
-	paragraphs    []parsedParagraph
-	tables        []ParsedTable
+	file              *os.File
+	zipReader         *zip.ReadCloser
+	document          *documentXML
+	styles            *stylesXML
+	numbering         *numberingXML
+	rels              *relationshipsXML
+	coreProps         *corePropertiesXML
+	appProps          *appPropertiesXML
+	styleResolver     *StyleResolver
+	numberingResolver *NumberingResolver
+	tableParser       *TableParser
+	listParser        *ListParser
+	paragraphs        []parsedParagraph
+	tables            []ParsedTable
+	lists             []ParsedList
+	elements          []parsedElement // Elements in document order
+}
+
+// parsedElement represents a parsed element (paragraph or table) with its type.
+type parsedElement struct {
+	Type      string           // "paragraph" or "table"
+	Paragraph *parsedParagraph // Non-nil if Type == "paragraph"
+	Table     *ParsedTable     // Non-nil if Type == "table"
 }
 
 // parsedParagraph holds a parsed paragraph with resolved styles.
@@ -35,6 +47,11 @@ type parsedParagraph struct {
 	StyleName string
 	IsHeading bool
 	Level     int // heading level (1-9) or 0 for non-headings
+
+	// List properties
+	IsListItem bool
+	NumID      string // Numbering ID (empty if not a list item)
+	ListLevel  int    // List indentation level (0-based)
 
 	// Paragraph properties
 	Alignment   string  // left, center, right, both
@@ -102,9 +119,14 @@ func Open(filename string) (*Reader, error) {
 	}
 
 	// Parse numbering.xml (optional)
-	if err := r.parseNumbering(); err != nil {
-		// Numbering is optional - just continue without it
-	}
+	_ = r.parseNumbering() // Numbering is optional
+
+	// Create numbering resolver and list parser
+	r.numberingResolver = NewNumberingResolver(r.numbering)
+	r.listParser = NewListParser(r.numberingResolver)
+
+	// Extract lists from paragraphs
+	r.lists = r.listParser.ExtractLists(r.paragraphs)
 
 	// Parse metadata (optional)
 	r.parseCoreProperties()
@@ -176,7 +198,7 @@ func (r *Reader) PageCount() (int, error) {
 }
 
 // Text extracts and returns all text content from the document.
-// This includes text from paragraphs and tables.
+// This includes text from paragraphs, lists, and tables in document order.
 func (r *Reader) Text() (string, error) {
 	if r.document == nil {
 		return "", fmt.Errorf("document not parsed")
@@ -184,12 +206,36 @@ func (r *Reader) Text() (string, error) {
 
 	var result strings.Builder
 
-	// Add paragraph text
+	// Track list item counters for ordered lists (per numID and level)
+	listCounters := make(map[string]map[int]int) // numID -> level -> count
+
+	// If we have ordered elements, use them for correct document order
+	if len(r.elements) > 0 {
+		for i, elem := range r.elements {
+			if i > 0 {
+				result.WriteString("\n")
+			}
+
+			switch elem.Type {
+			case "paragraph":
+				if elem.Paragraph != nil {
+					r.writeParagraphText(&result, elem.Paragraph, listCounters)
+				}
+			case "table":
+				if elem.Table != nil {
+					result.WriteString(elem.Table.ToText())
+				}
+			}
+		}
+		return result.String(), nil
+	}
+
+	// Fallback: output paragraphs then tables (old behavior)
 	for i, para := range r.paragraphs {
 		if i > 0 {
 			result.WriteString("\n")
 		}
-		result.WriteString(para.Text)
+		r.writeParagraphText(&result, &para, listCounters)
 	}
 
 	// Add table text
@@ -201,6 +247,136 @@ func (r *Reader) Text() (string, error) {
 	}
 
 	return result.String(), nil
+}
+
+// writeParagraphText writes a paragraph's text to the builder with list formatting.
+func (r *Reader) writeParagraphText(sb *strings.Builder, para *parsedParagraph, listCounters map[string]map[int]int) {
+	if para.IsListItem {
+		// Add indentation for nested lists
+		for j := 0; j < para.ListLevel; j++ {
+			sb.WriteString("  ")
+		}
+
+		// Get or initialize counter for this list
+		if listCounters[para.NumID] == nil {
+			listCounters[para.NumID] = make(map[int]int)
+		}
+
+		// Determine list type and format bullet/number
+		listType, bullet, startAt := r.getListFormat(para.NumID, para.ListLevel)
+
+		if listType == ListTypeOrdered {
+			// Increment counter for this level
+			listCounters[para.NumID][para.ListLevel]++
+			num := startAt + listCounters[para.NumID][para.ListLevel] - 1
+			sb.WriteString(formatNumber(num, para.NumID, para.ListLevel, r.numberingResolver))
+			sb.WriteString(". ")
+		} else {
+			// Bullet list
+			if bullet == "" {
+				bullet = getBulletChar("", para.ListLevel)
+			}
+			sb.WriteString(bullet)
+			sb.WriteString(" ")
+		}
+	}
+
+	sb.WriteString(para.Text)
+}
+
+// getListFormat returns list formatting info for a numID and level.
+func (r *Reader) getListFormat(numID string, level int) (ListType, string, int) {
+	if r.numberingResolver == nil {
+		return ListTypeUnordered, "•", 1
+	}
+	return r.numberingResolver.ResolveLevel(numID, level)
+}
+
+// formatNumber formats a list number based on the numbering format.
+func formatNumber(num int, numID string, level int, resolver *NumberingResolver) string {
+	if resolver == nil {
+		return fmt.Sprintf("%d", num)
+	}
+
+	// Get the format type from resolver
+	abstractID, ok := resolver.numMappings[numID]
+	if !ok {
+		return fmt.Sprintf("%d", num)
+	}
+
+	abstractNum, ok := resolver.abstractNums[abstractID]
+	if !ok {
+		return fmt.Sprintf("%d", num)
+	}
+
+	levelStr := fmt.Sprintf("%d", level)
+	for _, lvl := range abstractNum.Levels {
+		if lvl.ILvl == levelStr {
+			switch lvl.NumFmt.Val {
+			case "lowerLetter":
+				return toLowerLetter(num)
+			case "upperLetter":
+				return toUpperLetter(num)
+			case "lowerRoman":
+				return toLowerRoman(num)
+			case "upperRoman":
+				return toUpperRoman(num)
+			default:
+				return fmt.Sprintf("%d", num)
+			}
+		}
+	}
+
+	return fmt.Sprintf("%d", num)
+}
+
+// toLowerLetter converts a number to lowercase letter (1=a, 2=b, etc.)
+func toLowerLetter(n int) string {
+	if n < 1 {
+		return "a"
+	}
+	result := ""
+	for n > 0 {
+		n-- // Make it 0-indexed
+		result = string(rune('a'+n%26)) + result
+		n /= 26
+	}
+	return result
+}
+
+// toUpperLetter converts a number to uppercase letter (1=A, 2=B, etc.)
+func toUpperLetter(n int) string {
+	return strings.ToUpper(toLowerLetter(n))
+}
+
+// toLowerRoman converts a number to lowercase Roman numerals.
+func toLowerRoman(n int) string {
+	return strings.ToLower(toUpperRoman(n))
+}
+
+// toUpperRoman converts a number to uppercase Roman numerals.
+func toUpperRoman(n int) string {
+	if n < 1 || n > 3999 {
+		return fmt.Sprintf("%d", n)
+	}
+
+	romanNumerals := []struct {
+		value  int
+		symbol string
+	}{
+		{1000, "M"}, {900, "CM"}, {500, "D"}, {400, "CD"},
+		{100, "C"}, {90, "XC"}, {50, "L"}, {40, "XL"},
+		{10, "X"}, {9, "IX"}, {5, "V"}, {4, "IV"}, {1, "I"},
+	}
+
+	result := ""
+	for _, rn := range romanNumerals {
+		for n >= rn.value {
+			result += rn.symbol
+			n -= rn.value
+		}
+	}
+	return result
 }
 
 // Document returns a model.Document representation of the DOCX content.
@@ -345,8 +521,70 @@ func (r *Reader) parseDocument() error {
 		return fmt.Errorf("unmarshaling document.xml: %w", err)
 	}
 
-	// Process paragraphs
-	r.processParagraphs()
+	// Parse elements in order using xml.Decoder
+	if err := r.parseBodyElementsInOrder(data); err != nil {
+		return fmt.Errorf("parsing body elements in order: %w", err)
+	}
+
+	// Process elements in document order
+	r.processElementsInOrder()
+
+	return nil
+}
+
+// parseBodyElementsInOrder parses body elements maintaining document order.
+func (r *Reader) parseBodyElementsInOrder(data []byte) error {
+	if r.document.Body == nil {
+		return nil
+	}
+
+	decoder := xml.NewDecoder(strings.NewReader(string(data)))
+	var inBody bool
+	var paraIndex, tableIndex int
+
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+
+		switch t := token.(type) {
+		case xml.StartElement:
+			// Check if we're entering the body
+			if t.Name.Local == "body" {
+				inBody = true
+				continue
+			}
+
+			if !inBody {
+				continue
+			}
+
+			// Track elements in order
+			switch t.Name.Local {
+			case "p":
+				if paraIndex < len(r.document.Body.Paragraphs) {
+					r.document.Body.Elements = append(r.document.Body.Elements, bodyElement{
+						Type:      "paragraph",
+						Paragraph: &r.document.Body.Paragraphs[paraIndex],
+					})
+					paraIndex++
+				}
+			case "tbl":
+				if tableIndex < len(r.document.Body.Tables) {
+					r.document.Body.Elements = append(r.document.Body.Elements, bodyElement{
+						Type:  "table",
+						Table: &r.document.Body.Tables[tableIndex],
+					})
+					tableIndex++
+				}
+			}
+		case xml.EndElement:
+			if t.Name.Local == "body" {
+				inBody = false
+			}
+		}
+	}
 
 	return nil
 }
@@ -435,6 +673,47 @@ func (r *Reader) processTables() {
 	}
 }
 
+// processElementsInOrder processes body elements in document order.
+func (r *Reader) processElementsInOrder() {
+	if r.document == nil || r.document.Body == nil {
+		return
+	}
+
+	// If no Elements were parsed (fallback for simple parsing), use old method
+	if len(r.document.Body.Elements) == 0 {
+		r.processParagraphs()
+		return
+	}
+
+	// Process elements in order
+	r.elements = make([]parsedElement, 0, len(r.document.Body.Elements))
+	r.paragraphs = make([]parsedParagraph, 0, len(r.document.Body.Paragraphs))
+	r.tables = make([]ParsedTable, 0, len(r.document.Body.Tables))
+
+	for _, elem := range r.document.Body.Elements {
+		switch elem.Type {
+		case "paragraph":
+			if elem.Paragraph != nil {
+				parsed := r.processParagraph(*elem.Paragraph)
+				r.paragraphs = append(r.paragraphs, parsed)
+				r.elements = append(r.elements, parsedElement{
+					Type:      "paragraph",
+					Paragraph: &r.paragraphs[len(r.paragraphs)-1],
+				})
+			}
+		case "table":
+			if elem.Table != nil && r.tableParser != nil {
+				parsed := r.tableParser.ParseTable(*elem.Table)
+				r.tables = append(r.tables, parsed)
+				r.elements = append(r.elements, parsedElement{
+					Type:  "table",
+					Table: &r.tables[len(r.tables)-1],
+				})
+			}
+		}
+	}
+}
+
 // processParagraph processes a single paragraph.
 func (r *Reader) processParagraph(p paragraphXML) parsedParagraph {
 	parsed := parsedParagraph{
@@ -491,6 +770,13 @@ func (r *Reader) processParagraph(p paragraphXML) parsedParagraph {
 		}
 	}
 
+	// Check for list item (numbering properties)
+	if ppr.NumPr.NumID.Val != "" && ppr.NumPr.NumID.Val != "0" {
+		parsed.IsListItem = true
+		parsed.NumID = ppr.NumPr.NumID.Val
+		parsed.ListLevel = parseListLevel(ppr.NumPr.ILvl.Val)
+	}
+
 	// Extract text from runs with resolved formatting
 	var textParts []string
 	for _, run := range p.Runs {
@@ -544,6 +830,20 @@ func (r *Reader) extractRunText(run runXML) string {
 		parts = append(parts, t.Value)
 	}
 
+	// Handle symbol characters (emoji and special symbols)
+	for _, sym := range run.Symbols {
+		if char := parseSymbolChar(sym.Char); char != "" {
+			parts = append(parts, char)
+		}
+	}
+
+	// Handle AlternateContent fallbacks (used for emoji in newer Word versions)
+	for _, ac := range run.AlternateContent {
+		for _, t := range ac.Fallback.Text {
+			parts = append(parts, t.Value)
+		}
+	}
+
 	// Handle tab characters
 	for range run.Tabs {
 		parts = append(parts, "\t")
@@ -559,6 +859,27 @@ func (r *Reader) extractRunText(run runXML) string {
 	}
 
 	return strings.Join(parts, "")
+}
+
+// parseSymbolChar converts a hex character code to its Unicode character.
+func parseSymbolChar(hexCode string) string {
+	if hexCode == "" {
+		return ""
+	}
+
+	// Parse the hex code
+	code, err := strconv.ParseInt(hexCode, 16, 32)
+	if err != nil {
+		return ""
+	}
+
+	// Convert to rune and then to string
+	// Handle surrogate pairs for emoji (codes > 0xFFFF)
+	if code > 0 && code <= 0x10FFFF {
+		return string(rune(code))
+	}
+
+	return ""
 }
 
 // isHeadingStyle determines if a style ID represents a heading.
@@ -611,4 +932,32 @@ func parseOutlineLevel(s string) int {
 		return level
 	}
 	return -1
+}
+
+// parseListLevel parses a list level string to an integer (0-based).
+func parseListLevel(s string) int {
+	if s == "" {
+		return 0
+	}
+	level := 0
+	for _, c := range s {
+		if c >= '0' && c <= '9' {
+			level = level*10 + int(c-'0')
+		}
+	}
+	return level
+}
+
+// Lists returns all parsed lists from the document.
+func (r *Reader) Lists() []ParsedList {
+	return r.lists
+}
+
+// ModelLists returns lists converted to model.List format.
+func (r *Reader) ModelLists() []*model.List {
+	result := make([]*model.List, len(r.lists))
+	for i := range r.lists {
+		result[i] = r.lists[i].ToModelList()
+	}
+	return result
 }

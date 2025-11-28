@@ -410,3 +410,56 @@ func TestTableInDocument(t *testing.T) {
 		t.Errorf("expected at least 3 elements, got %d", len(page.Elements))
 	}
 }
+
+func TestTableOrderInText(t *testing.T) {
+	// Test that table appears between paragraphs in text output
+	tableXML := `
+<w:p><w:r><w:t>Before table</w:t></w:r></w:p>
+<w:tbl>
+  <w:tblGrid>
+    <w:gridCol w:w="2880"/>
+    <w:gridCol w:w="2880"/>
+  </w:tblGrid>
+  <w:tr>
+    <w:tc><w:p><w:r><w:t>TableCell</w:t></w:r></w:p></w:tc>
+    <w:tc><w:p><w:r><w:t>Data</w:t></w:r></w:p></w:tc>
+  </w:tr>
+</w:tbl>
+<w:p><w:r><w:t>After table</w:t></w:r></w:p>`
+
+	docxPath := createTestDOCXWithTable(t, tableXML)
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	text, err := r.Text()
+	if err != nil {
+		t.Fatalf("Text() error = %v", err)
+	}
+
+	// Find positions of each content
+	beforeIdx := strings.Index(text, "Before table")
+	tableIdx := strings.Index(text, "TableCell")
+	afterIdx := strings.Index(text, "After table")
+
+	if beforeIdx == -1 {
+		t.Fatal("'Before table' not found in text")
+	}
+	if tableIdx == -1 {
+		t.Fatal("'TableCell' not found in text")
+	}
+	if afterIdx == -1 {
+		t.Fatal("'After table' not found in text")
+	}
+
+	// Verify order: Before < Table < After
+	if beforeIdx >= tableIdx {
+		t.Errorf("'Before table' (at %d) should appear before 'TableCell' (at %d)", beforeIdx, tableIdx)
+	}
+	if tableIdx >= afterIdx {
+		t.Errorf("'TableCell' (at %d) should appear before 'After table' (at %d)", tableIdx, afterIdx)
+	}
+}
