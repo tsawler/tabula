@@ -208,7 +208,7 @@ func TestStyleResolver_ResolveRun(t *testing.T) {
 	t.Run("override with direct formatting", func(t *testing.T) {
 		runProps := runPropsXML{
 			Bold:     boolXML{XMLName: xml.Name{Local: "b"}, Val: ""}, // Simulates <w:b/>
-			FontSize: sizeXML{Val: "28"},                               // 14pt
+			FontSize: sizeXML{Val: "28"},                              // 14pt
 		}
 		resolved := sr.ResolveRun("NormalStyle", runProps)
 
@@ -232,8 +232,8 @@ func TestParseHalfPoints(t *testing.T) {
 		input string
 		want  float64
 	}{
-		{"24", 12},    // 24 half-points = 12pt
-		{"22", 11},    // 22 half-points = 11pt
+		{"24", 12}, // 24 half-points = 12pt
+		{"22", 11}, // 22 half-points = 11pt
 		{"0", 0},
 		{"", 0},
 		{"invalid", 0},

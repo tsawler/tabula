@@ -29,8 +29,8 @@ type Reader struct {
 	xrefTable   *core.XRefTable
 	trailer     core.Dict
 	version     PDFVersion
-	objCache    map[int]core.Object          // Cache for loaded objects
-	objStmCache map[int]*core.ObjectStream   // Cache for object streams
+	objCache    map[int]core.Object        // Cache for loaded objects
+	objStmCache map[int]*core.ObjectStream // Cache for object streams
 	fileSize    int64
 	pageTree    *pages.PageTree // Cached page tree
 }

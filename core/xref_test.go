@@ -52,8 +52,8 @@ func TestXRefEntry(t *testing.T) {
 	// Test compressed entry (object in object stream)
 	compressedEntry := &XRefEntry{
 		Type:       XRefEntryCompressed,
-		Offset:     10,  // Object stream number
-		Generation: 5,   // Index within object stream
+		Offset:     10, // Object stream number
+		Generation: 5,  // Index within object stream
 		InUse:      true,
 	}
 

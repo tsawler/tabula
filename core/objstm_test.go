@@ -7,11 +7,11 @@ import (
 // TestNewObjectStream tests creating an ObjectStream from a Stream
 func TestNewObjectStream(t *testing.T) {
 	tests := []struct {
-		name    string
-		dict    Dict
-		wantN   int
+		name      string
+		dict      Dict
+		wantN     int
 		wantFirst int
-		wantErr bool
+		wantErr   bool
 	}{
 		{
 			name: "valid object stream",

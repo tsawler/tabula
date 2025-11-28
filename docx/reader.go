@@ -617,7 +617,7 @@ func (r *Reader) Document() (*model.Document, error) {
 			}
 
 			bbox := model.BBox{
-				X:      72,  // 1 inch margin
+				X:      72, // 1 inch margin
 				Y:      yPos,
 				Width:  468, // 6.5 inch text width
 				Height: estimatedHeight,
@@ -1102,7 +1102,7 @@ func (r *Reader) isHeadingStyle(styleID string) (bool, int) {
 		"heading1": 1, "heading2": 2, "heading3": 3,
 		"heading4": 4, "heading5": 5, "heading6": 6,
 		"heading7": 7, "heading8": 8, "heading9": 9,
-		"title":    1, // Title is typically H1 equivalent
+		"title": 1, // Title is typically H1 equivalent
 	}
 
 	if level, ok := headingMap[styleID]; ok {

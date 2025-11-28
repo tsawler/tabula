@@ -4,10 +4,10 @@ import "encoding/xml"
 
 // stylesXML represents the structure of styles.xml
 type stylesXML struct {
-	XMLName       xml.Name          `xml:"document-styles"`
-	Styles        *officeStylesXML  `xml:"styles"`
-	AutoStyles    *autoStylesXML    `xml:"automatic-styles"`
-	MasterStyles  *masterStylesXML  `xml:"master-styles"`
+	XMLName      xml.Name         `xml:"document-styles"`
+	Styles       *officeStylesXML `xml:"styles"`
+	AutoStyles   *autoStylesXML   `xml:"automatic-styles"`
+	MasterStyles *masterStylesXML `xml:"master-styles"`
 }
 
 // contentStylesXML represents automatic styles in content.xml
@@ -19,15 +19,15 @@ type contentStylesXML struct {
 
 // officeStylesXML represents the office:styles element (named styles).
 type officeStylesXML struct {
-	Styles      []styleDefXML      `xml:"style"`
-	ListStyles  []listStyleXML     `xml:"list-style"`
-	OutlineStyle *outlineStyleXML  `xml:"outline-style"`
+	Styles       []styleDefXML    `xml:"style"`
+	ListStyles   []listStyleXML   `xml:"list-style"`
+	OutlineStyle *outlineStyleXML `xml:"outline-style"`
 }
 
 // autoStylesXML represents the office:automatic-styles element.
 type autoStylesXML struct {
-	Styles      []styleDefXML  `xml:"style"`
-	ListStyles  []listStyleXML `xml:"list-style"`
+	Styles      []styleDefXML   `xml:"style"`
+	ListStyles  []listStyleXML  `xml:"list-style"`
 	PageLayouts []pageLayoutXML `xml:"page-layout"`
 }
 
@@ -38,32 +38,32 @@ type masterStylesXML struct {
 
 // styleDefXML represents a style definition (<style:style>).
 type styleDefXML struct {
-	XMLName           xml.Name              `xml:"style"`
-	Name              string                `xml:"name,attr"`
-	Family            string                `xml:"family,attr"` // paragraph, text, table, table-cell, etc.
-	ParentStyleName   string                `xml:"parent-style-name,attr"`
-	DisplayName       string                `xml:"display-name,attr"`
-	Class             string                `xml:"class,attr"`
-	DefaultOutlineLevel string              `xml:"default-outline-level,attr"`
-	ParagraphProps    *paragraphPropsXML    `xml:"paragraph-properties"`
-	TextProps         *textPropsXML         `xml:"text-properties"`
-	TableProps        *tablePropsXML        `xml:"table-properties"`
-	TableColumnProps  *tableColumnPropsXML  `xml:"table-column-properties"`
-	TableRowProps     *tableRowPropsXML     `xml:"table-row-properties"`
-	TableCellProps    *tableCellPropsXML    `xml:"table-cell-properties"`
+	XMLName             xml.Name             `xml:"style"`
+	Name                string               `xml:"name,attr"`
+	Family              string               `xml:"family,attr"` // paragraph, text, table, table-cell, etc.
+	ParentStyleName     string               `xml:"parent-style-name,attr"`
+	DisplayName         string               `xml:"display-name,attr"`
+	Class               string               `xml:"class,attr"`
+	DefaultOutlineLevel string               `xml:"default-outline-level,attr"`
+	ParagraphProps      *paragraphPropsXML   `xml:"paragraph-properties"`
+	TextProps           *textPropsXML        `xml:"text-properties"`
+	TableProps          *tablePropsXML       `xml:"table-properties"`
+	TableColumnProps    *tableColumnPropsXML `xml:"table-column-properties"`
+	TableRowProps       *tableRowPropsXML    `xml:"table-row-properties"`
+	TableCellProps      *tableCellPropsXML   `xml:"table-cell-properties"`
 }
 
 // paragraphPropsXML represents paragraph properties (<style:paragraph-properties>).
 type paragraphPropsXML struct {
-	XMLName          xml.Name `xml:"paragraph-properties"`
-	TextAlign        string   `xml:"text-align,attr"`        // left, right, center, justify
-	MarginTop        string   `xml:"margin-top,attr"`
-	MarginBottom     string   `xml:"margin-bottom,attr"`
-	MarginLeft       string   `xml:"margin-left,attr"`
-	MarginRight      string   `xml:"margin-right,attr"`
-	TextIndent       string   `xml:"text-indent,attr"`
-	LineHeight       string   `xml:"line-height,attr"`
-	BackgroundColor  string   `xml:"background-color,attr"`
+	XMLName         xml.Name `xml:"paragraph-properties"`
+	TextAlign       string   `xml:"text-align,attr"` // left, right, center, justify
+	MarginTop       string   `xml:"margin-top,attr"`
+	MarginBottom    string   `xml:"margin-bottom,attr"`
+	MarginLeft      string   `xml:"margin-left,attr"`
+	MarginRight     string   `xml:"margin-right,attr"`
+	TextIndent      string   `xml:"text-indent,attr"`
+	LineHeight      string   `xml:"line-height,attr"`
+	BackgroundColor string   `xml:"background-color,attr"`
 }
 
 // textPropsXML represents text properties (<style:text-properties>).
@@ -72,8 +72,8 @@ type textPropsXML struct {
 	FontName        string   `xml:"font-name,attr"`
 	FontFamily      string   `xml:"font-family,attr"`
 	FontSize        string   `xml:"font-size,attr"`
-	FontStyle       string   `xml:"font-style,attr"`       // normal, italic
-	FontWeight      string   `xml:"font-weight,attr"`      // normal, bold
+	FontStyle       string   `xml:"font-style,attr"`           // normal, italic
+	FontWeight      string   `xml:"font-weight,attr"`          // normal, bold
 	TextUnderline   string   `xml:"text-underline-style,attr"` // none, solid
 	TextLineThrough string   `xml:"text-line-through-style,attr"`
 	Color           string   `xml:"color,attr"`
@@ -123,52 +123,52 @@ type tableCellPropsXML struct {
 
 // listStyleXML represents a list style definition (<text:list-style>).
 type listStyleXML struct {
-	XMLName     xml.Name         `xml:"list-style"`
-	Name        string           `xml:"name,attr"`
-	DisplayName string           `xml:"display-name,attr"`
-	Levels      []listLevelXML   `xml:"-"` // Populated by custom parsing
+	XMLName      xml.Name             `xml:"list-style"`
+	Name         string               `xml:"name,attr"`
+	DisplayName  string               `xml:"display-name,attr"`
+	Levels       []listLevelXML       `xml:"-"` // Populated by custom parsing
 	BulletLevels []listLevelBulletXML `xml:"list-level-style-bullet"`
 	NumberLevels []listLevelNumberXML `xml:"list-level-style-number"`
 }
 
 // listLevelXML is a generic interface for list levels.
 type listLevelXML struct {
-	Level       int
-	IsBullet    bool
-	BulletChar  string
-	NumFormat   string // "1", "a", "A", "i", "I"
-	NumPrefix   string
-	NumSuffix   string
-	StartValue  int
+	Level      int
+	IsBullet   bool
+	BulletChar string
+	NumFormat  string // "1", "a", "A", "i", "I"
+	NumPrefix  string
+	NumSuffix  string
+	StartValue int
 }
 
 // listLevelBulletXML represents a bullet list level (<text:list-level-style-bullet>).
 type listLevelBulletXML struct {
-	XMLName     xml.Name `xml:"list-level-style-bullet"`
-	Level       string   `xml:"level,attr"`
-	BulletChar  string   `xml:"bullet-char,attr"`
-	StyleName   string   `xml:"style-name,attr"`
-	NumPrefix   string   `xml:"num-prefix,attr"`
-	NumSuffix   string   `xml:"num-suffix,attr"`
+	XMLName    xml.Name `xml:"list-level-style-bullet"`
+	Level      string   `xml:"level,attr"`
+	BulletChar string   `xml:"bullet-char,attr"`
+	StyleName  string   `xml:"style-name,attr"`
+	NumPrefix  string   `xml:"num-prefix,attr"`
+	NumSuffix  string   `xml:"num-suffix,attr"`
 }
 
 // listLevelNumberXML represents a numbered list level (<text:list-level-style-number>).
 type listLevelNumberXML struct {
-	XMLName     xml.Name `xml:"list-level-style-number"`
-	Level       string   `xml:"level,attr"`
-	NumFormat   string   `xml:"num-format,attr"` // "1", "a", "A", "i", "I"
-	NumPrefix   string   `xml:"num-prefix,attr"`
-	NumSuffix   string   `xml:"num-suffix,attr"`
-	StartValue  string   `xml:"start-value,attr"`
-	DisplayLevels string `xml:"display-levels,attr"`
-	StyleName   string   `xml:"style-name,attr"`
+	XMLName       xml.Name `xml:"list-level-style-number"`
+	Level         string   `xml:"level,attr"`
+	NumFormat     string   `xml:"num-format,attr"` // "1", "a", "A", "i", "I"
+	NumPrefix     string   `xml:"num-prefix,attr"`
+	NumSuffix     string   `xml:"num-suffix,attr"`
+	StartValue    string   `xml:"start-value,attr"`
+	DisplayLevels string   `xml:"display-levels,attr"`
+	StyleName     string   `xml:"style-name,attr"`
 }
 
 // outlineStyleXML represents outline numbering style.
 type outlineStyleXML struct {
-	XMLName xml.Name              `xml:"outline-style"`
-	Name    string                `xml:"name,attr"`
-	Levels  []outlineLevelXML     `xml:"outline-level-style"`
+	XMLName xml.Name          `xml:"outline-style"`
+	Name    string            `xml:"name,attr"`
+	Levels  []outlineLevelXML `xml:"outline-level-style"`
 }
 
 // outlineLevelXML represents an outline level style.
@@ -183,28 +183,28 @@ type outlineLevelXML struct {
 
 // pageLayoutXML represents a page layout (<style:page-layout>).
 type pageLayoutXML struct {
-	XMLName    xml.Name            `xml:"page-layout"`
-	Name       string              `xml:"name,attr"`
-	PageProps  *pagePropsXML       `xml:"page-layout-properties"`
+	XMLName     xml.Name              `xml:"page-layout"`
+	Name        string                `xml:"name,attr"`
+	PageProps   *pagePropsXML         `xml:"page-layout-properties"`
 	HeaderStyle *headerFooterStyleXML `xml:"header-style"`
 	FooterStyle *headerFooterStyleXML `xml:"footer-style"`
 }
 
 // pagePropsXML represents page layout properties.
 type pagePropsXML struct {
-	XMLName      xml.Name `xml:"page-layout-properties"`
-	PageWidth    string   `xml:"page-width,attr"`
-	PageHeight   string   `xml:"page-height,attr"`
-	MarginTop    string   `xml:"margin-top,attr"`
-	MarginBottom string   `xml:"margin-bottom,attr"`
-	MarginLeft   string   `xml:"margin-left,attr"`
-	MarginRight  string   `xml:"margin-right,attr"`
-	PrintOrientation string `xml:"print-orientation,attr"`
+	XMLName          xml.Name `xml:"page-layout-properties"`
+	PageWidth        string   `xml:"page-width,attr"`
+	PageHeight       string   `xml:"page-height,attr"`
+	MarginTop        string   `xml:"margin-top,attr"`
+	MarginBottom     string   `xml:"margin-bottom,attr"`
+	MarginLeft       string   `xml:"margin-left,attr"`
+	MarginRight      string   `xml:"margin-right,attr"`
+	PrintOrientation string   `xml:"print-orientation,attr"`
 }
 
 // headerFooterStyleXML represents header/footer style.
 type headerFooterStyleXML struct {
-	XMLName    xml.Name           `xml:"header-style"`
+	XMLName    xml.Name              `xml:"header-style"`
 	Properties *headerFooterPropsXML `xml:"header-footer-properties"`
 }
 
@@ -225,8 +225,8 @@ type masterPageXML struct {
 
 // metaXML represents document metadata from meta.xml.
 type metaXML struct {
-	XMLName       xml.Name     `xml:"document-meta"`
-	Meta          *metaInfoXML `xml:"meta"`
+	XMLName xml.Name     `xml:"document-meta"`
+	Meta    *metaInfoXML `xml:"meta"`
 }
 
 // metaInfoXML represents the office:meta element.

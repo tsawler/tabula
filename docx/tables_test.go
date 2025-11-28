@@ -314,10 +314,10 @@ func TestTableParser_ParseTwipsOrPercent(t *testing.T) {
 		widthType string
 		want      float64
 	}{
-		{"2880", "dxa", 144},      // 2880 twips = 144pt
-		{"5000", "pct", 100},      // 5000 = 100% (stored as 50ths)
+		{"2880", "dxa", 144}, // 2880 twips = 144pt
+		{"5000", "pct", 100}, // 5000 = 100% (stored as 50ths)
 		{"0", "auto", 0},
-		{"1440", "", 72},          // Default to twips
+		{"1440", "", 72}, // Default to twips
 	}
 
 	for _, tt := range tests {
