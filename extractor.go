@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/tsawler/tabula/core"
+	"github.com/tsawler/tabula/docx"
+	"github.com/tsawler/tabula/format"
 	"github.com/tsawler/tabula/layout"
 	"github.com/tsawler/tabula/model"
 	"github.com/tsawler/tabula/pages"
@@ -21,13 +23,17 @@ type extractedPage struct {
 	page      *pages.Page
 }
 
-// Extractor provides a fluent interface for extracting content from PDFs.
+// Extractor provides a fluent interface for extracting content from PDFs and DOCX files.
 // Each configuration method returns a new Extractor instance, making it
 // safe for concurrent use and allowing method chaining.
 type Extractor struct {
 	// Source
 	filename string
-	reader   *reader.Reader
+	format   format.Format
+
+	// Readers (only one will be used based on format)
+	reader     *reader.Reader // PDF reader
+	docxReader *docx.Reader   // DOCX reader
 
 	// Lifecycle
 	ownsReader   bool // true if we opened the reader and should close it
@@ -48,7 +54,9 @@ type Extractor struct {
 func (e *Extractor) clone() *Extractor {
 	newExt := &Extractor{
 		filename:     e.filename,
+		format:       e.format,
 		reader:       e.reader,
+		docxReader:   e.docxReader,
 		ownsReader:   e.ownsReader,
 		readerOpened: e.readerOpened,
 		options:      e.options.clone(),
@@ -67,25 +75,48 @@ func (e *Extractor) ensureReader() error {
 		return fmt.Errorf("no filename specified")
 	}
 
-	r, err := reader.Open(e.filename)
-	if err != nil {
-		return fmt.Errorf("failed to open PDF: %w", err)
-	}
+	switch e.format {
+	case format.DOCX:
+		dr, err := docx.Open(e.filename)
+		if err != nil {
+			return fmt.Errorf("failed to open DOCX: %w", err)
+		}
+		e.docxReader = dr
+		e.ownsReader = true
+		e.readerOpened = true
+		return nil
 
-	e.reader = r
-	e.ownsReader = true
-	e.readerOpened = true
-	return nil
+	case format.PDF:
+		r, err := reader.Open(e.filename)
+		if err != nil {
+			return fmt.Errorf("failed to open PDF: %w", err)
+		}
+		e.reader = r
+		e.ownsReader = true
+		e.readerOpened = true
+		return nil
+
+	default:
+		return fmt.Errorf("unsupported file format: %s", e.format)
+	}
 }
 
 // Close releases resources associated with the Extractor.
 // It is safe to call Close multiple times.
 func (e *Extractor) Close() error {
-	if e.reader != nil && e.ownsReader {
-		err := e.reader.Close()
-		e.reader = nil
-		e.ownsReader = false
-		return err
+	if e.ownsReader {
+		if e.reader != nil {
+			err := e.reader.Close()
+			e.reader = nil
+			e.ownsReader = false
+			return err
+		}
+		if e.docxReader != nil {
+			err := e.docxReader.Close()
+			e.docxReader = nil
+			e.ownsReader = false
+			return err
+		}
 	}
 	return nil
 }
@@ -274,6 +305,7 @@ func (e *Extractor) IsMultiColumn() (bool, error) {
 // Example:
 //
 //	text, warnings, err := tabula.Open("document.pdf").Text()
+//	text, warnings, err := tabula.Open("document.docx").Text()
 //	if len(warnings) > 0 {
 //	    log.Println("Warnings:", tabula.FormatWarnings(warnings))
 //	}
@@ -287,6 +319,16 @@ func (e *Extractor) Text() (string, []Warning, error) {
 	}
 	defer e.Close()
 
+	// Handle DOCX files
+	if e.format == format.DOCX {
+		text, err := e.docxReader.Text()
+		if err != nil {
+			return "", e.warnings, err
+		}
+		return text, e.warnings, nil
+	}
+
+	// PDF processing
 	pageIndices, err := e.resolvePages()
 	if err != nil {
 		return "", nil, err
@@ -501,7 +543,8 @@ func (e *Extractor) Fragments() ([]text.TextFragment, []Warning, error) {
 	return allFragments, e.warnings, nil
 }
 
-// PageCount returns the total number of pages in the PDF.
+// PageCount returns the total number of pages in the document.
+// For DOCX files, this returns 1 (the entire document is treated as a single page).
 // Note: This does NOT close the reader, allowing further operations.
 //
 // Example:
@@ -516,6 +559,10 @@ func (e *Extractor) PageCount() (int, error) {
 
 	if err := e.ensureReader(); err != nil {
 		return 0, err
+	}
+
+	if e.format == format.DOCX {
+		return e.docxReader.PageCount()
 	}
 
 	return e.reader.PageCount()
@@ -1086,6 +1133,7 @@ func (e *Extractor) Elements() ([]layout.LayoutElement, error) {
 //	doc, warnings, err := tabula.Open("document.pdf").
 //	    ExcludeHeadersAndFooters().
 //	    Document()
+//	doc, warnings, err := tabula.Open("document.docx").Document()
 //	if err != nil {
 //	    log.Fatal(err)
 //	}
@@ -1100,6 +1148,16 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 	}
 	defer e.Close()
 
+	// Handle DOCX files
+	if e.format == format.DOCX {
+		doc, err := e.docxReader.Document()
+		if err != nil {
+			return nil, e.warnings, err
+		}
+		return doc, e.warnings, nil
+	}
+
+	// PDF processing
 	pageIndices, err := e.resolvePages()
 	if err != nil {
 		return nil, nil, err

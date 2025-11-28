@@ -1,5 +1,5 @@
 // Package tabula provides a fluent API for extracting text, tables, and other
-// content from PDF files.
+// content from PDF and DOCX files.
 //
 // Basic usage:
 //
@@ -10,6 +10,10 @@
 //	if len(warnings) > 0 {
 //	    log.Println("Warnings:", tabula.FormatWarnings(warnings))
 //	}
+//
+// DOCX files work the same way:
+//
+//	text, warnings, err := tabula.Open("document.docx").Text()
 //
 // With options:
 //
@@ -23,26 +27,35 @@
 package tabula
 
 import (
+	"github.com/tsawler/tabula/format"
 	"github.com/tsawler/tabula/reader"
 )
 
-// Open opens a PDF file and returns an Extractor for fluent configuration.
+// Open opens a PDF or DOCX file and returns an Extractor for fluent configuration.
+// The file format is automatically detected based on the file extension.
 // The returned Extractor must be closed when done, either explicitly via Close()
 // or implicitly when calling a terminal operation like Text().
+//
+// Supported formats:
+//   - PDF (.pdf)
+//   - DOCX (.docx)
 //
 // Example:
 //
 //	text, warnings, err := tabula.Open("document.pdf").Text()
+//	text, warnings, err := tabula.Open("document.docx").Text()
 func Open(filename string) *Extractor {
 	return &Extractor{
 		filename: filename,
+		format:   format.Detect(filename),
 		options:  defaultOptions(),
 	}
 }
 
-// FromReader creates an Extractor from an already-opened reader.Reader.
-// This is useful when you need more control over the reader lifecycle.
+// FromReader creates an Extractor from an already-opened PDF reader.Reader.
+// This is useful when you need more control over the PDF reader lifecycle.
 // Note: The caller is responsible for closing the reader.
+// For DOCX files, use Open() instead which handles format detection automatically.
 //
 // Example:
 //
@@ -55,6 +68,7 @@ func Open(filename string) *Extractor {
 func FromReader(r *reader.Reader) *Extractor {
 	return &Extractor{
 		reader:       r,
+		format:       format.PDF,
 		ownsReader:   false,
 		readerOpened: true,
 		options:      defaultOptions(),
