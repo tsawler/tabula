@@ -184,7 +184,7 @@ ext := tabula.FromReader(r)
 |--------|---------|-------------|---------|
 | `Text()` | `string` | Plain text content | PDF, DOCX, ODT |
 | `ToMarkdown()` | `string` | Markdown-formatted content | PDF, DOCX, ODT |
-| `ToMarkdownWithOptions(opts)` | `string` | Markdown with custom options | PDF |
+| `ToMarkdownWithOptions(opts)` | `string` | Markdown with custom options | PDF, DOCX, ODT |
 | `Document()` | `*model.Document` | Full document structure | PDF, DOCX, ODT |
 | `Chunks()` | `*rag.ChunkCollection` | Semantic chunks for RAG | PDF, DOCX, ODT |
 | `ChunksWithConfig(config, sizeConfig)` | `*rag.ChunkCollection` | Chunks with custom sizing | PDF, DOCX, ODT |
@@ -197,6 +197,8 @@ ext := tabula.FromReader(r)
 | `Blocks()` | `[]layout.Block` | Text blocks | PDF |
 | `Elements()` | `[]layout.LayoutElement` | All elements in reading order | PDF |
 | `Analyze()` | `*layout.AnalysisResult` | Complete layout analysis | PDF |
+
+**Note on PDF-only methods:** The methods marked "PDF" in the table above (`Fragments`, `Lines`, `Paragraphs`, `Headings`, `Lists`, `Blocks`, `Elements`, `Analyze`) exist because PDFs lack semantic structure - they store raw text fragments at arbitrary positions, requiring layout analysis to reconstruct document structure. DOCX and ODT files already contain explicit semantic markup (paragraphs, headings, lists) in their XML, so these detection methods aren't needed. Use `Document()` to access the semantic structure for all formats.
 
 ### Inspection Methods (non-terminal, PDF only)
 
@@ -244,15 +246,26 @@ result := chunks.
 ```go
 import "github.com/tsawler/tabula/rag"
 
+// Options supported by all formats (PDF, DOCX, ODT)
 opts := rag.MarkdownOptions{
-    IncludeMetadata:        true,   // YAML front matter
-    IncludeTableOfContents: true,   // Generated TOC
-    IncludeChunkSeparators: true,   // --- between chunks
-    IncludePageNumbers:     true,   // Page references
-    IncludeChunkIDs:        true,   // HTML comments with chunk IDs
+    IncludeMetadata:        true,   // YAML front matter with document metadata
+    IncludeTableOfContents: true,   // Generated TOC from headings
+    HeadingLevelOffset:     0,      // Adjust heading levels (1 makes H1 -> H2)
+    MaxHeadingLevel:        6,      // Cap heading depth
 }
 
+// Works with all formats
 markdown, _, _ := tabula.Open("doc.pdf").ToMarkdownWithOptions(opts)
+markdown, _, _ := tabula.Open("doc.docx").ToMarkdownWithOptions(opts)
+markdown, _, _ := tabula.Open("doc.odt").ToMarkdownWithOptions(opts)
+
+// PDF-only options (used via RAG chunking pipeline)
+pdfOpts := rag.MarkdownOptions{
+    IncludeMetadata:        true,
+    IncludeChunkSeparators: true,   // --- between chunks (PDF only)
+    IncludePageNumbers:     true,   // Page references (PDF only)
+    IncludeChunkIDs:        true,   // HTML comments with chunk IDs (PDF only)
+}
 
 // Or use preset for RAG
 opts := rag.RAGOptimizedMarkdownOptions()

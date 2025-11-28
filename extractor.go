@@ -516,24 +516,37 @@ func (e *Extractor) ToMarkdown() (string, []Warning, error) {
 // ToMarkdownWithOptions extracts content and returns it as markdown with custom options.
 // This is a terminal operation that closes the underlying reader.
 //
+// Supported options for all formats:
+//   - IncludeMetadata: adds YAML front matter with document metadata
+//   - IncludeTableOfContents: generates a table of contents from headings
+//   - HeadingLevelOffset: adjusts heading levels (e.g., 1 makes H1 -> H2)
+//   - MaxHeadingLevel: caps heading depth (default: 6)
+//
+// PDF-only options (used via RAG chunking):
+//   - IncludeChunkSeparators: adds horizontal rules between chunks
+//   - IncludePageNumbers: adds page references
+//   - IncludeChunkIDs: adds chunk IDs as HTML comments
+//
 // Example:
 //
 //	opts := rag.MarkdownOptions{
 //	    IncludeTableOfContents: true,
-//	    IncludePageNumbers:     true,
+//	    IncludeMetadata:        true,
 //	}
 //	md, warnings, err := tabula.Open("document.pdf").ToMarkdownWithOptions(opts)
+//	md, warnings, err := tabula.Open("document.docx").ToMarkdownWithOptions(opts)
 func (e *Extractor) ToMarkdownWithOptions(opts rag.MarkdownOptions) (string, []Warning, error) {
 	// For DOCX files, use the native markdown method which preserves document order
 	if e.format == format.DOCX {
 		if err := e.ensureReader(); err != nil {
 			return "", nil, err
 		}
+		defer e.Close()
 		docxOpts := docx.ExtractOptions{
 			ExcludeHeaders: e.options.excludeHeaders,
 			ExcludeFooters: e.options.excludeFooters,
 		}
-		md, err := e.docxReader.MarkdownWithOptions(docxOpts)
+		md, err := e.docxReader.MarkdownWithRAGOptions(docxOpts, opts)
 		if err != nil {
 			return "", nil, err
 		}
@@ -545,11 +558,12 @@ func (e *Extractor) ToMarkdownWithOptions(opts rag.MarkdownOptions) (string, []W
 		if err := e.ensureReader(); err != nil {
 			return "", nil, err
 		}
+		defer e.Close()
 		odtOpts := odt.ExtractOptions{
 			ExcludeHeaders: e.options.excludeHeaders,
 			ExcludeFooters: e.options.excludeFooters,
 		}
-		md, err := e.odtReader.MarkdownWithOptions(odtOpts)
+		md, err := e.odtReader.MarkdownWithRAGOptions(odtOpts, opts)
 		if err != nil {
 			return "", nil, err
 		}
