@@ -26,16 +26,16 @@ type ResolvedStyle struct {
 	IndentFirst float64 // points (first line indent, can be negative for hanging)
 
 	// Run/character properties
-	FontName   string
-	FontSize   float64 // points
-	Bold       bool
-	Italic     bool
-	Underline  bool
-	Strike     bool
-	SmallCaps  bool
-	AllCaps    bool
-	Color      string // hex color like "FF0000"
-	Highlight  string // highlight color name
+	FontName  string
+	FontSize  float64 // points
+	Bold      bool
+	Italic    bool
+	Underline bool
+	Strike    bool
+	SmallCaps bool
+	AllCaps   bool
+	Color     string // hex color like "FF0000"
+	Highlight string // highlight color name
 }
 
 // StyleResolver resolves styles with inheritance support.

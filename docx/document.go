@@ -28,28 +28,28 @@ type bodyXML struct {
 
 // bodyElement represents an element in the document body (paragraph or table).
 type bodyElement struct {
-	Type      string         // "paragraph" or "table"
+	Type      string // "paragraph" or "table"
 	Paragraph *paragraphXML
 	Table     *tableXML
 }
 
 // paragraphXML represents a paragraph element (<w:p>).
 type paragraphXML struct {
-	XMLName    xml.Name           `xml:"p"`
-	Properties paragraphPropsXML  `xml:"pPr"`
-	Runs       []runXML           `xml:"r"`
-	Hyperlinks []hyperlinkXML     `xml:"hyperlink"`
-	BookmarkStart []bookmarkXML   `xml:"bookmarkStart"`
+	XMLName       xml.Name          `xml:"p"`
+	Properties    paragraphPropsXML `xml:"pPr"`
+	Runs          []runXML          `xml:"r"`
+	Hyperlinks    []hyperlinkXML    `xml:"hyperlink"`
+	BookmarkStart []bookmarkXML     `xml:"bookmarkStart"`
 }
 
 // paragraphPropsXML represents paragraph properties (<w:pPr>).
 type paragraphPropsXML struct {
-	Style       styleRefXML        `xml:"pStyle"`
-	NumPr       numberingPropsXML  `xml:"numPr"`
-	Justification justificationXML `xml:"jc"`
-	Spacing     spacingXML         `xml:"spacing"`
-	Indent      indentXML          `xml:"ind"`
-	OutlineLvl  outlineLvlXML      `xml:"outlineLvl"`
+	Style         styleRefXML       `xml:"pStyle"`
+	NumPr         numberingPropsXML `xml:"numPr"`
+	Justification justificationXML  `xml:"jc"`
+	Spacing       spacingXML        `xml:"spacing"`
+	Indent        indentXML         `xml:"ind"`
+	OutlineLvl    outlineLvlXML     `xml:"outlineLvl"`
 }
 
 // styleRefXML represents a style reference.
@@ -100,13 +100,13 @@ type outlineLvlXML struct {
 
 // runXML represents a text run (<w:r>).
 type runXML struct {
-	XMLName          xml.Name             `xml:"r"`
-	Properties       runPropsXML          `xml:"rPr"`
-	Text             []textXML            `xml:"t"`
-	Tabs             []tabXML             `xml:"tab"`
-	Breaks           []breakXML           `xml:"br"`
-	Drawing          []drawingXML         `xml:"drawing"`
-	Symbols          []symXML             `xml:"sym"`
+	XMLName          xml.Name              `xml:"r"`
+	Properties       runPropsXML           `xml:"rPr"`
+	Text             []textXML             `xml:"t"`
+	Tabs             []tabXML              `xml:"tab"`
+	Breaks           []breakXML            `xml:"br"`
+	Drawing          []drawingXML          `xml:"drawing"`
+	Symbols          []symXML              `xml:"sym"`
 	AlternateContent []alternateContentXML `xml:"AlternateContent"`
 }
 
@@ -128,13 +128,13 @@ type fallbackXML struct {
 
 // runPropsXML represents run properties (<w:rPr>).
 type runPropsXML struct {
-	Bold      boolXML    `xml:"b"`
-	Italic    boolXML    `xml:"i"`
+	Bold      boolXML      `xml:"b"`
+	Italic    boolXML      `xml:"i"`
 	Underline underlineXML `xml:"u"`
-	Strike    boolXML    `xml:"strike"`
-	FontSize  sizeXML    `xml:"sz"`
-	Font      fontXML    `xml:"rFonts"`
-	Color     colorXML   `xml:"color"`
+	Strike    boolXML      `xml:"strike"`
+	FontSize  sizeXML      `xml:"sz"`
+	Font      fontXML      `xml:"rFonts"`
+	Color     colorXML     `xml:"color"`
 	Highlight highlightXML `xml:"highlight"`
 }
 
@@ -156,9 +156,9 @@ type sizeXML struct {
 
 // fontXML represents font settings.
 type fontXML struct {
-	ASCII   string `xml:"ascii,attr"`
-	HAnsi   string `xml:"hAnsi,attr"`
-	CS      string `xml:"cs,attr"`
+	ASCII    string `xml:"ascii,attr"`
+	HAnsi    string `xml:"hAnsi,attr"`
+	CS       string `xml:"cs,attr"`
 	EastAsia string `xml:"eastAsia,attr"`
 }
 
@@ -192,7 +192,7 @@ type breakXML struct {
 
 // drawingXML represents an embedded drawing/image.
 type drawingXML struct {
-	XMLName xml.Name `xml:"drawing"`
+	XMLName xml.Name   `xml:"drawing"`
 	Inline  *inlineXML `xml:"inline"`
 	Anchor  *anchorXML `xml:"anchor"`
 }
@@ -243,16 +243,16 @@ type bookmarkXML struct {
 
 // tableXML represents a table (<w:tbl>).
 type tableXML struct {
-	XMLName    xml.Name       `xml:"tbl"`
-	Properties tablePropsXML  `xml:"tblPr"`
-	Grid       tableGridXML   `xml:"tblGrid"`
-	Rows       []tableRowXML  `xml:"tr"`
+	XMLName    xml.Name      `xml:"tbl"`
+	Properties tablePropsXML `xml:"tblPr"`
+	Grid       tableGridXML  `xml:"tblGrid"`
+	Rows       []tableRowXML `xml:"tr"`
 }
 
 // tablePropsXML represents table properties.
 type tablePropsXML struct {
-	Style  styleRefXML `xml:"tblStyle"`
-	Width  tableSizeXML `xml:"tblW"`
+	Style   styleRefXML     `xml:"tblStyle"`
+	Width   tableSizeXML    `xml:"tblW"`
 	Borders tableBordersXML `xml:"tblBorders"`
 }
 
@@ -292,8 +292,8 @@ type gridColXML struct {
 
 // tableRowXML represents a table row (<w:tr>).
 type tableRowXML struct {
-	XMLName    xml.Name      `xml:"tr"`
-	Properties rowPropsXML   `xml:"trPr"`
+	XMLName    xml.Name       `xml:"tr"`
+	Properties rowPropsXML    `xml:"trPr"`
 	Cells      []tableCellXML `xml:"tc"`
 }
 
@@ -318,12 +318,12 @@ type tableCellXML struct {
 
 // cellPropsXML represents cell properties.
 type cellPropsXML struct {
-	Width    tableSizeXML `xml:"tcW"`
-	GridSpan gridSpanXML  `xml:"gridSpan"`
-	VMerge   vMergeXML    `xml:"vMerge"`
+	Width    tableSizeXML    `xml:"tcW"`
+	GridSpan gridSpanXML     `xml:"gridSpan"`
+	VMerge   vMergeXML       `xml:"vMerge"`
 	Borders  tableBordersXML `xml:"tcBorders"`
-	Shading  shadingXML   `xml:"shd"`
-	VAlign   vAlignXML    `xml:"vAlign"`
+	Shading  shadingXML      `xml:"shd"`
+	VAlign   vAlignXML       `xml:"vAlign"`
 }
 
 // gridSpanXML represents column span.

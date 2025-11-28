@@ -4,9 +4,9 @@ import "encoding/xml"
 
 // stylesXML represents the structure of word/styles.xml
 type stylesXML struct {
-	XMLName  xml.Name      `xml:"styles"`
+	XMLName     xml.Name       `xml:"styles"`
 	DocDefaults docDefaultsXML `xml:"docDefaults"`
-	Styles   []styleDefXML `xml:"style"`
+	Styles      []styleDefXML  `xml:"style"`
 }
 
 // docDefaultsXML represents document default styles.
@@ -27,18 +27,18 @@ type pPrDefaultXML struct {
 
 // styleDefXML represents a style definition.
 type styleDefXML struct {
-	XMLName   xml.Name          `xml:"style"`
-	Type      string            `xml:"type,attr"`      // paragraph, character, table, numbering
-	StyleID   string            `xml:"styleId,attr"`
-	Default   string            `xml:"default,attr"`   // "1" if default style
-	CustomStyle string          `xml:"customStyle,attr"`
-	Name      styleNameXML      `xml:"name"`
-	BasedOn   basedOnXML        `xml:"basedOn"`
-	Next      nextXML           `xml:"next"`
-	Link      linkXML           `xml:"link"`
-	PPr       paragraphPropsXML `xml:"pPr"`
-	RPr       runPropsXML       `xml:"rPr"`
-	TblPr     tablePropsXML     `xml:"tblPr"`
+	XMLName     xml.Name          `xml:"style"`
+	Type        string            `xml:"type,attr"` // paragraph, character, table, numbering
+	StyleID     string            `xml:"styleId,attr"`
+	Default     string            `xml:"default,attr"` // "1" if default style
+	CustomStyle string            `xml:"customStyle,attr"`
+	Name        styleNameXML      `xml:"name"`
+	BasedOn     basedOnXML        `xml:"basedOn"`
+	Next        nextXML           `xml:"next"`
+	Link        linkXML           `xml:"link"`
+	PPr         paragraphPropsXML `xml:"pPr"`
+	RPr         runPropsXML       `xml:"rPr"`
+	TblPr       tablePropsXML     `xml:"tblPr"`
 }
 
 // styleNameXML represents a style name.
@@ -63,9 +63,9 @@ type linkXML struct {
 
 // numberingXML represents word/numbering.xml
 type numberingXML struct {
-	XMLName         xml.Name              `xml:"numbering"`
-	AbstractNums    []abstractNumXML      `xml:"abstractNum"`
-	Nums            []numXML              `xml:"num"`
+	XMLName      xml.Name         `xml:"numbering"`
+	AbstractNums []abstractNumXML `xml:"abstractNum"`
+	Nums         []numXML         `xml:"num"`
 }
 
 // abstractNumXML represents an abstract numbering definition.
@@ -82,12 +82,12 @@ type numStyleLinkXML struct {
 
 // lvlXML represents a numbering level.
 type lvlXML struct {
-	ILvl       string       `xml:"ilvl,attr"`
-	Start      startXML     `xml:"start"`
-	NumFmt     numFmtXML    `xml:"numFmt"`
-	LvlText    lvlTextXML   `xml:"lvlText"`
-	LvlJc      lvlJcXML     `xml:"lvlJc"`
-	PPr        paragraphPropsXML `xml:"pPr"`
+	ILvl    string            `xml:"ilvl,attr"`
+	Start   startXML          `xml:"start"`
+	NumFmt  numFmtXML         `xml:"numFmt"`
+	LvlText lvlTextXML        `xml:"lvlText"`
+	LvlJc   lvlJcXML          `xml:"lvlJc"`
+	PPr     paragraphPropsXML `xml:"pPr"`
 }
 
 // startXML represents numbering start value.
@@ -112,7 +112,7 @@ type lvlJcXML struct {
 
 // numXML represents a numbering instance.
 type numXML struct {
-	NumID         string        `xml:"numId,attr"`
+	NumID         string         `xml:"numId,attr"`
 	AbstractNumID abstractRefXML `xml:"abstractNumId"`
 }
 
@@ -137,17 +137,17 @@ type relationshipXML struct {
 
 // corePropertiesXML represents docProps/core.xml (Dublin Core metadata)
 type corePropertiesXML struct {
-	XMLName     xml.Name `xml:"coreProperties"`
-	Title       string   `xml:"title"`
-	Subject     string   `xml:"subject"`
-	Creator     string   `xml:"creator"`
-	Keywords    string   `xml:"keywords"`
-	Description string   `xml:"description"`
-	LastModifiedBy string `xml:"lastModifiedBy"`
-	Revision    string   `xml:"revision"`
-	Created     string   `xml:"created"`
-	Modified    string   `xml:"modified"`
-	Category    string   `xml:"category"`
+	XMLName        xml.Name `xml:"coreProperties"`
+	Title          string   `xml:"title"`
+	Subject        string   `xml:"subject"`
+	Creator        string   `xml:"creator"`
+	Keywords       string   `xml:"keywords"`
+	Description    string   `xml:"description"`
+	LastModifiedBy string   `xml:"lastModifiedBy"`
+	Revision       string   `xml:"revision"`
+	Created        string   `xml:"created"`
+	Modified       string   `xml:"modified"`
+	Category       string   `xml:"category"`
 }
 
 // appPropertiesXML represents docProps/app.xml

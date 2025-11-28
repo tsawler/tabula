@@ -134,8 +134,8 @@ type ParsedTableCell struct {
 	Text       string // Combined text from all paragraphs
 
 	// Structure
-	ColSpan int // Number of columns spanned (gridSpan)
-	RowSpan int // Number of rows spanned (vMerge)
+	ColSpan              int  // Number of columns spanned (gridSpan)
+	RowSpan              int  // Number of rows spanned (vMerge)
 	IsMergedContinuation bool // True if this is a continuation of a vertical merge
 
 	// Dimensions

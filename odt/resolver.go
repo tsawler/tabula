@@ -36,11 +36,11 @@ type ResolvedStyle struct {
 
 // StyleResolver resolves styles with inheritance support.
 type StyleResolver struct {
-	styles       map[string]*styleDefXML
-	listStyles   map[string]*listStyleXML
-	resolved     map[string]*ResolvedStyle
-	defaultFont  string
-	defaultSize  float64
+	styles      map[string]*styleDefXML
+	listStyles  map[string]*listStyleXML
+	resolved    map[string]*ResolvedStyle
+	defaultFont string
+	defaultSize float64
 }
 
 // NewStyleResolver creates a new style resolver from parsed styles.

@@ -411,11 +411,11 @@ func TestListParsing_NoNumbering(t *testing.T) {
 
 func TestNumberingResolver_ResolveLevel(t *testing.T) {
 	tests := []struct {
-		name       string
-		numID      string
-		level      int
-		wantType   ListType
-		wantStart  int
+		name      string
+		numID     string
+		level     int
+		wantType  ListType
+		wantStart int
 	}{
 		{"empty numID", "", 0, ListTypeUnordered, 1},
 		{"unknown numID", "999", 0, ListTypeUnordered, 1},
@@ -584,4 +584,3 @@ func TestLetterConversion(t *testing.T) {
 		})
 	}
 }
-

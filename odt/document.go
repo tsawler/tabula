@@ -34,11 +34,11 @@ type textBodyXML struct {
 
 // bodyElement represents an element in the document body (paragraph, heading, list, or table).
 type bodyElement struct {
-	Type      string         // "paragraph", "heading", "list", or "table"
-	Paragraph *paragraphXML  // Non-nil if Type == "paragraph"
-	Heading   *headingXML    // Non-nil if Type == "heading"
-	List      *listXML       // Non-nil if Type == "list"
-	Table     *tableXML      // Non-nil if Type == "table"
+	Type      string        // "paragraph", "heading", "list", or "table"
+	Paragraph *paragraphXML // Non-nil if Type == "paragraph"
+	Heading   *headingXML   // Non-nil if Type == "heading"
+	List      *listXML      // Non-nil if Type == "list"
+	Table     *tableXML     // Non-nil if Type == "table"
 }
 
 // paragraphXML represents a paragraph element (<text:p>).
@@ -51,11 +51,11 @@ type paragraphXML struct {
 
 // headingXML represents a heading element (<text:h>).
 type headingXML struct {
-	XMLName     xml.Name  `xml:"h"`
-	StyleName   string    `xml:"style-name,attr"`
-	OutlineLevel string   `xml:"outline-level,attr"`
-	Spans       []spanXML `xml:"span"`
-	Text        string    `xml:",chardata"`
+	XMLName      xml.Name  `xml:"h"`
+	StyleName    string    `xml:"style-name,attr"`
+	OutlineLevel string    `xml:"outline-level,attr"`
+	Spans        []spanXML `xml:"span"`
+	Text         string    `xml:",chardata"`
 }
 
 // spanXML represents a text span with formatting (<text:span>).
@@ -81,11 +81,11 @@ type listItemXML struct {
 
 // tableXML represents a table (<table:table>).
 type tableXML struct {
-	XMLName   xml.Name        `xml:"table"`
-	Name      string          `xml:"name,attr"`
-	StyleName string          `xml:"style-name,attr"`
-	Columns   []tableColXML   `xml:"table-column"`
-	Rows      []tableRowXML   `xml:"table-row"`
+	XMLName   xml.Name      `xml:"table"`
+	Name      string        `xml:"name,attr"`
+	StyleName string        `xml:"style-name,attr"`
+	Columns   []tableColXML `xml:"table-column"`
+	Rows      []tableRowXML `xml:"table-row"`
 }
 
 // tableColXML represents a table column definition.
@@ -104,11 +104,11 @@ type tableRowXML struct {
 
 // tableCellXML represents a table cell (<table:table-cell>).
 type tableCellXML struct {
-	XMLName            xml.Name       `xml:"table-cell"`
-	StyleName          string         `xml:"style-name,attr"`
-	NumberColumnsSpanned string       `xml:"number-columns-spanned,attr"`
-	NumberRowsSpanned  string         `xml:"number-rows-spanned,attr"`
-	Paragraphs         []paragraphXML `xml:"p"`
+	XMLName              xml.Name       `xml:"table-cell"`
+	StyleName            string         `xml:"style-name,attr"`
+	NumberColumnsSpanned string         `xml:"number-columns-spanned,attr"`
+	NumberRowsSpanned    string         `xml:"number-rows-spanned,attr"`
+	Paragraphs           []paragraphXML `xml:"p"`
 }
 
 // coveredCellXML represents a covered (merged) cell (<table:covered-table-cell>).
