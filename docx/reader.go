@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/tsawler/tabula/model"
+	"github.com/tsawler/tabula/rag"
 )
 
 // Reader provides access to DOCX document content.
@@ -370,6 +371,154 @@ func (r *Reader) MarkdownWithOptions(opts ExtractOptions) (string, error) {
 				level := para.Level
 				if level < 1 {
 					level = 1
+				}
+				if level > 6 {
+					level = 6
+				}
+				result.WriteString(strings.Repeat("#", level))
+				result.WriteString(" ")
+				result.WriteString(para.Text)
+				result.WriteString("\n\n")
+				inList = false
+			} else if para.IsListItem && para.NumID != "" && para.NumID != "0" {
+				// Render as markdown list item
+				r.writeMarkdownListItem(&result, para, listCounters)
+				inList = true
+				lastNumID = para.NumID
+			} else if para.Text != "" {
+				// Regular paragraph
+				result.WriteString(para.Text)
+				result.WriteString("\n\n")
+				inList = false
+			}
+
+		case "table":
+			if inList {
+				result.WriteString("\n")
+				inList = false
+			}
+			if elem.Table != nil {
+				result.WriteString(elem.Table.ToMarkdown())
+				result.WriteString("\n")
+			}
+		}
+	}
+
+	return strings.TrimSpace(result.String()), nil
+}
+
+// MarkdownWithRAGOptions returns document content as Markdown with both extraction
+// and RAG-style markdown options. This supports options like IncludeMetadata,
+// IncludeTableOfContents, HeadingLevelOffset, and MaxHeadingLevel.
+func (r *Reader) MarkdownWithRAGOptions(extractOpts ExtractOptions, mdOpts rag.MarkdownOptions) (string, error) {
+	if len(r.elements) == 0 && len(r.paragraphs) == 0 {
+		return "", nil
+	}
+
+	var result strings.Builder
+
+	// Add YAML front matter metadata if requested
+	if mdOpts.IncludeMetadata {
+		meta := r.Metadata()
+		result.WriteString("---\n")
+		if meta.Title != "" {
+			result.WriteString(fmt.Sprintf("title: %q\n", meta.Title))
+		}
+		if meta.Author != "" {
+			result.WriteString(fmt.Sprintf("author: %q\n", meta.Author))
+		}
+		if meta.Subject != "" {
+			result.WriteString(fmt.Sprintf("subject: %q\n", meta.Subject))
+		}
+		if len(meta.Keywords) > 0 {
+			result.WriteString("keywords:\n")
+			for _, kw := range meta.Keywords {
+				result.WriteString(fmt.Sprintf("  - %q\n", kw))
+			}
+		}
+		if meta.Creator != "" {
+			result.WriteString(fmt.Sprintf("generator: %q\n", meta.Creator))
+		}
+		result.WriteString("---\n\n")
+	}
+
+	// Collect headings for TOC if requested
+	var tocHeadings []struct {
+		Level int
+		Text  string
+	}
+	if mdOpts.IncludeTableOfContents {
+		for _, elem := range r.elements {
+			if elem.Type == "paragraph" && elem.Paragraph != nil && elem.Paragraph.IsHeading {
+				level := elem.Paragraph.Level
+				level += mdOpts.HeadingLevelOffset
+				if level < 1 {
+					level = 1
+				}
+				if mdOpts.MaxHeadingLevel > 0 && level > mdOpts.MaxHeadingLevel {
+					level = mdOpts.MaxHeadingLevel
+				}
+				tocHeadings = append(tocHeadings, struct {
+					Level int
+					Text  string
+				}{Level: level, Text: elem.Paragraph.Text})
+			}
+		}
+
+		// Generate TOC
+		if len(tocHeadings) > 0 {
+			result.WriteString("## Table of Contents\n\n")
+			for _, h := range tocHeadings {
+				indent := strings.Repeat("  ", h.Level-1)
+				// Create anchor-friendly ID
+				anchor := strings.ToLower(h.Text)
+				anchor = strings.ReplaceAll(anchor, " ", "-")
+				result.WriteString(fmt.Sprintf("%s- [%s](#%s)\n", indent, h.Text, anchor))
+			}
+			result.WriteString("\n---\n\n")
+		}
+	}
+
+	// Track list state for grouping
+	var inList bool
+	var lastNumID string
+	listCounters := make(map[string]map[int]int)
+
+	// Process elements in order
+	for i, elem := range r.elements {
+		switch elem.Type {
+		case "paragraph":
+			para := elem.Paragraph
+			if para == nil {
+				continue
+			}
+
+			// Check if this paragraph should be excluded
+			if r.shouldExcludeParagraph(para.Text, extractOpts) {
+				continue
+			}
+
+			// Add separator between elements (except first)
+			if i > 0 && result.Len() > 0 {
+				// Check if we're transitioning out of a list
+				if inList && (!para.IsListItem || para.NumID != lastNumID) {
+					result.WriteString("\n")
+					inList = false
+				}
+			}
+
+			if para.IsHeading {
+				// Render as markdown heading with level adjustments
+				level := para.Level
+				if level < 1 {
+					level = 1
+				}
+				level += mdOpts.HeadingLevelOffset
+				if level < 1 {
+					level = 1
+				}
+				if mdOpts.MaxHeadingLevel > 0 && level > mdOpts.MaxHeadingLevel {
+					level = mdOpts.MaxHeadingLevel
 				}
 				if level > 6 {
 					level = 6
