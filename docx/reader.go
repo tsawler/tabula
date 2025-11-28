@@ -14,15 +14,18 @@ import (
 
 // Reader provides access to DOCX document content.
 type Reader struct {
-	file       *os.File
-	zipReader  *zip.ReadCloser
-	document   *documentXML
-	styles     *stylesXML
-	numbering  *numberingXML
-	rels       *relationshipsXML
-	coreProps  *corePropertiesXML
-	appProps   *appPropertiesXML
-	paragraphs []parsedParagraph
+	file          *os.File
+	zipReader     *zip.ReadCloser
+	document      *documentXML
+	styles        *stylesXML
+	numbering     *numberingXML
+	rels          *relationshipsXML
+	coreProps     *corePropertiesXML
+	appProps      *appPropertiesXML
+	styleResolver *StyleResolver
+	tableParser   *TableParser
+	paragraphs    []parsedParagraph
+	tables        []ParsedTable
 }
 
 // parsedParagraph holds a parsed paragraph with resolved styles.
@@ -32,14 +35,30 @@ type parsedParagraph struct {
 	StyleName string
 	IsHeading bool
 	Level     int // heading level (1-9) or 0 for non-headings
-	Runs      []parsedRun
+
+	// Paragraph properties
+	Alignment   string  // left, center, right, both
+	SpaceBefore float64 // points
+	SpaceAfter  float64 // points
+	IndentLeft  float64 // points
+	IndentRight float64 // points
+	IndentFirst float64 // points
+
+	// Text runs with formatting
+	Runs []parsedRun
 }
 
-// parsedRun holds a parsed text run.
+// parsedRun holds a parsed text run with formatting.
 type parsedRun struct {
-	Text   string
-	Bold   bool
-	Italic bool
+	Text      string
+	FontName  string
+	FontSize  float64 // points
+	Bold      bool
+	Italic    bool
+	Underline bool
+	Strike    bool
+	Color     string // hex color
+	Highlight string // highlight color name
 }
 
 // Open opens a DOCX file for reading.
@@ -65,15 +84,21 @@ func Open(filename string) (*Reader, error) {
 		return nil, fmt.Errorf("parsing relationships: %w", err)
 	}
 
-	// Parse document.xml
+	// Parse styles.xml first (optional but usually present)
+	_ = r.parseStyles() // Creates styleResolver even on error
+
+	// Ensure styleResolver exists
+	if r.styleResolver == nil {
+		r.styleResolver = NewStyleResolver(nil)
+	}
+
+	// Create table parser
+	r.tableParser = NewTableParser(r.styleResolver)
+
+	// Parse document.xml (now that styleResolver and tableParser are ready)
 	if err := r.parseDocument(); err != nil {
 		zr.Close()
 		return nil, fmt.Errorf("parsing document: %w", err)
-	}
-
-	// Parse styles.xml (optional but usually present)
-	if err := r.parseStyles(); err != nil {
-		// Styles are optional - just continue without them
 	}
 
 	// Parse numbering.xml (optional)
@@ -151,20 +176,28 @@ func (r *Reader) PageCount() (int, error) {
 }
 
 // Text extracts and returns all text content from the document.
+// This includes text from paragraphs and tables.
 func (r *Reader) Text() (string, error) {
 	if r.document == nil {
 		return "", fmt.Errorf("document not parsed")
 	}
 
 	var result strings.Builder
+
+	// Add paragraph text
 	for i, para := range r.paragraphs {
 		if i > 0 {
 			result.WriteString("\n")
-			if para.IsHeading {
-				result.WriteString("\n") // Extra blank line before headings
-			}
 		}
 		result.WriteString(para.Text)
+	}
+
+	// Add table text
+	for _, tbl := range r.tables {
+		if result.Len() > 0 {
+			result.WriteString("\n")
+		}
+		result.WriteString(tbl.ToText())
 	}
 
 	return result.String(), nil
@@ -231,6 +264,25 @@ func (r *Reader) Document() (*model.Document, error) {
 		yPos -= estimatedHeight + 4 // Move down for next element
 	}
 
+	// Add tables
+	for _, tbl := range r.tables {
+		modelTable := tbl.ToModelTable()
+		if modelTable.RowCount() > 0 {
+			// Estimate table height
+			tableHeight := float64(modelTable.RowCount()) * 20.0
+
+			modelTable.BBox = model.BBox{
+				X:      72,
+				Y:      yPos,
+				Width:  468,
+				Height: tableHeight,
+			}
+
+			page.AddElement(modelTable)
+			yPos -= tableHeight + 10
+		}
+	}
+
 	doc.AddPage(page)
 	return doc, nil
 }
@@ -253,6 +305,20 @@ func (r *Reader) Metadata() model.Metadata {
 		meta.Creator = r.appProps.Application
 	}
 	return meta
+}
+
+// Tables returns all parsed tables from the document.
+func (r *Reader) Tables() []ParsedTable {
+	return r.tables
+}
+
+// ModelTables returns tables converted to model.Table format.
+func (r *Reader) ModelTables() []*model.Table {
+	result := make([]*model.Table, len(r.tables))
+	for i := range r.tables {
+		result[i] = r.tables[i].ToModelTable()
+	}
+	return result
 }
 
 // parseRelationships parses the document relationships file.
@@ -285,15 +351,24 @@ func (r *Reader) parseDocument() error {
 	return nil
 }
 
-// parseStyles parses the styles definition file.
+// parseStyles parses the styles definition file and creates the resolver.
 func (r *Reader) parseStyles() error {
 	data, err := r.getFileContent("word/styles.xml")
 	if err != nil {
+		// Create resolver with no styles (will use defaults)
+		r.styleResolver = NewStyleResolver(nil)
 		return err
 	}
 
 	r.styles = &stylesXML{}
-	return xml.Unmarshal(data, r.styles)
+	if err := xml.Unmarshal(data, r.styles); err != nil {
+		r.styleResolver = NewStyleResolver(nil)
+		return err
+	}
+
+	// Create style resolver
+	r.styleResolver = NewStyleResolver(r.styles)
+	return nil
 }
 
 // parseNumbering parses the numbering definitions file.
@@ -341,6 +416,23 @@ func (r *Reader) processParagraphs() {
 		parsed := r.processParagraph(p)
 		r.paragraphs = append(r.paragraphs, parsed)
 	}
+
+	// Process tables
+	r.processTables()
+}
+
+// processTables processes all tables in the document.
+func (r *Reader) processTables() {
+	if r.document == nil || r.document.Body == nil || r.tableParser == nil {
+		return
+	}
+
+	r.tables = make([]ParsedTable, 0, len(r.document.Body.Tables))
+
+	for _, tbl := range r.document.Body.Tables {
+		parsed := r.tableParser.ParseTable(tbl)
+		r.tables = append(r.tables, parsed)
+	}
 }
 
 // processParagraph processes a single paragraph.
@@ -349,32 +441,96 @@ func (r *Reader) processParagraph(p paragraphXML) parsedParagraph {
 		StyleID: p.Properties.Style.Val,
 	}
 
-	// Extract text from runs
+	// Resolve style (handles inheritance)
+	var resolvedStyle *ResolvedStyle
+	if r.styleResolver != nil {
+		resolvedStyle = r.styleResolver.Resolve(parsed.StyleID)
+		parsed.StyleName = resolvedStyle.Name
+		parsed.IsHeading = resolvedStyle.IsHeading
+		parsed.Level = resolvedStyle.HeadingLevel
+
+		// Apply style's paragraph properties
+		parsed.Alignment = resolvedStyle.Alignment
+		parsed.SpaceBefore = resolvedStyle.SpaceBefore
+		parsed.SpaceAfter = resolvedStyle.SpaceAfter
+		parsed.IndentLeft = resolvedStyle.IndentLeft
+		parsed.IndentRight = resolvedStyle.IndentRight
+		parsed.IndentFirst = resolvedStyle.IndentFirst
+	}
+
+	// Apply direct paragraph formatting (overrides style)
+	ppr := p.Properties
+	if ppr.Justification.Val != "" {
+		parsed.Alignment = ppr.Justification.Val
+	}
+	if ppr.Spacing.Before != "" {
+		parsed.SpaceBefore = parseTwips(ppr.Spacing.Before)
+	}
+	if ppr.Spacing.After != "" {
+		parsed.SpaceAfter = parseTwips(ppr.Spacing.After)
+	}
+	if ppr.Indent.Left != "" {
+		parsed.IndentLeft = parseTwips(ppr.Indent.Left)
+	}
+	if ppr.Indent.Right != "" {
+		parsed.IndentRight = parseTwips(ppr.Indent.Right)
+	}
+	if ppr.Indent.FirstLine != "" {
+		parsed.IndentFirst = parseTwips(ppr.Indent.FirstLine)
+	}
+	if ppr.Indent.Hanging != "" {
+		parsed.IndentFirst = -parseTwips(ppr.Indent.Hanging)
+	}
+
+	// Check outline level for heading detection (direct formatting)
+	if !parsed.IsHeading && ppr.OutlineLvl.Val != "" {
+		level := parseOutlineLevel(ppr.OutlineLvl.Val)
+		if level >= 0 && level <= 8 {
+			parsed.IsHeading = true
+			parsed.Level = level + 1
+		}
+	}
+
+	// Extract text from runs with resolved formatting
 	var textParts []string
 	for _, run := range p.Runs {
 		runText := r.extractRunText(run)
 		if runText != "" {
 			textParts = append(textParts, runText)
-			parsed.Runs = append(parsed.Runs, parsedRun{
-				Text:   runText,
-				Bold:   run.Properties.Bold.Val != "false" && run.Properties.Bold.XMLName.Local != "",
-				Italic: run.Properties.Italic.Val != "false" && run.Properties.Italic.XMLName.Local != "",
-			})
+
+			// Resolve run properties
+			var resolvedRun *ResolvedRun
+			if r.styleResolver != nil {
+				resolvedRun = r.styleResolver.ResolveRun(parsed.StyleID, run.Properties)
+			}
+
+			pr := parsedRun{
+				Text: runText,
+			}
+
+			if resolvedRun != nil {
+				pr.FontName = resolvedRun.FontName
+				pr.FontSize = resolvedRun.FontSize
+				pr.Bold = resolvedRun.Bold
+				pr.Italic = resolvedRun.Italic
+				pr.Underline = resolvedRun.Underline
+				pr.Strike = resolvedRun.Strike
+				pr.Color = resolvedRun.Color
+				pr.Highlight = resolvedRun.Highlight
+			} else {
+				// Fallback: direct property check
+				pr.Bold = run.Properties.Bold.XMLName.Local != "" && run.Properties.Bold.Val != "false"
+				pr.Italic = run.Properties.Italic.XMLName.Local != "" && run.Properties.Italic.Val != "false"
+			}
+
+			parsed.Runs = append(parsed.Runs, pr)
 		}
 	}
 	parsed.Text = strings.Join(textParts, "")
 
-	// Detect heading from style
-	if parsed.StyleID != "" {
+	// Legacy fallback for heading detection if no style resolver
+	if r.styleResolver == nil && parsed.StyleID != "" {
 		parsed.IsHeading, parsed.Level = r.isHeadingStyle(parsed.StyleID)
-		if r.styles != nil {
-			for _, style := range r.styles.Styles {
-				if style.StyleID == parsed.StyleID {
-					parsed.StyleName = style.Name.Val
-					break
-				}
-			}
-		}
 	}
 
 	return parsed

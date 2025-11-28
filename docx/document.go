@@ -305,7 +305,8 @@ type gridSpanXML struct {
 
 // vMergeXML represents vertical merge.
 type vMergeXML struct {
-	Val string `xml:"val,attr"` // "restart" or empty (continue)
+	XMLName xml.Name `xml:"vMerge"`
+	Val     string   `xml:"val,attr"` // "restart" or empty (continue)
 }
 
 // shadingXML represents cell shading.
