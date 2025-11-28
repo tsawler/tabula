@@ -13,7 +13,7 @@ A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval
 - **Fluent API** - Chain methods for clean, readable code
 - **Multi-Format Support** - PDF (.pdf), Word (.docx), and OpenDocument (.odt) files
 - **Layout Analysis** - Detect headings, paragraphs, lists, and tables
-- **Header/Footer Detection** - Automatically identify and exclude repeating content (PDF)
+- **Header/Footer Detection** - Automatically identify and exclude repeating content
 - **RAG-Ready Chunking** - Semantic document chunking with metadata
 - **Markdown Export** - Convert extracted content to markdown
 - **PDF 1.0-1.7 Support** - Including modern XRef streams (PDF 1.5+)
@@ -56,13 +56,19 @@ func main() {
 }
 ```
 
-### Extract with Options (PDF)
+### Extract with Options
 
 ```go
+// PDF with all options
 text, warnings, err := tabula.Open("document.pdf").
     Pages(1, 2, 3).              // Specific pages (PDF only)
-    ExcludeHeadersAndFooters().  // Remove repeating headers/footers (PDF only)
+    ExcludeHeadersAndFooters().  // Remove headers/footers
     JoinParagraphs().            // Join text into paragraphs (PDF only)
+    Text()
+
+// DOCX/ODT with header/footer exclusion
+text, warnings, err := tabula.Open("document.docx").
+    ExcludeHeadersAndFooters().  // Remove headers/footers
     Text()
 ```
 
@@ -74,11 +80,15 @@ markdown, warnings, err := tabula.Open("document.pdf").
     ExcludeHeadersAndFooters().
     ToMarkdown()
 
-// DOCX (preserves headings, lists, tables)
-markdown, warnings, err := tabula.Open("document.docx").ToMarkdown()
+// DOCX with header/footer exclusion (preserves headings, lists, tables)
+markdown, warnings, err := tabula.Open("document.docx").
+    ExcludeHeadersAndFooters().
+    ToMarkdown()
 
-// ODT (preserves headings, lists, tables)
-markdown, warnings, err := tabula.Open("document.odt").ToMarkdown()
+// ODT with header/footer exclusion (preserves headings, lists, tables)
+markdown, warnings, err := tabula.Open("document.odt").
+    ExcludeHeadersAndFooters().
+    ToMarkdown()
 ```
 
 ### RAG Chunking
@@ -161,9 +171,9 @@ ext := tabula.FromReader(r)
 |--------|-------------|---------|
 | `Pages(1, 2, 3)` | Extract specific pages (1-indexed) | PDF |
 | `PageRange(1, 10)` | Extract page range (inclusive) | PDF |
-| `ExcludeHeaders()` | Exclude detected headers | PDF |
-| `ExcludeFooters()` | Exclude detected footers | PDF |
-| `ExcludeHeadersAndFooters()` | Exclude both | PDF |
+| `ExcludeHeaders()` | Exclude detected headers | PDF, DOCX, ODT |
+| `ExcludeFooters()` | Exclude detected footers | PDF, DOCX, ODT |
+| `ExcludeHeadersAndFooters()` | Exclude both | PDF, DOCX, ODT |
 | `JoinParagraphs()` | Join text fragments into paragraphs | PDF |
 | `ByColumn()` | Process multi-column layouts column by column | PDF |
 | `PreserveLayout()` | Maintain spatial positioning | PDF |
