@@ -34,6 +34,92 @@ func (pt *ParsedTable) ToText() string {
 	return sb.String()
 }
 
+// ToMarkdown returns a markdown table representation.
+func (pt *ParsedTable) ToMarkdown() string {
+	if len(pt.Rows) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+
+	// Determine column count from first row
+	colCount := 0
+	for _, row := range pt.Rows {
+		count := 0
+		for _, cell := range row.Cells {
+			span := cell.ColSpan
+			if span < 1 {
+				span = 1
+			}
+			count += span
+		}
+		if count > colCount {
+			colCount = count
+		}
+	}
+
+	if colCount == 0 {
+		return ""
+	}
+
+	// Write each row
+	for rowIdx, row := range pt.Rows {
+		sb.WriteString("|")
+		colIdx := 0
+		for _, cell := range row.Cells {
+			if cell.IsMergedContinuation {
+				continue
+			}
+			// Replace newlines and pipes within cells
+			text := strings.ReplaceAll(cell.Text, "\n", " ")
+			text = strings.ReplaceAll(text, "|", "\\|")
+			text = strings.TrimSpace(text)
+			sb.WriteString(" ")
+			sb.WriteString(text)
+			sb.WriteString(" |")
+
+			span := cell.ColSpan
+			if span < 1 {
+				span = 1
+			}
+			colIdx += span
+		}
+		// Pad remaining columns if needed
+		for colIdx < colCount {
+			sb.WriteString(" |")
+			colIdx++
+		}
+		sb.WriteString("\n")
+
+		// Add header separator after first row
+		if rowIdx == 0 {
+			sb.WriteString("|")
+			for i := 0; i < colCount; i++ {
+				sb.WriteString(" --- |")
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
+}
+
+// ColCount returns the number of columns in the table.
+func (pt *ParsedTable) ColCount() int {
+	if len(pt.Rows) == 0 {
+		return 0
+	}
+	count := 0
+	for _, cell := range pt.Rows[0].Cells {
+		span := cell.ColSpan
+		if span < 1 {
+			span = 1
+		}
+		count += span
+	}
+	return count
+}
+
 // ParsedTableRow represents a parsed table row.
 type ParsedTableRow struct {
 	Cells    []ParsedTableCell

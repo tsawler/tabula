@@ -604,8 +604,10 @@ func (c *Chunk) ToMarkdownWithOptions(opts MarkdownOptions) string {
 		sb.WriteString("\n\n")
 	}
 
-	// Add the main content
-	sb.WriteString(c.Text)
+	// Add the main content (skip if it's the same as section title for heading chunks)
+	if c.Text != c.Metadata.SectionTitle {
+		sb.WriteString(c.Text)
+	}
 
 	// Add page reference if requested
 	if opts.IncludePageNumbers && c.Metadata.PageStart > 0 {

@@ -249,6 +249,124 @@ func (r *Reader) Text() (string, error) {
 	return result.String(), nil
 }
 
+// Markdown returns the document content as a Markdown-formatted string.
+// It converts:
+//   - Headings to # notation (level 1-6)
+//   - Lists to - (bullet) or 1. (numbered) notation
+//   - Tables to markdown table format
+//   - Paragraphs to plain text
+func (r *Reader) Markdown() (string, error) {
+	if len(r.elements) == 0 && len(r.paragraphs) == 0 {
+		return "", nil
+	}
+
+	var result strings.Builder
+
+	// Track list state for grouping
+	var inList bool
+	var lastNumID string
+	listCounters := make(map[string]map[int]int)
+
+	// Process elements in order
+	for i, elem := range r.elements {
+		switch elem.Type {
+		case "paragraph":
+			para := elem.Paragraph
+			if para == nil {
+				continue
+			}
+
+			// Add separator between elements (except first)
+			if i > 0 && result.Len() > 0 {
+				// Check if we're transitioning out of a list
+				if inList && (!para.IsListItem || para.NumID != lastNumID) {
+					result.WriteString("\n")
+					inList = false
+				}
+			}
+
+			if para.IsHeading {
+				// Render as markdown heading
+				level := para.Level
+				if level < 1 {
+					level = 1
+				}
+				if level > 6 {
+					level = 6
+				}
+				result.WriteString(strings.Repeat("#", level))
+				result.WriteString(" ")
+				result.WriteString(para.Text)
+				result.WriteString("\n\n")
+				inList = false
+			} else if para.IsListItem && para.NumID != "" && para.NumID != "0" {
+				// Render as markdown list item
+				r.writeMarkdownListItem(&result, para, listCounters)
+				inList = true
+				lastNumID = para.NumID
+			} else if para.Text != "" {
+				// Regular paragraph
+				result.WriteString(para.Text)
+				result.WriteString("\n\n")
+				inList = false
+			}
+
+		case "table":
+			if inList {
+				result.WriteString("\n")
+				inList = false
+			}
+			if elem.Table != nil {
+				result.WriteString(elem.Table.ToMarkdown())
+				result.WriteString("\n")
+			}
+		}
+	}
+
+	return strings.TrimSpace(result.String()), nil
+}
+
+// writeMarkdownListItem writes a list item in markdown format.
+func (r *Reader) writeMarkdownListItem(sb *strings.Builder, para *parsedParagraph, listCounters map[string]map[int]int) {
+	// Add indentation for nested lists (2 spaces per level)
+	for j := 0; j < para.ListLevel; j++ {
+		sb.WriteString("  ")
+	}
+
+	// Get or initialize counter for this list
+	if listCounters[para.NumID] == nil {
+		listCounters[para.NumID] = make(map[int]int)
+	}
+
+	// Reset child level counters when going back to a parent level
+	lastLevel, hasLast := listCounters[para.NumID][-1] // Use -1 to store last level
+	if hasLast && para.ListLevel <= lastLevel {
+		// Clear counters for all levels deeper than current
+		for lvl := range listCounters[para.NumID] {
+			if lvl > para.ListLevel {
+				delete(listCounters[para.NumID], lvl)
+			}
+		}
+	}
+	listCounters[para.NumID][-1] = para.ListLevel // Track last level
+
+	// Determine list type
+	listType, _, startAt := r.getListFormat(para.NumID, para.ListLevel)
+
+	if listType == ListTypeOrdered {
+		// Numbered list
+		listCounters[para.NumID][para.ListLevel]++
+		num := startAt + listCounters[para.NumID][para.ListLevel] - 1
+		sb.WriteString(fmt.Sprintf("%d. ", num))
+	} else {
+		// Bullet list
+		sb.WriteString("- ")
+	}
+
+	sb.WriteString(para.Text)
+	sb.WriteString("\n")
+}
+
 // writeParagraphText writes a paragraph's text to the builder with list formatting.
 func (r *Reader) writeParagraphText(sb *strings.Builder, para *parsedParagraph, listCounters map[string]map[int]int) {
 	if para.IsListItem {
@@ -403,61 +521,153 @@ func (r *Reader) Document() (*model.Document, error) {
 	page := model.NewPage(612, 792) // Standard US Letter dimensions
 	page.Number = 1
 
-	// Add elements
+	// Process elements in document order, grouping list items
 	yPos := 750.0 // Start near top of page
-	for _, para := range r.paragraphs {
-		if para.Text == "" {
-			continue
-		}
 
-		estimatedHeight := 14.0 // Default line height
-		if para.IsHeading {
-			estimatedHeight = float64(24 - para.Level*2) // Larger for higher-level headings
-		}
+	// Track current list being built
+	var currentList *model.List
+	var currentListNumID string
+	var currentListStartY float64
+	var listLevelCounters map[int]int // Counter per level for ordered lists
+	var lastListLevel int             // Track last item's level to reset child counters
 
-		bbox := model.BBox{
-			X:      72,  // 1 inch margin
-			Y:      yPos,
-			Width:  468, // 6.5 inch text width
-			Height: estimatedHeight,
-		}
-
-		if para.IsHeading {
-			heading := &model.Heading{
-				Level: para.Level,
-				Text:  para.Text,
-				BBox:  bbox,
-			}
-			page.AddElement(heading)
-		} else {
-			paragraph := &model.Paragraph{
-				Text: para.Text,
-				BBox: bbox,
-			}
-			page.AddElement(paragraph)
-		}
-
-		yPos -= estimatedHeight + 4 // Move down for next element
-	}
-
-	// Add tables
-	for _, tbl := range r.tables {
-		modelTable := tbl.ToModelTable()
-		if modelTable.RowCount() > 0 {
-			// Estimate table height
-			tableHeight := float64(modelTable.RowCount()) * 20.0
-
-			modelTable.BBox = model.BBox{
+	// Helper to finalize and add the current list
+	finalizeList := func() {
+		if currentList != nil && len(currentList.Items) > 0 {
+			listHeight := float64(len(currentList.Items)) * 14.0
+			currentList.BBox = model.BBox{
 				X:      72,
-				Y:      yPos,
+				Y:      currentListStartY,
 				Width:  468,
-				Height: tableHeight,
+				Height: listHeight,
+			}
+			page.AddElement(currentList)
+			yPos -= listHeight + 4
+		}
+		currentList = nil
+		currentListNumID = ""
+		listLevelCounters = nil
+		lastListLevel = 0
+	}
+
+	for _, elem := range r.elements {
+		switch elem.Type {
+		case "paragraph":
+			para := elem.Paragraph
+			if para == nil || para.Text == "" {
+				continue
 			}
 
-			page.AddElement(modelTable)
-			yPos -= tableHeight + 10
+			// Check if this is a list item
+			if para.IsListItem && para.NumID != "" && para.NumID != "0" {
+				// Determine if we need to start a new list
+				if currentList == nil || para.NumID != currentListNumID {
+					// Finalize previous list if any
+					finalizeList()
+
+					// Start new list
+					listType, _, _ := r.numberingResolver.ResolveLevel(para.NumID, para.ListLevel)
+					currentList = &model.List{
+						Ordered: listType == ListTypeOrdered,
+					}
+					currentListNumID = para.NumID
+					currentListStartY = yPos
+					listLevelCounters = make(map[int]int)
+				}
+
+				// Reset child level counters when going back to a parent level
+				if para.ListLevel <= lastListLevel {
+					// Clear counters for all levels deeper than current
+					for lvl := range listLevelCounters {
+						if lvl > para.ListLevel {
+							delete(listLevelCounters, lvl)
+						}
+					}
+				}
+
+				// Get bullet/number for this item
+				_, bullet, startAt := r.numberingResolver.ResolveLevel(para.NumID, para.ListLevel)
+				if currentList.Ordered && bullet == "" {
+					// Increment counter for this level
+					listLevelCounters[para.ListLevel]++
+					itemNum := startAt + listLevelCounters[para.ListLevel] - 1
+					bullet = formatNumber(itemNum, para.NumID, para.ListLevel, r.numberingResolver) + "."
+				}
+				if !currentList.Ordered && bullet == "" {
+					bullet = getBulletChar("", para.ListLevel)
+				}
+
+				lastListLevel = para.ListLevel
+
+				// Add item to current list
+				currentList.Items = append(currentList.Items, model.ListItem{
+					Text:   para.Text,
+					Level:  para.ListLevel,
+					Bullet: bullet,
+				})
+				continue
+			}
+
+			// Not a list item - finalize any pending list
+			finalizeList()
+
+			estimatedHeight := 14.0 // Default line height
+			if para.IsHeading {
+				estimatedHeight = float64(24 - para.Level*2) // Larger for higher-level headings
+			}
+
+			bbox := model.BBox{
+				X:      72,  // 1 inch margin
+				Y:      yPos,
+				Width:  468, // 6.5 inch text width
+				Height: estimatedHeight,
+			}
+
+			if para.IsHeading {
+				heading := &model.Heading{
+					Level: para.Level,
+					Text:  para.Text,
+					BBox:  bbox,
+				}
+				page.AddElement(heading)
+			} else {
+				paragraph := &model.Paragraph{
+					Text: para.Text,
+					BBox: bbox,
+				}
+				page.AddElement(paragraph)
+			}
+
+			yPos -= estimatedHeight + 4 // Move down for next element
+
+		case "table":
+			// Finalize any pending list before adding table
+			finalizeList()
+
+			if elem.Table == nil {
+				continue
+			}
+
+			modelTable := elem.Table.ToModelTable()
+			if modelTable.RowCount() > 0 {
+				// Estimate table height
+				tableHeight := float64(modelTable.RowCount()) * 20.0
+
+				modelTable.BBox = model.BBox{
+					X:      72,
+					Y:      yPos,
+					Width:  468,
+					Height: tableHeight,
+				}
+
+				page.AddElement(modelTable)
+				yPos -= tableHeight + 10
+			}
 		}
 	}
+
+	// Finalize any remaining list
+	finalizeList()
 
 	doc.AddPage(page)
 	return doc, nil
