@@ -1,6 +1,8 @@
 package tabula
 
 import (
+	"archive/zip"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -8,6 +10,11 @@ import (
 
 	"github.com/tsawler/tabula/rag"
 )
+
+// newZipWriter creates a zip.Writer wrapper for test DOCX creation.
+func newZipWriter(w io.Writer) *zip.Writer {
+	return zip.NewWriter(w)
+}
 
 // testPDFPath returns the path to a test PDF file
 func testPDFPath(filename string) string {
@@ -518,4 +525,145 @@ func TestToMarkdownErrorHandling(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for non-existent file")
 	}
+}
+
+// ============================================================================
+// DOCX Tests
+// ============================================================================
+
+func TestDOCXTextExtraction(t *testing.T) {
+	tmpDir := t.TempDir()
+	docxPath := filepath.Join(tmpDir, "test.docx")
+
+	if err := createMinimalDOCX(docxPath, "Hello from DOCX"); err != nil {
+		t.Fatalf("failed to create test DOCX: %v", err)
+	}
+
+	text, warnings, err := Open(docxPath).Text()
+	if err != nil {
+		t.Fatalf("Open(docx).Text() error = %v", err)
+	}
+
+	if len(warnings) > 0 {
+		t.Logf("warnings: %v", warnings)
+	}
+
+	if !strings.Contains(text, "Hello from DOCX") {
+		t.Errorf("Text() = %q, expected to contain 'Hello from DOCX'", text)
+	}
+}
+
+func TestDOCXPageCount(t *testing.T) {
+	tmpDir := t.TempDir()
+	docxPath := filepath.Join(tmpDir, "test.docx")
+
+	if err := createMinimalDOCX(docxPath, "Test content"); err != nil {
+		t.Fatalf("failed to create test DOCX: %v", err)
+	}
+
+	ext := Open(docxPath)
+	defer ext.Close()
+
+	count, err := ext.PageCount()
+	if err != nil {
+		t.Fatalf("PageCount() error = %v", err)
+	}
+
+	// DOCX is treated as single page
+	if count != 1 {
+		t.Errorf("PageCount() = %d, want 1", count)
+	}
+}
+
+func TestDOCXDocument(t *testing.T) {
+	tmpDir := t.TempDir()
+	docxPath := filepath.Join(tmpDir, "test.docx")
+
+	// Create DOCX with heading and paragraph
+	content := `<w:p>
+  <w:pPr><w:pStyle w:val="Heading1"/></w:pPr>
+  <w:r><w:t>Test Heading</w:t></w:r>
+</w:p>
+<w:p><w:r><w:t>Test paragraph content.</w:t></w:r></w:p>`
+
+	if err := createMinimalDOCXWithContent(docxPath, content); err != nil {
+		t.Fatalf("failed to create test DOCX: %v", err)
+	}
+
+	doc, warnings, err := Open(docxPath).Document()
+	if err != nil {
+		t.Fatalf("Document() error = %v", err)
+	}
+
+	if len(warnings) > 0 {
+		t.Logf("warnings: %v", warnings)
+	}
+
+	if doc.PageCount() != 1 {
+		t.Errorf("PageCount() = %d, want 1", doc.PageCount())
+	}
+
+	page := doc.GetPage(1)
+	if page == nil {
+		t.Fatal("GetPage(1) returned nil")
+	}
+
+	// Should have heading and paragraph elements
+	if len(page.Elements) < 1 {
+		t.Errorf("Elements count = %d, want >= 1", len(page.Elements))
+	}
+}
+
+func TestDOCXUnsupportedFormat(t *testing.T) {
+	// Test with unsupported extension
+	_, _, err := Open("test.xyz").Text()
+	if err == nil {
+		t.Error("expected error for unsupported format")
+	}
+}
+
+// createMinimalDOCX creates a minimal valid DOCX file with simple text content.
+func createMinimalDOCX(path, text string) error {
+	content := `<w:p><w:r><w:t>` + text + `</w:t></w:r></w:p>`
+	return createMinimalDOCXWithContent(path, content)
+}
+
+// createMinimalDOCXWithContent creates a minimal valid DOCX file with custom XML content.
+func createMinimalDOCXWithContent(path, content string) error {
+	f, err := os.Create(path)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+
+	zw := newZipWriter(f)
+	defer zw.Close()
+
+	// [Content_Types].xml
+	contentTypes := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`
+	w, _ := zw.Create("[Content_Types].xml")
+	w.Write([]byte(contentTypes))
+
+	// _rels/.rels
+	rels := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`
+	w, _ = zw.Create("_rels/.rels")
+	w.Write([]byte(rels))
+
+	// word/document.xml
+	document := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>` + content + `</w:body>
+</w:document>`
+	w, _ = zw.Create("word/document.xml")
+	w.Write([]byte(document))
+
+	return nil
 }
