@@ -31,6 +31,10 @@ type Reader struct {
 	tables            []ParsedTable
 	lists             []ParsedList
 	elements          []parsedElement // Elements in document order
+
+	// Header/footer content (parsed from word/header*.xml and word/footer*.xml)
+	headerTexts []string // Text content from all header files
+	footerTexts []string // Text content from all footer files
 }
 
 // parsedElement represents a parsed element (paragraph or table) with its type.
@@ -132,6 +136,9 @@ func Open(filename string) (*Reader, error) {
 	r.parseCoreProperties()
 	r.parseAppProperties()
 
+	// Parse headers and footers (optional)
+	r.parseHeadersAndFooters()
+
 	return r, nil
 }
 
@@ -197,9 +204,22 @@ func (r *Reader) PageCount() (int, error) {
 	return 1, nil
 }
 
+// ExtractOptions holds options for text extraction.
+type ExtractOptions struct {
+	ExcludeHeaders bool
+	ExcludeFooters bool
+}
+
 // Text extracts and returns all text content from the document.
 // This includes text from paragraphs, lists, and tables in document order.
 func (r *Reader) Text() (string, error) {
+	return r.TextWithOptions(ExtractOptions{})
+}
+
+// TextWithOptions extracts text content with the specified options.
+// When ExcludeHeaders or ExcludeFooters is true, content matching
+// header/footer text will be filtered out.
+func (r *Reader) TextWithOptions(opts ExtractOptions) (string, error) {
 	if r.document == nil {
 		return "", fmt.Errorf("document not parsed")
 	}
@@ -219,6 +239,10 @@ func (r *Reader) Text() (string, error) {
 			switch elem.Type {
 			case "paragraph":
 				if elem.Paragraph != nil {
+					// Check if this paragraph should be excluded
+					if r.shouldExcludeParagraph(elem.Paragraph.Text, opts) {
+						continue
+					}
 					r.writeParagraphText(&result, elem.Paragraph, listCounters)
 				}
 			case "table":
@@ -232,6 +256,10 @@ func (r *Reader) Text() (string, error) {
 
 	// Fallback: output paragraphs then tables (old behavior)
 	for i, para := range r.paragraphs {
+		// Check if this paragraph should be excluded
+		if r.shouldExcludeParagraph(para.Text, opts) {
+			continue
+		}
 		if i > 0 {
 			result.WriteString("\n")
 		}
@@ -249,6 +277,46 @@ func (r *Reader) Text() (string, error) {
 	return result.String(), nil
 }
 
+// shouldExcludeParagraph checks if a paragraph should be excluded based on options.
+func (r *Reader) shouldExcludeParagraph(text string, opts ExtractOptions) bool {
+	if text == "" {
+		return false
+	}
+
+	trimmedText := strings.TrimSpace(text)
+	if trimmedText == "" {
+		return false
+	}
+
+	// Check against header texts
+	if opts.ExcludeHeaders {
+		for _, headerText := range r.headerTexts {
+			// Check each line of the header
+			for _, headerLine := range strings.Split(headerText, "\n") {
+				headerLine = strings.TrimSpace(headerLine)
+				if headerLine != "" && trimmedText == headerLine {
+					return true
+				}
+			}
+		}
+	}
+
+	// Check against footer texts
+	if opts.ExcludeFooters {
+		for _, footerText := range r.footerTexts {
+			// Check each line of the footer
+			for _, footerLine := range strings.Split(footerText, "\n") {
+				footerLine = strings.TrimSpace(footerLine)
+				if footerLine != "" && trimmedText == footerLine {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 // Markdown returns the document content as a Markdown-formatted string.
 // It converts:
 //   - Headings to # notation (level 1-6)
@@ -256,6 +324,13 @@ func (r *Reader) Text() (string, error) {
 //   - Tables to markdown table format
 //   - Paragraphs to plain text
 func (r *Reader) Markdown() (string, error) {
+	return r.MarkdownWithOptions(ExtractOptions{})
+}
+
+// MarkdownWithOptions returns document content as Markdown with the specified options.
+// When ExcludeHeaders or ExcludeFooters is true, content matching
+// header/footer text will be filtered out.
+func (r *Reader) MarkdownWithOptions(opts ExtractOptions) (string, error) {
 	if len(r.elements) == 0 && len(r.paragraphs) == 0 {
 		return "", nil
 	}
@@ -273,6 +348,11 @@ func (r *Reader) Markdown() (string, error) {
 		case "paragraph":
 			para := elem.Paragraph
 			if para == nil {
+				continue
+			}
+
+			// Check if this paragraph should be excluded
+			if r.shouldExcludeParagraph(para.Text, opts) {
 				continue
 			}
 
@@ -850,6 +930,100 @@ func (r *Reader) parseAppProperties() {
 
 	r.appProps = &appPropertiesXML{}
 	xml.Unmarshal(data, r.appProps)
+}
+
+// parseHeadersAndFooters parses header and footer files linked via relationships.
+// In DOCX, headers/footers are stored in separate files (word/header1.xml, word/footer1.xml, etc.)
+// and linked via relationships in word/_rels/document.xml.rels.
+func (r *Reader) parseHeadersAndFooters() {
+	if r.rels == nil {
+		return
+	}
+
+	// Relationship types for headers and footers
+	const (
+		headerRelType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/header"
+		footerRelType = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer"
+	)
+
+	for _, rel := range r.rels.Relationships {
+		switch rel.Type {
+		case headerRelType:
+			if text := r.extractHeaderFooterText("word/" + rel.Target); text != "" {
+				r.headerTexts = append(r.headerTexts, text)
+			}
+		case footerRelType:
+			if text := r.extractHeaderFooterText("word/" + rel.Target); text != "" {
+				r.footerTexts = append(r.footerTexts, text)
+			}
+		}
+	}
+}
+
+// extractHeaderFooterText extracts text content from a header or footer XML file.
+func (r *Reader) extractHeaderFooterText(filename string) string {
+	data, err := r.getFileContent(filename)
+	if err != nil {
+		return ""
+	}
+
+	// Header/footer files have the same structure as document.xml
+	// with <w:hdr> or <w:ftr> as root containing <w:p> paragraphs
+	var paragraphs []paragraphXML
+
+	// Try parsing as header first
+	var hdr headerXML
+	if err := xml.Unmarshal(data, &hdr); err == nil && len(hdr.Paragraphs) > 0 {
+		paragraphs = hdr.Paragraphs
+	} else {
+		// Try parsing as footer
+		var ftr footerXML
+		if err := xml.Unmarshal(data, &ftr); err == nil {
+			paragraphs = ftr.Paragraphs
+		}
+	}
+
+	var textParts []string
+	for _, para := range paragraphs {
+		paraText := r.extractParagraphText(para)
+		if paraText != "" {
+			textParts = append(textParts, paraText)
+		}
+	}
+
+	return strings.Join(textParts, "\n")
+}
+
+// extractParagraphText extracts text from a paragraph XML element.
+func (r *Reader) extractParagraphText(p paragraphXML) string {
+	var textParts []string
+	for _, run := range p.Runs {
+		runText := r.extractRunText(run)
+		if runText != "" {
+			textParts = append(textParts, runText)
+		}
+	}
+	return strings.Join(textParts, "")
+}
+
+// HasHeaders returns true if the document has header content.
+func (r *Reader) HasHeaders() bool {
+	return len(r.headerTexts) > 0
+}
+
+// HasFooters returns true if the document has footer content.
+func (r *Reader) HasFooters() bool {
+	return len(r.footerTexts) > 0
+}
+
+// HeaderTexts returns all header text content from the document.
+func (r *Reader) HeaderTexts() []string {
+	return r.headerTexts
+}
+
+// FooterTexts returns all footer text content from the document.
+func (r *Reader) FooterTexts() []string {
+	return r.footerTexts
 }
 
 // processParagraphs processes all paragraphs in the document.

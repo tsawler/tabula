@@ -340,7 +340,11 @@ func (e *Extractor) Text() (string, []Warning, error) {
 
 	// Handle DOCX files
 	if e.format == format.DOCX {
-		text, err := e.docxReader.Text()
+		opts := docx.ExtractOptions{
+			ExcludeHeaders: e.options.excludeHeaders,
+			ExcludeFooters: e.options.excludeFooters,
+		}
+		text, err := e.docxReader.TextWithOptions(opts)
 		if err != nil {
 			return "", e.warnings, err
 		}
@@ -349,7 +353,11 @@ func (e *Extractor) Text() (string, []Warning, error) {
 
 	// Handle ODT files
 	if e.format == format.ODT {
-		text, err := e.odtReader.Text()
+		opts := odt.ExtractOptions{
+			ExcludeHeaders: e.options.excludeHeaders,
+			ExcludeFooters: e.options.excludeFooters,
+		}
+		text, err := e.odtReader.TextWithOptions(opts)
 		if err != nil {
 			return "", e.warnings, err
 		}
@@ -521,7 +529,11 @@ func (e *Extractor) ToMarkdownWithOptions(opts rag.MarkdownOptions) (string, []W
 		if err := e.ensureReader(); err != nil {
 			return "", nil, err
 		}
-		md, err := e.docxReader.Markdown()
+		docxOpts := docx.ExtractOptions{
+			ExcludeHeaders: e.options.excludeHeaders,
+			ExcludeFooters: e.options.excludeFooters,
+		}
+		md, err := e.docxReader.MarkdownWithOptions(docxOpts)
 		if err != nil {
 			return "", nil, err
 		}
@@ -533,7 +545,11 @@ func (e *Extractor) ToMarkdownWithOptions(opts rag.MarkdownOptions) (string, []W
 		if err := e.ensureReader(); err != nil {
 			return "", nil, err
 		}
-		md, err := e.odtReader.Markdown()
+		odtOpts := odt.ExtractOptions{
+			ExcludeHeaders: e.options.excludeHeaders,
+			ExcludeFooters: e.options.excludeFooters,
+		}
+		md, err := e.odtReader.MarkdownWithOptions(odtOpts)
 		if err != nil {
 			return "", nil, err
 		}

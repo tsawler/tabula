@@ -204,23 +204,50 @@ type pagePropsXML struct {
 
 // headerFooterStyleXML represents header/footer style.
 type headerFooterStyleXML struct {
-	XMLName    xml.Name              `xml:"header-style"`
 	Properties *headerFooterPropsXML `xml:"header-footer-properties"`
 }
 
 // headerFooterPropsXML represents header/footer properties.
 type headerFooterPropsXML struct {
-	XMLName      xml.Name `xml:"header-footer-properties"`
-	MinHeight    string   `xml:"min-height,attr"`
-	MarginBottom string   `xml:"margin-bottom,attr"`
+	MinHeight    string `xml:"min-height,attr"`
+	MarginBottom string `xml:"margin-bottom,attr"`
 }
 
 // masterPageXML represents a master page (<style:master-page>).
 type masterPageXML struct {
-	XMLName        xml.Name `xml:"master-page"`
-	Name           string   `xml:"name,attr"`
-	PageLayoutName string   `xml:"page-layout-name,attr"`
-	DisplayName    string   `xml:"display-name,attr"`
+	XMLName        xml.Name           `xml:"master-page"`
+	Name           string             `xml:"name,attr"`
+	PageLayoutName string             `xml:"page-layout-name,attr"`
+	DisplayName    string             `xml:"display-name,attr"`
+	Header         *masterHeaderXML   `xml:"header"`
+	Footer         *masterFooterXML   `xml:"footer"`
+	HeaderLeft     *masterHeaderXML   `xml:"header-left"`
+	FooterLeft     *masterFooterXML   `xml:"footer-left"`
+	HeaderFirst    *masterHeaderXML   `xml:"header-first"`
+	FooterFirst    *masterFooterXML   `xml:"footer-first"`
+}
+
+// masterHeaderXML represents header content in a master page (<style:header>).
+type masterHeaderXML struct {
+	Paragraphs []masterParagraphXML `xml:"p"`
+}
+
+// masterFooterXML represents footer content in a master page (<style:footer>).
+type masterFooterXML struct {
+	Paragraphs []masterParagraphXML `xml:"p"`
+}
+
+// masterParagraphXML represents a paragraph in header/footer.
+type masterParagraphXML struct {
+	StyleName string          `xml:"style-name,attr"`
+	Text      string          `xml:",chardata"`
+	Spans     []masterSpanXML `xml:"span"`
+}
+
+// masterSpanXML represents a text span in header/footer paragraph.
+type masterSpanXML struct {
+	StyleName string `xml:"style-name,attr"`
+	Text      string `xml:",chardata"`
 }
 
 // metaXML represents document metadata from meta.xml.
