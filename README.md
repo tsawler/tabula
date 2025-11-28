@@ -1,11 +1,11 @@
 # Tabula
 
-A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval-Augmented Generation) workflows. Supports PDF and docx files.
+A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval-Augmented Generation) workflows. Supports PDF, DOCX, and ODT files.
 
 ## Features
 
 - **Fluent API** - Chain methods for clean, readable code
-- **Multi-Format Support** - PDF (.pdf) and Word (.docx) files
+- **Multi-Format Support** - PDF (.pdf), Word (.docx), and OpenDocument (.odt) files
 - **Layout Analysis** - Detect headings, paragraphs, lists, and tables
 - **Header/Footer Detection** - Automatically identify and exclude repeating content (PDF)
 - **RAG-Ready Chunking** - Semantic document chunking with metadata
@@ -34,9 +34,10 @@ import (
 )
 
 func main() {
-    // Works with both PDF and DOCX files
+    // Works with PDF, DOCX, and ODT files
     text, warnings, err := tabula.Open("document.pdf").Text()
     // text, warnings, err := tabula.Open("document.docx").Text()
+    // text, warnings, err := tabula.Open("document.odt").Text()
     if err != nil {
         log.Fatal(err)
     }
@@ -69,6 +70,9 @@ markdown, warnings, err := tabula.Open("document.pdf").
 
 // DOCX (preserves headings, lists, tables)
 markdown, warnings, err := tabula.Open("document.docx").ToMarkdown()
+
+// ODT (preserves headings, lists, tables)
+markdown, warnings, err := tabula.Open("document.odt").ToMarkdown()
 ```
 
 ### RAG Chunking
@@ -84,9 +88,10 @@ import (
 )
 
 func main() {
-    // Works with both PDF and DOCX
+    // Works with PDF, DOCX, and ODT
     chunks, warnings, err := tabula.Open("document.pdf").Chunks()
     // chunks, warnings, err := tabula.Open("document.docx").Chunks()
+    // chunks, warnings, err := tabula.Open("document.odt").Chunks()
     if err != nil {
         log.Fatal(err)
     }
@@ -137,6 +142,7 @@ for i, md := range mdChunks {
 // From file path (format auto-detected by extension)
 ext := tabula.Open("document.pdf")
 ext := tabula.Open("document.docx")
+ext := tabula.Open("document.odt")
 
 // From existing PDF reader (PDF only)
 r, _ := reader.Open("document.pdf")
@@ -160,13 +166,13 @@ ext := tabula.FromReader(r)
 
 | Method | Returns | Description | Formats |
 |--------|---------|-------------|---------|
-| `Text()` | `string` | Plain text content | PDF, DOCX |
-| `ToMarkdown()` | `string` | Markdown-formatted content | PDF, DOCX |
+| `Text()` | `string` | Plain text content | PDF, DOCX, ODT |
+| `ToMarkdown()` | `string` | Markdown-formatted content | PDF, DOCX, ODT |
 | `ToMarkdownWithOptions(opts)` | `string` | Markdown with custom options | PDF |
-| `Document()` | `*model.Document` | Full document structure | PDF, DOCX |
-| `Chunks()` | `*rag.ChunkCollection` | Semantic chunks for RAG | PDF, DOCX |
-| `ChunksWithConfig(config, sizeConfig)` | `*rag.ChunkCollection` | Chunks with custom sizing | PDF, DOCX |
-| `PageCount()` | `int` | Number of pages | PDF, DOCX |
+| `Document()` | `*model.Document` | Full document structure | PDF, DOCX, ODT |
+| `Chunks()` | `*rag.ChunkCollection` | Semantic chunks for RAG | PDF, DOCX, ODT |
+| `ChunksWithConfig(config, sizeConfig)` | `*rag.ChunkCollection` | Chunks with custom sizing | PDF, DOCX, ODT |
+| `PageCount()` | `int` | Number of pages | PDF, DOCX, ODT |
 | `Fragments()` | `[]text.TextFragment` | Raw text fragments with positions | PDF |
 | `Lines()` | `[]layout.Line` | Detected text lines | PDF |
 | `Paragraphs()` | `[]layout.Paragraph` | Detected paragraphs | PDF |
@@ -184,7 +190,7 @@ defer ext.Close()
 
 isCharLevel, _ := ext.IsCharacterLevel()  // Detect character-level PDFs
 isMultiCol, _ := ext.IsMultiColumn()      // Detect multi-column layouts
-pageCount, _ := ext.PageCount()           // Get page count (works with DOCX too)
+pageCount, _ := ext.PageCount()           // Get page count (works with DOCX and ODT too)
 ```
 
 ## RAG Integration

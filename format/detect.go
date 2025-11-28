@@ -18,6 +18,8 @@ const (
 	PDF
 	// DOCX indicates a Microsoft Word (.docx) document.
 	DOCX
+	// ODT indicates an OpenDocument Text (.odt) document.
+	ODT
 )
 
 // String returns the string representation of the format.
@@ -27,6 +29,8 @@ func (f Format) String() string {
 		return "PDF"
 	case DOCX:
 		return "DOCX"
+	case ODT:
+		return "ODT"
 	default:
 		return "Unknown"
 	}
@@ -39,6 +43,8 @@ func (f Format) Extension() string {
 		return ".pdf"
 	case DOCX:
 		return ".docx"
+	case ODT:
+		return ".odt"
 	default:
 		return ""
 	}
@@ -52,6 +58,8 @@ func Detect(filename string) Format {
 		return PDF
 	case ".docx":
 		return DOCX
+	case ".odt":
+		return ODT
 	default:
 		return Unknown
 	}
@@ -106,11 +114,27 @@ func DetectFromReader(r io.ReaderAt, size int64) (Format, error) {
 	return Unknown, nil
 }
 
-// detectZIPFormat inspects a ZIP archive to determine if it's DOCX, XLSX, PPTX, etc.
+// detectZIPFormat inspects a ZIP archive to determine if it's DOCX, XLSX, PPTX, ODT, etc.
 func detectZIPFormat(r io.ReaderAt, size int64) (Format, error) {
 	zr, err := zip.NewReader(r, size)
 	if err != nil {
 		return Unknown, err
+	}
+
+	// Check for OpenDocument Format first (has mimetype file at the start)
+	for _, f := range zr.File {
+		if f.Name == "mimetype" {
+			rc, err := f.Open()
+			if err == nil {
+				data := make([]byte, 256)
+				n, _ := rc.Read(data)
+				rc.Close()
+				mimeType := string(data[:n])
+				if strings.Contains(mimeType, "application/vnd.oasis.opendocument.text") {
+					return ODT, nil
+				}
+			}
+		}
 	}
 
 	// Check for Office Open XML markers
