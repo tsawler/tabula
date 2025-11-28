@@ -308,3 +308,310 @@ func TestPageCount(t *testing.T) {
 		t.Errorf("expected page count 1, got %d", count)
 	}
 }
+
+// createTestODTWithHeadersFooters creates an ODT file with headers and footers in styles.xml.
+func createTestODTWithHeadersFooters(t *testing.T, bodyContent, headerContent, footerContent string) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	odtPath := filepath.Join(tmpDir, "test_with_hf.odt")
+
+	f, err := os.Create(odtPath)
+	if err != nil {
+		t.Fatalf("failed to create ODT file: %v", err)
+	}
+
+	zw := zip.NewWriter(f)
+
+	// Add mimetype file (must be first, uncompressed)
+	mw, err := zw.CreateHeader(&zip.FileHeader{
+		Name:   "mimetype",
+		Method: zip.Store, // No compression
+	})
+	if err != nil {
+		t.Fatalf("failed to create mimetype: %v", err)
+	}
+	mw.Write([]byte("application/vnd.oasis.opendocument.text"))
+
+	// Add content.xml
+	contentXML := `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+                         xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+  <office:body>
+    <office:text>` + bodyContent + `</office:text>
+  </office:body>
+</office:document-content>`
+	cw, err := zw.Create("content.xml")
+	if err != nil {
+		t.Fatalf("failed to create content.xml: %v", err)
+	}
+	cw.Write([]byte(contentXML))
+
+	// Add styles.xml with headers and footers in master pages
+	stylesXML := `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-styles xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+                        xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0"
+                        xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+  <office:automatic-styles>
+    <style:page-layout style:name="pm1">
+      <style:page-layout-properties/>
+      <style:header-style>
+        <style:header-footer-properties fo:min-height="0.5in"/>
+      </style:header-style>
+      <style:footer-style>
+        <style:header-footer-properties fo:min-height="0.5in"/>
+      </style:footer-style>
+    </style:page-layout>
+  </office:automatic-styles>
+  <office:master-styles>
+    <style:master-page style:name="Standard" style:page-layout-name="pm1">
+      <style:header>
+        <text:p>` + headerContent + `</text:p>
+      </style:header>
+      <style:footer>
+        <text:p>` + footerContent + `</text:p>
+      </style:footer>
+    </style:master-page>
+  </office:master-styles>
+</office:document-styles>`
+	sw, err := zw.Create("styles.xml")
+	if err != nil {
+		t.Fatalf("failed to create styles.xml: %v", err)
+	}
+	sw.Write([]byte(stylesXML))
+
+	// Add meta.xml
+	metaw, err := zw.Create("meta.xml")
+	if err != nil {
+		t.Fatalf("failed to create meta.xml: %v", err)
+	}
+	metaw.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<office:document-meta xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+                      xmlns:dc="http://purl.org/dc/elements/1.1/"
+                      xmlns:meta="urn:oasis:names:tc:opendocument:xmlns:meta:1.0">
+  <office:meta>
+    <dc:title>Test Document</dc:title>
+  </office:meta>
+</office:document-meta>`))
+
+	if err := zw.Close(); err != nil {
+		t.Fatalf("failed to close zip: %v", err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatalf("failed to close file: %v", err)
+	}
+
+	return odtPath
+}
+
+func TestReader_HeaderFooterParsing(t *testing.T) {
+	bodyContent := `<text:p>Main document content</text:p>`
+	headerContent := "Company Header"
+	footerContent := "Page 1 of 10"
+
+	odtPath := createTestODTWithHeadersFooters(t, bodyContent, headerContent, footerContent)
+
+	r, err := Open(odtPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer r.Close()
+
+	// Check that headers are detected
+	if !r.HasHeaders() {
+		t.Error("HasHeaders() should return true")
+	}
+
+	// Check that footers are detected
+	if !r.HasFooters() {
+		t.Error("HasFooters() should return true")
+	}
+
+	// Check header text
+	headerTexts := r.HeaderTexts()
+	if len(headerTexts) == 0 {
+		t.Error("HeaderTexts() should not be empty")
+	} else if !strings.Contains(headerTexts[0], headerContent) {
+		t.Errorf("HeaderTexts() = %v, expected to contain %q", headerTexts, headerContent)
+	}
+
+	// Check footer text
+	footerTexts := r.FooterTexts()
+	if len(footerTexts) == 0 {
+		t.Error("FooterTexts() should not be empty")
+	} else if !strings.Contains(footerTexts[0], footerContent) {
+		t.Errorf("FooterTexts() = %v, expected to contain %q", footerTexts, footerContent)
+	}
+}
+
+func TestReader_TextWithOptions_ExcludeHeaders(t *testing.T) {
+	// Create a document where the body contains the same text as the header
+	headerText := "Company Header"
+	bodyContent := `<text:p>Company Header</text:p>
+<text:p>Main document content</text:p>`
+
+	odtPath := createTestODTWithHeadersFooters(t, bodyContent, headerText, "Footer")
+
+	r, err := Open(odtPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer r.Close()
+
+	// Without exclusion, header text should appear
+	textWithHeader, err := r.TextWithOptions(ExtractOptions{ExcludeHeaders: false})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+	if !strings.Contains(textWithHeader, "Company Header") {
+		t.Error("Text without exclusion should contain header text")
+	}
+
+	// With exclusion, header text should be removed
+	textWithoutHeader, err := r.TextWithOptions(ExtractOptions{ExcludeHeaders: true})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+	if strings.Contains(textWithoutHeader, "Company Header") {
+		t.Error("Text with ExcludeHeaders=true should not contain header text")
+	}
+	if !strings.Contains(textWithoutHeader, "Main document content") {
+		t.Error("Text should still contain main content")
+	}
+}
+
+func TestReader_TextWithOptions_ExcludeFooters(t *testing.T) {
+	// Create a document where the body contains the same text as the footer
+	footerText := "Page 1 of 10"
+	bodyContent := `<text:p>Main document content</text:p>
+<text:p>Page 1 of 10</text:p>`
+
+	odtPath := createTestODTWithHeadersFooters(t, bodyContent, "Header", footerText)
+
+	r, err := Open(odtPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer r.Close()
+
+	// Without exclusion, footer text should appear
+	textWithFooter, err := r.TextWithOptions(ExtractOptions{ExcludeFooters: false})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+	if !strings.Contains(textWithFooter, "Page 1 of 10") {
+		t.Error("Text without exclusion should contain footer text")
+	}
+
+	// With exclusion, footer text should be removed
+	textWithoutFooter, err := r.TextWithOptions(ExtractOptions{ExcludeFooters: true})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+	if strings.Contains(textWithoutFooter, "Page 1 of 10") {
+		t.Error("Text with ExcludeFooters=true should not contain footer text")
+	}
+	if !strings.Contains(textWithoutFooter, "Main document content") {
+		t.Error("Text should still contain main content")
+	}
+}
+
+func TestReader_TextWithOptions_ExcludeBoth(t *testing.T) {
+	headerText := "Document Title"
+	footerText := "Confidential"
+	bodyContent := `<text:p>Document Title</text:p>
+<text:p>Important content here</text:p>
+<text:p>Confidential</text:p>`
+
+	odtPath := createTestODTWithHeadersFooters(t, bodyContent, headerText, footerText)
+
+	r, err := Open(odtPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer r.Close()
+
+	// Exclude both headers and footers
+	text, err := r.TextWithOptions(ExtractOptions{ExcludeHeaders: true, ExcludeFooters: true})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+
+	if strings.Contains(text, "Document Title") {
+		t.Error("Text should not contain header text")
+	}
+	if strings.Contains(text, "Confidential") {
+		t.Error("Text should not contain footer text")
+	}
+	if !strings.Contains(text, "Important content here") {
+		t.Error("Text should contain main content")
+	}
+}
+
+func TestReader_MarkdownWithOptions_ExcludeHeadersFooters(t *testing.T) {
+	headerText := "Report Header"
+	footerText := "Report Footer"
+	bodyContent := `<text:p>Report Header</text:p>
+<text:p>The main report content</text:p>
+<text:p>Report Footer</text:p>`
+
+	odtPath := createTestODTWithHeadersFooters(t, bodyContent, headerText, footerText)
+
+	r, err := Open(odtPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer r.Close()
+
+	// With exclusion
+	md, err := r.MarkdownWithOptions(ExtractOptions{ExcludeHeaders: true, ExcludeFooters: true})
+	if err != nil {
+		t.Fatalf("MarkdownWithOptions() error = %v", err)
+	}
+
+	if strings.Contains(md, "Report Header") {
+		t.Error("Markdown should not contain header text")
+	}
+	if strings.Contains(md, "Report Footer") {
+		t.Error("Markdown should not contain footer text")
+	}
+	if !strings.Contains(md, "The main report content") {
+		t.Error("Markdown should contain main content")
+	}
+}
+
+func TestReader_NoHeadersFooters(t *testing.T) {
+	// Test a document without headers/footers (using the basic createTestODT)
+	content := `<?xml version="1.0" encoding="UTF-8"?>
+<office:document-content xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0"
+                         xmlns:text="urn:oasis:names:tc:opendocument:xmlns:text:1.0">
+  <office:body>
+    <office:text>
+      <text:p>Simple document</text:p>
+    </office:text>
+  </office:body>
+</office:document-content>`
+	odtPath := createTestODT(t, content)
+
+	r, err := Open(odtPath)
+	if err != nil {
+		t.Fatalf("Open failed: %v", err)
+	}
+	defer r.Close()
+
+	if r.HasHeaders() {
+		t.Error("HasHeaders() should return false for document without headers")
+	}
+	if r.HasFooters() {
+		t.Error("HasFooters() should return false for document without footers")
+	}
+
+	// TextWithOptions should still work
+	text, err := r.TextWithOptions(ExtractOptions{ExcludeHeaders: true, ExcludeFooters: true})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+	if !strings.Contains(text, "Simple document") {
+		t.Error("Text should contain document content")
+	}
+}

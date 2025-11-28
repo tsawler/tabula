@@ -26,6 +26,16 @@ type Reader struct {
 	tables        []ParsedTable
 	lists         []ParsedList
 	elements      []parsedElement // Elements in document order
+
+	// Header/footer content (parsed from styles.xml master pages)
+	headerTexts []string // Text content from all headers
+	footerTexts []string // Text content from all footers
+}
+
+// ExtractOptions holds options for text extraction.
+type ExtractOptions struct {
+	ExcludeHeaders bool
+	ExcludeFooters bool
 }
 
 // Open opens an ODT file for reading.
@@ -66,6 +76,9 @@ func Open(filename string) (*Reader, error) {
 
 	// Parse metadata (optional)
 	r.parseMetadata()
+
+	// Parse headers and footers from master pages (optional)
+	r.parseHeadersAndFooters()
 
 	return r, nil
 }
@@ -123,6 +136,13 @@ func (r *Reader) PageCount() (int, error) {
 
 // Text extracts and returns all text content from the document.
 func (r *Reader) Text() (string, error) {
+	return r.TextWithOptions(ExtractOptions{})
+}
+
+// TextWithOptions extracts text content with the specified options.
+// When ExcludeHeaders or ExcludeFooters is true, content matching
+// header/footer text will be filtered out.
+func (r *Reader) TextWithOptions(opts ExtractOptions) (string, error) {
 	if len(r.elements) == 0 && len(r.paragraphs) == 0 {
 		return "", nil
 	}
@@ -140,6 +160,10 @@ func (r *Reader) Text() (string, error) {
 			switch elem.Type {
 			case "paragraph":
 				if elem.Paragraph != nil {
+					// Check if this paragraph should be excluded
+					if r.shouldExcludeParagraph(elem.Paragraph.Text, opts) {
+						continue
+					}
 					r.writeParagraphText(&result, elem.Paragraph, listCounters)
 				}
 			case "table":
@@ -153,6 +177,10 @@ func (r *Reader) Text() (string, error) {
 
 	// Fallback: output paragraphs then tables
 	for i, para := range r.paragraphs {
+		// Check if this paragraph should be excluded
+		if r.shouldExcludeParagraph(para.Text, opts) {
+			continue
+		}
 		if i > 0 {
 			result.WriteString("\n")
 		}
@@ -169,8 +197,55 @@ func (r *Reader) Text() (string, error) {
 	return result.String(), nil
 }
 
+// shouldExcludeParagraph checks if a paragraph should be excluded based on options.
+func (r *Reader) shouldExcludeParagraph(text string, opts ExtractOptions) bool {
+	if text == "" {
+		return false
+	}
+
+	trimmedText := strings.TrimSpace(text)
+	if trimmedText == "" {
+		return false
+	}
+
+	// Check against header texts
+	if opts.ExcludeHeaders {
+		for _, headerText := range r.headerTexts {
+			// Check each line of the header
+			for _, headerLine := range strings.Split(headerText, "\n") {
+				headerLine = strings.TrimSpace(headerLine)
+				if headerLine != "" && trimmedText == headerLine {
+					return true
+				}
+			}
+		}
+	}
+
+	// Check against footer texts
+	if opts.ExcludeFooters {
+		for _, footerText := range r.footerTexts {
+			// Check each line of the footer
+			for _, footerLine := range strings.Split(footerText, "\n") {
+				footerLine = strings.TrimSpace(footerLine)
+				if footerLine != "" && trimmedText == footerLine {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
 // Markdown returns the document content as a Markdown-formatted string.
 func (r *Reader) Markdown() (string, error) {
+	return r.MarkdownWithOptions(ExtractOptions{})
+}
+
+// MarkdownWithOptions returns document content as Markdown with the specified options.
+// When ExcludeHeaders or ExcludeFooters is true, content matching
+// header/footer text will be filtered out.
+func (r *Reader) MarkdownWithOptions(opts ExtractOptions) (string, error) {
 	if len(r.elements) == 0 && len(r.paragraphs) == 0 {
 		return "", nil
 	}
@@ -184,6 +259,11 @@ func (r *Reader) Markdown() (string, error) {
 		case "paragraph":
 			para := elem.Paragraph
 			if para == nil {
+				continue
+			}
+
+			// Check if this paragraph should be excluded
+			if r.shouldExcludeParagraph(para.Text, opts) {
 				continue
 			}
 
@@ -733,4 +813,109 @@ func (r *Reader) parseMetadata() {
 
 	r.meta = &metaXML{}
 	xml.Unmarshal(data, r.meta)
+}
+
+// parseHeadersAndFooters extracts header and footer content from master pages in styles.xml.
+// In ODT, headers/footers are defined inside <style:master-page> elements in styles.xml.
+func (r *Reader) parseHeadersAndFooters() {
+	if r.docStyles == nil || r.docStyles.MasterStyles == nil {
+		return
+	}
+
+	for _, masterPage := range r.docStyles.MasterStyles.MasterPages {
+		// Extract header content
+		if text := r.extractMasterHeaderText(masterPage.Header); text != "" {
+			r.headerTexts = append(r.headerTexts, text)
+		}
+		if text := r.extractMasterHeaderText(masterPage.HeaderLeft); text != "" {
+			r.headerTexts = append(r.headerTexts, text)
+		}
+		if text := r.extractMasterHeaderText(masterPage.HeaderFirst); text != "" {
+			r.headerTexts = append(r.headerTexts, text)
+		}
+
+		// Extract footer content
+		if text := r.extractMasterFooterText(masterPage.Footer); text != "" {
+			r.footerTexts = append(r.footerTexts, text)
+		}
+		if text := r.extractMasterFooterText(masterPage.FooterLeft); text != "" {
+			r.footerTexts = append(r.footerTexts, text)
+		}
+		if text := r.extractMasterFooterText(masterPage.FooterFirst); text != "" {
+			r.footerTexts = append(r.footerTexts, text)
+		}
+	}
+}
+
+// extractMasterHeaderText extracts text from a master page header.
+func (r *Reader) extractMasterHeaderText(header *masterHeaderXML) string {
+	if header == nil {
+		return ""
+	}
+
+	var textParts []string
+	for _, para := range header.Paragraphs {
+		paraText := r.extractMasterParagraphText(para)
+		if paraText != "" {
+			textParts = append(textParts, paraText)
+		}
+	}
+
+	return strings.Join(textParts, "\n")
+}
+
+// extractMasterFooterText extracts text from a master page footer.
+func (r *Reader) extractMasterFooterText(footer *masterFooterXML) string {
+	if footer == nil {
+		return ""
+	}
+
+	var textParts []string
+	for _, para := range footer.Paragraphs {
+		paraText := r.extractMasterParagraphText(para)
+		if paraText != "" {
+			textParts = append(textParts, paraText)
+		}
+	}
+
+	return strings.Join(textParts, "\n")
+}
+
+// extractMasterParagraphText extracts text from a header/footer paragraph.
+func (r *Reader) extractMasterParagraphText(para masterParagraphXML) string {
+	var textParts []string
+
+	// Direct text content
+	if para.Text != "" {
+		textParts = append(textParts, para.Text)
+	}
+
+	// Text from spans
+	for _, span := range para.Spans {
+		if span.Text != "" {
+			textParts = append(textParts, span.Text)
+		}
+	}
+
+	return strings.Join(textParts, "")
+}
+
+// HasHeaders returns true if the document has header content.
+func (r *Reader) HasHeaders() bool {
+	return len(r.headerTexts) > 0
+}
+
+// HasFooters returns true if the document has footer content.
+func (r *Reader) HasFooters() bool {
+	return len(r.footerTexts) > 0
+}
+
+// HeaderTexts returns all header text content from the document.
+func (r *Reader) HeaderTexts() []string {
+	return r.headerTexts
+}
+
+// FooterTexts returns all footer text content from the document.
+func (r *Reader) FooterTexts() []string {
+	return r.footerTexts
 }

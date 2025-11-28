@@ -348,3 +348,17 @@ type shadingXML struct {
 type vAlignXML struct {
 	Val string `xml:"val,attr"` // top, center, bottom
 }
+
+// headerXML represents the structure of word/header*.xml files (<w:hdr>).
+type headerXML struct {
+	XMLName    xml.Name       `xml:"hdr"`
+	Paragraphs []paragraphXML `xml:"p"`
+	Tables     []tableXML     `xml:"tbl"`
+}
+
+// footerXML represents the structure of word/footer*.xml files (<w:ftr>).
+type footerXML struct {
+	XMLName    xml.Name       `xml:"ftr"`
+	Paragraphs []paragraphXML `xml:"p"`
+	Tables     []tableXML     `xml:"tbl"`
+}

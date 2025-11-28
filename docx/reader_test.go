@@ -420,3 +420,280 @@ func TestReader_TextWithSpecialCharacters(t *testing.T) {
 		t.Errorf("Text() = %q, expected preserved spaces", text)
 	}
 }
+
+// createTestDOCXWithHeadersFooters creates a DOCX file with headers and footers for testing.
+func createTestDOCXWithHeadersFooters(t *testing.T, bodyContent, headerContent, footerContent string) string {
+	t.Helper()
+
+	tmpDir := t.TempDir()
+	docxPath := filepath.Join(tmpDir, "test_with_hf.docx")
+
+	f, err := os.Create(docxPath)
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+
+	zw := zip.NewWriter(f)
+
+	// [Content_Types].xml
+	contentTypes := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/header1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.header+xml"/>
+  <Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>
+</Types>`
+	w, _ := zw.Create("[Content_Types].xml")
+	w.Write([]byte(contentTypes))
+
+	// _rels/.rels
+	rels := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`
+	w, _ = zw.Create("_rels/.rels")
+	w.Write([]byte(rels))
+
+	// word/_rels/document.xml.rels - includes relationships to header and footer
+	docRels := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/header" Target="header1.xml"/>
+  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>
+</Relationships>`
+	w, _ = zw.Create("word/_rels/document.xml.rels")
+	w.Write([]byte(docRels))
+
+	// word/document.xml
+	document := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>` + bodyContent + `</w:body>
+</w:document>`
+	w, _ = zw.Create("word/document.xml")
+	w.Write([]byte(document))
+
+	// word/header1.xml
+	header := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:hdr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>` + headerContent + `</w:t></w:r></w:p>
+</w:hdr>`
+	w, _ = zw.Create("word/header1.xml")
+	w.Write([]byte(header))
+
+	// word/footer1.xml
+	footer := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p><w:r><w:t>` + footerContent + `</w:t></w:r></w:p>
+</w:ftr>`
+	w, _ = zw.Create("word/footer1.xml")
+	w.Write([]byte(footer))
+
+	zw.Close()
+	f.Close()
+
+	return docxPath
+}
+
+func TestReader_HeaderFooterParsing(t *testing.T) {
+	bodyContent := `<w:p><w:r><w:t>Main document content</w:t></w:r></w:p>`
+	headerContent := "Company Header"
+	footerContent := "Page 1 of 10"
+
+	docxPath := createTestDOCXWithHeadersFooters(t, bodyContent, headerContent, footerContent)
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	// Check that headers are detected
+	if !r.HasHeaders() {
+		t.Error("HasHeaders() should return true")
+	}
+
+	// Check that footers are detected
+	if !r.HasFooters() {
+		t.Error("HasFooters() should return true")
+	}
+
+	// Check header text
+	headerTexts := r.HeaderTexts()
+	if len(headerTexts) == 0 {
+		t.Error("HeaderTexts() should not be empty")
+	} else if !strings.Contains(headerTexts[0], headerContent) {
+		t.Errorf("HeaderTexts() = %v, expected to contain %q", headerTexts, headerContent)
+	}
+
+	// Check footer text
+	footerTexts := r.FooterTexts()
+	if len(footerTexts) == 0 {
+		t.Error("FooterTexts() should not be empty")
+	} else if !strings.Contains(footerTexts[0], footerContent) {
+		t.Errorf("FooterTexts() = %v, expected to contain %q", footerTexts, footerContent)
+	}
+}
+
+func TestReader_TextWithOptions_ExcludeHeaders(t *testing.T) {
+	// Create a document where the body contains the same text as the header
+	headerText := "Company Header"
+	bodyContent := `<w:p><w:r><w:t>Company Header</w:t></w:r></w:p>
+<w:p><w:r><w:t>Main document content</w:t></w:r></w:p>`
+
+	docxPath := createTestDOCXWithHeadersFooters(t, bodyContent, headerText, "Footer")
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	// Without exclusion, header text should appear
+	textWithHeader, err := r.TextWithOptions(ExtractOptions{ExcludeHeaders: false})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+	if !strings.Contains(textWithHeader, "Company Header") {
+		t.Error("Text without exclusion should contain header text")
+	}
+
+	// With exclusion, header text should be removed
+	textWithoutHeader, err := r.TextWithOptions(ExtractOptions{ExcludeHeaders: true})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+	if strings.Contains(textWithoutHeader, "Company Header") {
+		t.Error("Text with ExcludeHeaders=true should not contain header text")
+	}
+	if !strings.Contains(textWithoutHeader, "Main document content") {
+		t.Error("Text should still contain main content")
+	}
+}
+
+func TestReader_TextWithOptions_ExcludeFooters(t *testing.T) {
+	// Create a document where the body contains the same text as the footer
+	footerText := "Page 1 of 10"
+	bodyContent := `<w:p><w:r><w:t>Main document content</w:t></w:r></w:p>
+<w:p><w:r><w:t>Page 1 of 10</w:t></w:r></w:p>`
+
+	docxPath := createTestDOCXWithHeadersFooters(t, bodyContent, "Header", footerText)
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	// Without exclusion, footer text should appear
+	textWithFooter, err := r.TextWithOptions(ExtractOptions{ExcludeFooters: false})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+	if !strings.Contains(textWithFooter, "Page 1 of 10") {
+		t.Error("Text without exclusion should contain footer text")
+	}
+
+	// With exclusion, footer text should be removed
+	textWithoutFooter, err := r.TextWithOptions(ExtractOptions{ExcludeFooters: true})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+	if strings.Contains(textWithoutFooter, "Page 1 of 10") {
+		t.Error("Text with ExcludeFooters=true should not contain footer text")
+	}
+	if !strings.Contains(textWithoutFooter, "Main document content") {
+		t.Error("Text should still contain main content")
+	}
+}
+
+func TestReader_TextWithOptions_ExcludeBoth(t *testing.T) {
+	headerText := "Document Title"
+	footerText := "Confidential"
+	bodyContent := `<w:p><w:r><w:t>Document Title</w:t></w:r></w:p>
+<w:p><w:r><w:t>Important content here</w:t></w:r></w:p>
+<w:p><w:r><w:t>Confidential</w:t></w:r></w:p>`
+
+	docxPath := createTestDOCXWithHeadersFooters(t, bodyContent, headerText, footerText)
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	// Exclude both headers and footers
+	text, err := r.TextWithOptions(ExtractOptions{ExcludeHeaders: true, ExcludeFooters: true})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+
+	if strings.Contains(text, "Document Title") {
+		t.Error("Text should not contain header text")
+	}
+	if strings.Contains(text, "Confidential") {
+		t.Error("Text should not contain footer text")
+	}
+	if !strings.Contains(text, "Important content here") {
+		t.Error("Text should contain main content")
+	}
+}
+
+func TestReader_MarkdownWithOptions_ExcludeHeadersFooters(t *testing.T) {
+	headerText := "Report Header"
+	footerText := "Report Footer"
+	bodyContent := `<w:p><w:r><w:t>Report Header</w:t></w:r></w:p>
+<w:p><w:r><w:t>The main report content</w:t></w:r></w:p>
+<w:p><w:r><w:t>Report Footer</w:t></w:r></w:p>`
+
+	docxPath := createTestDOCXWithHeadersFooters(t, bodyContent, headerText, footerText)
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	// With exclusion
+	md, err := r.MarkdownWithOptions(ExtractOptions{ExcludeHeaders: true, ExcludeFooters: true})
+	if err != nil {
+		t.Fatalf("MarkdownWithOptions() error = %v", err)
+	}
+
+	if strings.Contains(md, "Report Header") {
+		t.Error("Markdown should not contain header text")
+	}
+	if strings.Contains(md, "Report Footer") {
+		t.Error("Markdown should not contain footer text")
+	}
+	if !strings.Contains(md, "The main report content") {
+		t.Error("Markdown should contain main content")
+	}
+}
+
+func TestReader_NoHeadersFooters(t *testing.T) {
+	// Test a document without headers/footers
+	content := `<w:p><w:r><w:t>Simple document</w:t></w:r></w:p>`
+	docxPath := createTestDOCX(t, content)
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	if r.HasHeaders() {
+		t.Error("HasHeaders() should return false for document without headers")
+	}
+	if r.HasFooters() {
+		t.Error("HasFooters() should return false for document without footers")
+	}
+
+	// TextWithOptions should still work
+	text, err := r.TextWithOptions(ExtractOptions{ExcludeHeaders: true, ExcludeFooters: true})
+	if err != nil {
+		t.Fatalf("TextWithOptions() error = %v", err)
+	}
+	if !strings.Contains(text, "Simple document") {
+		t.Error("Text should contain document content")
+	}
+}
