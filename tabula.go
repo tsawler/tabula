@@ -1,5 +1,5 @@
 // Package tabula provides a fluent API for extracting text, tables, and other
-// content from PDF and DOCX files.
+// content from PDF, DOCX, ODT, XLSX, PPTX, and HTML files.
 //
 // Basic usage:
 //
@@ -23,11 +23,19 @@
 //	    ExcludeFooters().
 //	    Text()
 //
+// HTML content can be parsed from a string (useful for web scraping):
+//
+//	text, _, err := tabula.FromHTMLString(htmlContent).Text()
+//
 // For advanced use cases, the lower-level reader package is also available.
 package tabula
 
 import (
+	"io"
+	"strings"
+
 	"github.com/tsawler/tabula/format"
+	"github.com/tsawler/tabula/htmldoc"
 	"github.com/tsawler/tabula/reader"
 )
 
@@ -73,6 +81,60 @@ func FromReader(r *reader.Reader) *Extractor {
 		readerOpened: true,
 		options:      defaultOptions(),
 	}
+}
+
+// FromHTMLReader creates an Extractor from an io.Reader containing HTML content.
+// This is useful when you have HTML content that was fetched from a remote source
+// (e.g., via HTTP) and want to extract text or convert it to markdown without
+// saving it to a file first.
+//
+// Example:
+//
+//	resp, err := http.Get("https://example.com/page")
+//	if err != nil {
+//	    // handle error
+//	}
+//	defer resp.Body.Close()
+//	text, warnings, err := tabula.FromHTMLReader(resp.Body).Text()
+func FromHTMLReader(r io.Reader) *Extractor {
+	htmlReader, err := htmldoc.OpenReader(r)
+	if err != nil {
+		return &Extractor{
+			format:  format.HTML,
+			options: defaultOptions(),
+			err:     err,
+		}
+	}
+	return &Extractor{
+		htmlReader:   htmlReader,
+		format:       format.HTML,
+		ownsReader:   true,
+		readerOpened: true,
+		options:      defaultOptions(),
+	}
+}
+
+// FromHTMLString creates an Extractor from a string containing HTML content.
+// This is useful when you have HTML content as a string (e.g., fetched from a
+// web API or embedded in your application) and want to extract text or convert
+// it to markdown.
+//
+// Example:
+//
+//	html := `<html><body><h1>Hello</h1><p>World</p></body></html>`
+//	text, warnings, err := tabula.FromHTMLString(html).Text()
+//
+// For web scraping:
+//
+//	resp, err := http.Get("https://example.com/page")
+//	if err != nil {
+//	    // handle error
+//	}
+//	body, _ := io.ReadAll(resp.Body)
+//	resp.Body.Close()
+//	text, _, _ := tabula.FromHTMLString(string(body)).Text()
+func FromHTMLString(html string) *Extractor {
+	return FromHTMLReader(strings.NewReader(html))
 }
 
 // Must is a helper that wraps a call to a function returning (T, error)

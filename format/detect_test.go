@@ -15,6 +15,7 @@ func TestFormat_String(t *testing.T) {
 		{ODT, "ODT"},
 		{XLSX, "XLSX"},
 		{PPTX, "PPTX"},
+		{HTML, "HTML"},
 		{Unknown, "Unknown"},
 		{Format(99), "Unknown"},
 	}
@@ -36,6 +37,7 @@ func TestFormat_Extension(t *testing.T) {
 		{ODT, ".odt"},
 		{XLSX, ".xlsx"},
 		{PPTX, ".pptx"},
+		{HTML, ".html"},
 		{Unknown, ""},
 	}
 
@@ -66,8 +68,12 @@ func TestDetect(t *testing.T) {
 		{"document.pptx", PPTX},
 		{"document.PPTX", PPTX},
 		{"document.Pptx", PPTX},
+		{"document.html", HTML},
+		{"document.HTML", HTML},
+		{"document.Html", HTML},
+		{"document.htm", HTML},
+		{"document.HTM", HTML},
 		{"document.txt", Unknown},
-		{"document.html", Unknown},
 		{"document", Unknown},
 		{"", Unknown},
 		{"/path/to/file.pdf", PDF},
@@ -75,6 +81,7 @@ func TestDetect(t *testing.T) {
 		{"/path/to/file.odt", ODT},
 		{"/path/to/file.xlsx", XLSX},
 		{"/path/to/file.pptx", PPTX},
+		{"/path/to/file.html", HTML},
 	}
 
 	for _, tt := range tests {
@@ -104,6 +111,21 @@ func TestDetectFromMagic(t *testing.T) {
 			name: "ZIP magic bytes (DOCX/XLSX/PPTX)",
 			data: []byte{0x50, 0x4B, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00},
 			want: Unknown, // ZIP needs further inspection
+		},
+		{
+			name: "HTML with DOCTYPE",
+			data: []byte("<!DOCTYPE html>\n<html>"),
+			want: HTML,
+		},
+		{
+			name: "HTML with html tag",
+			data: []byte("<html><head>"),
+			want: HTML,
+		},
+		{
+			name: "HTML with whitespace before DOCTYPE",
+			data: []byte("  \n  <!DOCTYPE HTML PUBLIC"),
+			want: HTML,
 		},
 		{
 			name: "empty data",
@@ -147,6 +169,20 @@ func TestDetectFromReader_PDF(t *testing.T) {
 	}
 	if format != PDF {
 		t.Errorf("DetectFromReader() = %v, want PDF", format)
+	}
+}
+
+func TestDetectFromReader_HTML(t *testing.T) {
+	// Create minimal HTML data
+	data := []byte("<!DOCTYPE html>\n<html><head><title>Test</title></head><body></body></html>")
+	r := bytes.NewReader(data)
+
+	format, err := DetectFromReader(r, int64(len(data)))
+	if err != nil {
+		t.Fatalf("DetectFromReader() error = %v", err)
+	}
+	if format != HTML {
+		t.Errorf("DetectFromReader() = %v, want HTML", format)
 	}
 }
 
