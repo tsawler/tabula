@@ -8,19 +8,20 @@ import (
 	"strings"
 )
 
-// XRefEntryType represents the type of an XRef entry
+// XRefEntryType identifies the type of a cross-reference table entry.
 type XRefEntryType int
 
+// XRef entry type constants.
 const (
-	// XRefEntryFree indicates a free (deleted) object entry
+	// XRefEntryFree indicates a free (deleted) object entry.
 	XRefEntryFree XRefEntryType = 0
-	// XRefEntryUncompressed indicates an in-use object at a byte offset in the file
+	// XRefEntryUncompressed indicates an in-use object at a byte offset in the file.
 	XRefEntryUncompressed XRefEntryType = 1
-	// XRefEntryCompressed indicates an object stored in an object stream (PDF 1.5+)
+	// XRefEntryCompressed indicates an object stored in an object stream (PDF 1.5+).
 	XRefEntryCompressed XRefEntryType = 2
 )
 
-// String returns a human-readable representation of the entry type
+// String returns a human-readable name for the entry type.
 func (t XRefEntryType) String() string {
 	switch t {
 	case XRefEntryFree:
@@ -34,22 +35,25 @@ func (t XRefEntryType) String() string {
 	}
 }
 
-// XRefEntry represents a single cross-reference table entry
+// XRefEntry represents a single entry in the cross-reference table,
+// describing where an object is located in the PDF file.
 type XRefEntry struct {
 	Type       XRefEntryType // Entry type (free, uncompressed, or compressed)
 	Offset     int64         // Byte offset (uncompressed) or object stream number (compressed)
 	Generation int           // Generation number (uncompressed) or index within object stream (compressed)
-	InUse      bool          // true if object is in use (Type != XRefEntryFree)
+	InUse      bool          // True if object is in use (Type != XRefEntryFree)
 }
 
-// XRefTable represents a PDF cross-reference table
+// XRefTable represents a PDF cross-reference table, which maps object numbers
+// to their locations in the file. It includes the trailer dictionary containing
+// document-level information.
 type XRefTable struct {
-	Entries  map[int]*XRefEntry // Map from object number to XRef entry
-	Trailer  Dict               // Trailer dictionary
-	IsStream bool               // true if this XRef came from a stream (PDF 1.5+)
+	Entries  map[int]*XRefEntry // Map from object number to entry
+	Trailer  Dict               // Trailer dictionary with /Root, /Info, /Size, etc.
+	IsStream bool               // True if this XRef came from a stream (PDF 1.5+)
 }
 
-// NewXRefTable creates a new empty XRef table
+// NewXRefTable creates a new empty cross-reference table.
 func NewXRefTable() *XRefTable {
 	return &XRefTable{
 		Entries: make(map[int]*XRefEntry),
@@ -57,37 +61,39 @@ func NewXRefTable() *XRefTable {
 	}
 }
 
-// Get retrieves an XRef entry by object number
+// Get returns the entry for the given object number and a boolean indicating
+// whether the entry exists.
 func (x *XRefTable) Get(objNum int) (*XRefEntry, bool) {
 	entry, ok := x.Entries[objNum]
 	return entry, ok
 }
 
-// Set adds or updates an XRef entry
+// Set adds or updates an entry for the given object number.
 func (x *XRefTable) Set(objNum int, entry *XRefEntry) {
 	x.Entries[objNum] = entry
 }
 
-// Size returns the number of entries in the table
+// Size returns the number of entries in the table.
 func (x *XRefTable) Size() int {
 	return len(x.Entries)
 }
 
-// XRefParser parses PDF cross-reference tables
+// XRefParser parses PDF cross-reference tables from a seekable reader.
+// It supports both traditional xref tables (PDF 1.0-1.4) and xref streams (PDF 1.5+).
 type XRefParser struct {
 	reader   io.ReadSeeker
 	startPos int64 // Starting position for current parse
 }
 
-// NewXRefParser creates a new XRef parser
+// NewXRefParser creates a new XRef parser for the given reader.
 func NewXRefParser(r io.ReadSeeker) *XRefParser {
 	return &XRefParser{
 		reader: r,
 	}
 }
 
-// FindXRef finds the byte offset of the XRef table by scanning from EOF
-// PDFs end with "startxref\n<offset>\n%%EOF"
+// FindXRef finds the byte offset of the xref table by scanning from EOF.
+// PDF files end with "startxref\n<offset>\n%%EOF", where offset points to the xref.
 func (x *XRefParser) FindXRef() (int64, error) {
 	// Seek to end to get file size
 	fileSize, err := x.reader.Seek(0, io.SeekEnd)
@@ -137,8 +143,9 @@ func (x *XRefParser) FindXRef() (int64, error) {
 	return offset, nil
 }
 
-// ParseXRef parses the XRef table at the given byte offset
-// Handles both traditional XRef tables (PDF 1.0-1.4) and XRef streams (PDF 1.5+)
+// ParseXRef parses the xref table at the given byte offset.
+// It auto-detects and handles both traditional xref tables (PDF 1.0-1.4)
+// and xref streams (PDF 1.5+).
 func (x *XRefParser) ParseXRef(offset int64) (*XRefTable, error) {
 	// Seek to the XRef table
 	_, err := x.reader.Seek(offset, io.SeekStart)
@@ -166,7 +173,9 @@ func (x *XRefParser) ParseXRef(offset int64) (*XRefTable, error) {
 	return x.parseTraditionalXRef()
 }
 
-// isXRefStream checks if the XRef at current position is a stream (PDF 1.5+) vs traditional table
+// isXRefStream checks if the xref at the current position is a stream (PDF 1.5+)
+// rather than a traditional table. Traditional tables start with "xref", while
+// streams start with an object definition like "5 0 obj".
 func (x *XRefParser) isXRefStream() (bool, error) {
 	scanner := bufio.NewScanner(x.reader)
 	if !scanner.Scan() {
@@ -189,7 +198,8 @@ func (x *XRefParser) isXRefStream() (bool, error) {
 	return false, fmt.Errorf("unrecognized xref format: %s", line)
 }
 
-// parseTraditionalXRef parses a traditional XRef table (PDF 1.0-1.4)
+// parseTraditionalXRef parses a traditional xref table (PDF 1.0-1.4).
+// The format is: "xref\n<subsections>\ntrailer\n<dict>\nstartxref\n<offset>\n%%EOF"
 func (x *XRefParser) parseTraditionalXRef() (*XRefTable, error) {
 	scanner := bufio.NewScanner(x.reader)
 
@@ -269,7 +279,8 @@ func (x *XRefParser) parseTraditionalXRef() (*XRefTable, error) {
 	return table, nil
 }
 
-// parseXRefStream parses an XRef stream (PDF 1.5+)
+// parseXRefStream parses an xref stream (PDF 1.5+).
+// XRef streams store cross-reference data in a compressed stream object.
 func (x *XRefParser) parseXRefStream() (*XRefTable, error) {
 	// Parse the entire indirect object "num gen obj << ... >> stream ... endstream endobj"
 	// Don't use Scanner here - it buffers ahead and corrupts the reader position
@@ -379,8 +390,9 @@ func (x *XRefParser) parseXRefStream() (*XRefTable, error) {
 	return table, nil
 }
 
-// parseXRefStreamEntry parses a single entry from XRef stream binary data
-// Returns the entry, number of bytes consumed, and error
+// parseXRefStreamEntry parses a single entry from xref stream binary data.
+// The w array specifies the byte widths of the three fields (type, field1, field2).
+// Returns the entry, number of bytes consumed, and any error.
 func (x *XRefParser) parseXRefStreamEntry(data []byte, w []int) (*XRefEntry, int, error) {
 	totalWidth := w[0] + w[1] + w[2]
 	if len(data) < totalWidth {
@@ -436,7 +448,7 @@ func (x *XRefParser) parseXRefStreamEntry(data []byte, w []int) (*XRefEntry, int
 	return entry, totalWidth, nil
 }
 
-// readBigEndianInt reads a big-endian integer from data
+// readBigEndianInt reads a big-endian integer of the specified byte width from data.
 func readBigEndianInt(data []byte, width int) int64 {
 	if width == 0 {
 		return 0
@@ -452,11 +464,11 @@ func readBigEndianInt(data []byte, width int) int64 {
 	return result
 }
 
-// parseEntry parses a single XRef entry line
-// Format: "nnnnnnnnnn ggggg n" or "nnnnnnnnnn ggggg f"
-// nnnnnnnnnn = 10-digit offset
-// ggggg = 5-digit generation number
-// n/f = in-use flag (n = in use, f = free)
+// parseEntry parses a single traditional xref entry line.
+// Format: "nnnnnnnnnn ggggg n" or "nnnnnnnnnn ggggg f", where:
+//   - nnnnnnnnnn = 10-digit byte offset
+//   - ggggg = 5-digit generation number
+//   - n/f = in-use flag (n = in use, f = free)
 func (x *XRefParser) parseEntry(line string) (*XRefEntry, error) {
 	// XRef entries are exactly 20 bytes: "nnnnnnnnnn ggggg n \n"
 	// But we might have trailing whitespace, so let's be flexible
@@ -504,7 +516,7 @@ func (x *XRefParser) parseEntry(line string) (*XRefEntry, error) {
 	}, nil
 }
 
-// parseTrailer parses the trailer dictionary after the "trailer" keyword
+// parseTrailer parses the trailer dictionary after the "trailer" keyword.
 func (x *XRefParser) parseTrailer(scanner *bufio.Scanner) (Dict, error) {
 	// Collect all remaining lines until we find a dictionary
 	var dictText strings.Builder
@@ -536,7 +548,8 @@ func (x *XRefParser) parseTrailer(scanner *bufio.Scanner) (Dict, error) {
 	return dict, nil
 }
 
-// ParseXRefFromEOF finds and parses the XRef table by scanning from EOF
+// ParseXRefFromEOF locates and parses the xref table by scanning from the end
+// of the file to find the startxref offset.
 func (x *XRefParser) ParseXRefFromEOF() (*XRefTable, error) {
 	offset, err := x.FindXRef()
 	if err != nil {
@@ -551,8 +564,9 @@ func (x *XRefParser) ParseXRefFromEOF() (*XRefTable, error) {
 	return table, nil
 }
 
-// ParsePrevXRef checks if the trailer has a /Prev entry and parses that XRef table
-// This handles incremental updates in PDFs
+// ParsePrevXRef checks if the trailer has a /Prev entry and parses that xref table.
+// This handles incremental updates in PDFs, where each update adds a new xref
+// table that points to the previous one.
 func (x *XRefParser) ParsePrevXRef(table *XRefTable) (*XRefTable, error) {
 	prevObj := table.Trailer.Get("Prev")
 	if prevObj == nil {
@@ -573,8 +587,9 @@ func (x *XRefParser) ParsePrevXRef(table *XRefTable) (*XRefTable, error) {
 	return prevTable, nil
 }
 
-// MergeXRefTables merges multiple XRef tables (from incremental updates)
-// Later entries override earlier ones
+// MergeXRefTables merges multiple xref tables from incremental updates.
+// Tables should be provided in chronological order (oldest first); later entries
+// override earlier ones for the same object number.
 func MergeXRefTables(tables ...*XRefTable) *XRefTable {
 	if len(tables) == 0 {
 		return NewXRefTable()
@@ -595,8 +610,8 @@ func MergeXRefTables(tables ...*XRefTable) *XRefTable {
 	return merged
 }
 
-// ParseAllXRefs parses the main XRef table and all previous ones (incremental updates)
-// Returns them in order from oldest to newest
+// ParseAllXRefs parses the main xref table and all previous ones from incremental
+// updates, following /Prev links. Returns tables in chronological order (oldest first).
 func (x *XRefParser) ParseAllXRefs() ([]*XRefTable, error) {
 	// Parse main XRef
 	mainTable, err := x.ParseXRefFromEOF()
