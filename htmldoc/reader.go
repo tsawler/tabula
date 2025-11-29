@@ -18,7 +18,10 @@ type Reader struct {
 	doc      *html.Node
 	title    string
 	metadata map[string]string
-	elements []parsedElement
+	elements []parsedElement // elements with no exclusion (NavigationExclusionNone)
+
+	// Cache for filtered elements by mode
+	filteredCache map[NavigationExclusionMode][]parsedElement
 }
 
 // Open opens an HTML file for reading.
@@ -40,9 +43,10 @@ func OpenReader(r io.Reader) (*Reader, error) {
 	}
 
 	reader := &Reader{
-		doc:      doc,
-		metadata: make(map[string]string),
-		elements: make([]parsedElement, 0),
+		doc:           doc,
+		metadata:      make(map[string]string),
+		elements:      make([]parsedElement, 0),
+		filteredCache: make(map[NavigationExclusionMode][]parsedElement),
 	}
 
 	// Extract title and metadata from head
@@ -94,37 +98,72 @@ func (r *Reader) extractHead(n *html.Node) {
 
 // extractBody extracts content from the body element.
 func (r *Reader) extractBody(n *html.Node) {
+	r.elements = r.extractBodyWithMode(n, NavigationExclusionNone)
+}
+
+// extractBodyWithMode extracts content with the specified navigation exclusion mode.
+func (r *Reader) extractBodyWithMode(n *html.Node, mode NavigationExclusionMode) []parsedElement {
 	body := findElement(n, "body")
 	if body == nil {
 		// No body tag, try to extract from root
 		body = n
 	}
 
-	ctx := &parseContext{
-		inList:       false,
-		listOrdered:  false,
-		listLevel:    0,
-		listItems:    nil,
+	// Create exclusion checker
+	var checker *exclusionChecker
+	if mode != NavigationExclusionNone {
+		checker = newExclusionChecker(mode, n)
 	}
 
-	r.traverseNode(body, ctx)
+	ctx := &parseContext{
+		inList:      false,
+		listOrdered: false,
+		listLevel:   0,
+		listItems:   nil,
+		checker:     checker,
+	}
+
+	elements := make([]parsedElement, 0)
+	r.traverseNodeFiltered(body, ctx, &elements)
 
 	// Flush any remaining list
 	if ctx.inList && len(ctx.listItems) > 0 {
-		r.elements = append(r.elements, parsedElement{
+		elements = append(elements, parsedElement{
 			Type:    ElementList,
 			Items:   ctx.listItems,
 			Ordered: ctx.listOrdered,
 		})
 	}
+
+	return elements
+}
+
+// getElements returns elements filtered by the specified mode.
+// Results are cached for efficiency.
+func (r *Reader) getElements(mode NavigationExclusionMode) []parsedElement {
+	// NavigationExclusionNone uses the pre-parsed elements
+	if mode == NavigationExclusionNone {
+		return r.elements
+	}
+
+	// Check cache
+	if cached, ok := r.filteredCache[mode]; ok {
+		return cached
+	}
+
+	// Parse with the specified mode
+	elements := r.extractBodyWithMode(r.doc, mode)
+	r.filteredCache[mode] = elements
+	return elements
 }
 
 // parseContext tracks the current parsing state.
 type parseContext struct {
-	inList       bool
-	listOrdered  bool
-	listLevel    int
-	listItems    []listItem
+	inList      bool
+	listOrdered bool
+	listLevel   int
+	listItems   []listItem
+	checker     *exclusionChecker // nil means no exclusion filtering
 }
 
 // traverseNode recursively processes DOM nodes.
@@ -321,6 +360,206 @@ func (r *Reader) traverseNode(n *html.Node, ctx *parseContext) {
 	}
 }
 
+// traverseNodeFiltered recursively processes DOM nodes with exclusion filtering.
+// Results are appended to the elements slice.
+func (r *Reader) traverseNodeFiltered(n *html.Node, ctx *parseContext, elements *[]parsedElement) {
+	if n.Type == html.ElementNode {
+		// Skip non-content elements
+		if shouldSkipElement(n.Data) {
+			return
+		}
+
+		// Check exclusion filter
+		if ctx.checker != nil && ctx.checker.shouldExclude(n) {
+			return
+		}
+
+		switch n.Data {
+		case "h1", "h2", "h3", "h4", "h5", "h6":
+			// Flush list before heading
+			if ctx.inList && len(ctx.listItems) > 0 {
+				*elements = append(*elements, parsedElement{
+					Type:    ElementList,
+					Items:   ctx.listItems,
+					Ordered: ctx.listOrdered,
+				})
+				ctx.inList = false
+				ctx.listItems = nil
+			}
+
+			level := int(n.Data[1] - '0')
+			text := strings.TrimSpace(getTextContent(n))
+			if text != "" {
+				*elements = append(*elements, parsedElement{
+					Type:  ElementHeading,
+					Text:  text,
+					Level: level,
+				})
+			}
+			return
+
+		case "p", "div":
+			// Flush list before paragraph
+			if ctx.inList && len(ctx.listItems) > 0 && n.Data == "p" {
+				*elements = append(*elements, parsedElement{
+					Type:    ElementList,
+					Items:   ctx.listItems,
+					Ordered: ctx.listOrdered,
+				})
+				ctx.inList = false
+				ctx.listItems = nil
+			}
+
+			text := strings.TrimSpace(getTextContent(n))
+			if text != "" && !isBlockContainer(n) {
+				*elements = append(*elements, parsedElement{
+					Type: ElementParagraph,
+					Text: text,
+				})
+				return
+			}
+			// If it's a block container (div with children), traverse children
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				r.traverseNodeFiltered(c, ctx, elements)
+			}
+			return
+
+		case "ul", "ol":
+			// Flush previous list if different type or top-level
+			if ctx.inList && ctx.listLevel == 0 && len(ctx.listItems) > 0 {
+				*elements = append(*elements, parsedElement{
+					Type:    ElementList,
+					Items:   ctx.listItems,
+					Ordered: ctx.listOrdered,
+				})
+				ctx.listItems = nil
+			}
+
+			prevInList := ctx.inList
+			prevOrdered := ctx.listOrdered
+			prevLevel := ctx.listLevel
+
+			ctx.inList = true
+			ctx.listOrdered = n.Data == "ol"
+			if !prevInList {
+				ctx.listItems = make([]listItem, 0)
+				ctx.listLevel = 0
+			}
+
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				r.traverseNodeFiltered(c, ctx, elements)
+			}
+
+			if !prevInList {
+				// Flush the list we just built
+				if len(ctx.listItems) > 0 {
+					*elements = append(*elements, parsedElement{
+						Type:    ElementList,
+						Items:   ctx.listItems,
+						Ordered: ctx.listOrdered,
+					})
+				}
+				ctx.inList = false
+				ctx.listItems = nil
+			}
+
+			ctx.listOrdered = prevOrdered
+			ctx.listLevel = prevLevel
+			return
+
+		case "li":
+			if ctx.inList {
+				// Get direct text content, not nested lists
+				text := getDirectTextContent(n)
+				if text != "" {
+					ctx.listItems = append(ctx.listItems, listItem{
+						Text:  text,
+						Level: ctx.listLevel,
+					})
+				}
+				// Check for nested lists
+				ctx.listLevel++
+				for c := n.FirstChild; c != nil; c = c.NextSibling {
+					if c.Type == html.ElementNode && (c.Data == "ul" || c.Data == "ol") {
+						r.traverseNodeFiltered(c, ctx, elements)
+					}
+				}
+				ctx.listLevel--
+			}
+			return
+
+		case "table":
+			// Flush list before table
+			if ctx.inList && len(ctx.listItems) > 0 {
+				*elements = append(*elements, parsedElement{
+					Type:    ElementList,
+					Items:   ctx.listItems,
+					Ordered: ctx.listOrdered,
+				})
+				ctx.inList = false
+				ctx.listItems = nil
+			}
+
+			table := r.parseTable(n)
+			if table != nil && len(table.Rows) > 0 {
+				*elements = append(*elements, parsedElement{
+					Type:  ElementTable,
+					Table: table,
+				})
+			}
+			return
+
+		case "pre", "code":
+			text := getTextContent(n)
+			if text != "" {
+				*elements = append(*elements, parsedElement{
+					Type:   ElementCode,
+					Text:   text,
+					IsCode: true,
+				})
+			}
+			return
+
+		case "blockquote":
+			text := strings.TrimSpace(getTextContent(n))
+			if text != "" {
+				*elements = append(*elements, parsedElement{
+					Type: ElementBlockquote,
+					Text: text,
+				})
+			}
+			return
+
+		case "a":
+			// Links are handled inline in text extraction
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				r.traverseNodeFiltered(c, ctx, elements)
+			}
+			return
+
+		case "br":
+			// Line breaks handled in text extraction
+			return
+
+		case "hr":
+			// Horizontal rules - could be handled as separators
+			return
+
+		case "article", "section", "main", "header", "footer", "nav", "aside":
+			// Semantic containers - traverse children (exclusion already checked above)
+			for c := n.FirstChild; c != nil; c = c.NextSibling {
+				r.traverseNodeFiltered(c, ctx, elements)
+			}
+			return
+		}
+	}
+
+	// Default: traverse children
+	for c := n.FirstChild; c != nil; c = c.NextSibling {
+		r.traverseNodeFiltered(c, ctx, elements)
+	}
+}
+
 // parseTable extracts a table from an HTML table element.
 func (r *Reader) parseTable(tableNode *html.Node) *ParsedTable {
 	table := &ParsedTable{
@@ -416,7 +655,8 @@ func isBlockContainer(n *html.Node) bool {
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
 		if c.Type == html.ElementNode {
 			switch c.Data {
-			case "div", "p", "ul", "ol", "table", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre", "article", "section":
+			case "div", "p", "ul", "ol", "table", "h1", "h2", "h3", "h4", "h5", "h6", "blockquote", "pre",
+				"article", "section", "main", "header", "footer", "nav", "aside":
 				return true
 			}
 		}
@@ -496,23 +736,35 @@ func (r *Reader) PageCount() (int, error) {
 
 // ExtractOptions holds options for text extraction.
 type ExtractOptions struct {
-	IncludeLinks      bool // Preserve link URLs in output
-	IncludeMetadata   bool // Include meta tags
-	StripNavigation   bool // Skip <nav>, <header>, <footer> elements (not yet implemented)
-	ExcludeHeaders    bool // Exclude headers (not applicable for HTML)
-	ExcludeFooters    bool // Exclude footers (not applicable for HTML)
+	IncludeLinks    bool // Preserve link URLs in output
+	IncludeMetadata bool // Include meta tags
+	ExcludeHeaders  bool // Exclude headers (not applicable for HTML)
+	ExcludeFooters  bool // Exclude footers (not applicable for HTML)
+
+	// NavigationExclusion controls filtering of navigation, headers, footers, and sidebars.
+	// Default: NavigationExclusionStandard (filters semantic elements and common class/id patterns)
+	NavigationExclusion NavigationExclusionMode
+}
+
+// DefaultExtractOptions returns extract options with sensible defaults.
+func DefaultExtractOptions() ExtractOptions {
+	return ExtractOptions{
+		NavigationExclusion: NavigationExclusionStandard,
+	}
 }
 
 // Text extracts and returns all text content from the HTML document.
+// Uses default options which include NavigationExclusionStandard.
 func (r *Reader) Text() (string, error) {
-	return r.TextWithOptions(ExtractOptions{})
+	return r.TextWithOptions(DefaultExtractOptions())
 }
 
 // TextWithOptions extracts text content with the specified options.
 func (r *Reader) TextWithOptions(opts ExtractOptions) (string, error) {
 	var result strings.Builder
 
-	for _, elem := range r.elements {
+	elements := r.getElements(opts.NavigationExclusion)
+	for _, elem := range elements {
 		switch elem.Type {
 		case ElementHeading:
 			if result.Len() > 0 {
@@ -575,15 +827,17 @@ func (r *Reader) TextWithOptions(opts ExtractOptions) (string, error) {
 }
 
 // Markdown returns the HTML content as Markdown.
+// Uses default options which include NavigationExclusionStandard.
 func (r *Reader) Markdown() (string, error) {
-	return r.MarkdownWithOptions(ExtractOptions{})
+	return r.MarkdownWithOptions(DefaultExtractOptions())
 }
 
 // MarkdownWithOptions returns HTML content as Markdown with options.
 func (r *Reader) MarkdownWithOptions(opts ExtractOptions) (string, error) {
 	var result strings.Builder
 
-	for _, elem := range r.elements {
+	elements := r.getElements(opts.NavigationExclusion)
+	for _, elem := range elements {
 		switch elem.Type {
 		case ElementHeading:
 			if result.Len() > 0 {
@@ -678,8 +932,9 @@ func (r *Reader) MarkdownWithRAGOptions(extractOpts ExtractOptions, mdOpts rag.M
 
 	// Add table of contents if requested
 	if mdOpts.IncludeTableOfContents {
+		elements := r.getElements(extractOpts.NavigationExclusion)
 		headings := make([]parsedElement, 0)
-		for _, elem := range r.elements {
+		for _, elem := range elements {
 			if elem.Type == ElementHeading {
 				headings = append(headings, elem)
 			}
@@ -727,7 +982,13 @@ func (r *Reader) Metadata() model.Metadata {
 }
 
 // Document returns a model.Document representation of the HTML content.
+// Uses default options which include NavigationExclusionStandard.
 func (r *Reader) Document() (*model.Document, error) {
+	return r.DocumentWithOptions(DefaultExtractOptions())
+}
+
+// DocumentWithOptions returns a model.Document with the specified extraction options.
+func (r *Reader) DocumentWithOptions(opts ExtractOptions) (*model.Document, error) {
 	doc := model.NewDocument()
 
 	// Set metadata
@@ -751,7 +1012,8 @@ func (r *Reader) Document() (*model.Document, error) {
 
 	yPos := 750.0
 
-	for _, elem := range r.elements {
+	elements := r.getElements(opts.NavigationExclusion)
+	for _, elem := range elements {
 		switch elem.Type {
 		case ElementHeading:
 			heading := &model.Heading{

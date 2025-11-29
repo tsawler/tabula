@@ -26,6 +26,31 @@ const (
 	ElementLink
 )
 
+// NavigationExclusionMode controls how navigation, headers, and footers are filtered.
+type NavigationExclusionMode int
+
+const (
+	// NavigationExclusionNone includes all content without filtering.
+	NavigationExclusionNone NavigationExclusionMode = iota
+
+	// NavigationExclusionExplicit skips only explicit semantic HTML5 elements:
+	// <nav>, <aside>, and ARIA roles (role="navigation", role="complementary").
+	// <header> and <footer> are only skipped when they are direct children of <body>
+	// or a single top-level wrapper element.
+	NavigationExclusionExplicit
+
+	// NavigationExclusionStandard (default) combines explicit element detection with
+	// common class/id pattern matching. This catches navigation and boilerplate content
+	// even when sites don't use semantic HTML5 elements.
+	// Patterns matched include: nav, navbar, navigation, menu, footer, sidebar, etc.
+	NavigationExclusionStandard
+
+	// NavigationExclusionAggressive adds link-density heuristics to standard detection.
+	// Sections with very high link-to-text ratios are excluded. This may occasionally
+	// exclude legitimate content like link-heavy documentation or "related articles" sections.
+	NavigationExclusionAggressive
+)
+
 // listItem represents an item in a list.
 type listItem struct {
 	Text  string
