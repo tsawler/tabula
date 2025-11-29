@@ -6,12 +6,12 @@
 
 # Tabula
 
-A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval-Augmented Generation) workflows. Supports PDF, DOCX, ODT, and XLSX files.
+A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval-Augmented Generation) workflows. Supports PDF, DOCX, ODT, XLSX, and PPTX files.
 
 ## Features
 
 - **Fluent API** - Chain methods for clean, readable code
-- **Multi-Format Support** - PDF (.pdf), Word (.docx), OpenDocument (.odt), and Excel (.xlsx) files
+- **Multi-Format Support** - PDF (.pdf), Word (.docx), OpenDocument (.odt), Excel (.xlsx), and PowerPoint (.pptx) files
 - **Layout Analysis** - Detect headings, paragraphs, lists, and tables
 - **Header/Footer Detection** - Automatically identify and exclude repeating content
 - **RAG-Ready Chunking** - Semantic document chunking with metadata
@@ -40,11 +40,12 @@ import (
 )
 
 func main() {
-    // Works with PDF, DOCX, ODT, and XLSX files
+    // Works with PDF, DOCX, ODT, XLSX, and PPTX files
     text, warnings, err := tabula.Open("document.pdf").Text()
     // text, warnings, err := tabula.Open("document.docx").Text()
     // text, warnings, err := tabula.Open("document.odt").Text()
     // text, warnings, err := tabula.Open("spreadsheet.xlsx").Text()
+    // text, warnings, err := tabula.Open("presentation.pptx").Text()
     if err != nil {
         log.Fatal(err)
     }
@@ -67,13 +68,18 @@ text, warnings, err := tabula.Open("document.pdf").
     JoinParagraphs().            // Join text into paragraphs (PDF only)
     Text()
 
-// DOCX/ODT/XLSX with header/footer exclusion
+// DOCX/ODT/XLSX/PPTX with header/footer exclusion
 text, warnings, err := tabula.Open("document.docx").
     ExcludeHeadersAndFooters().  // Remove headers/footers
     Text()
 
 // XLSX (each sheet extracted as tab-separated values)
 text, warnings, err := tabula.Open("spreadsheet.xlsx").Text()
+
+// PPTX (each slide extracted with title and content)
+text, warnings, err := tabula.Open("presentation.pptx").
+    ExcludeHeadersAndFooters().  // Remove slide footers and numbers
+    Text()
 ```
 
 ### Extract as Markdown
@@ -96,6 +102,11 @@ markdown, warnings, err := tabula.Open("document.odt").
 
 // XLSX (each sheet as a markdown table)
 markdown, warnings, err := tabula.Open("spreadsheet.xlsx").ToMarkdown()
+
+// PPTX (each slide with title as heading, content, and tables)
+markdown, warnings, err := tabula.Open("presentation.pptx").
+    ExcludeHeadersAndFooters().
+    ToMarkdown()
 ```
 
 ### RAG Chunking
@@ -111,11 +122,12 @@ import (
 )
 
 func main() {
-    // Works with PDF, DOCX, ODT, and XLSX
+    // Works with PDF, DOCX, ODT, XLSX, and PPTX
     chunks, warnings, err := tabula.Open("document.pdf").Chunks()
     // chunks, warnings, err := tabula.Open("document.docx").Chunks()
     // chunks, warnings, err := tabula.Open("document.odt").Chunks()
     // chunks, warnings, err := tabula.Open("spreadsheet.xlsx").Chunks()
+    // chunks, warnings, err := tabula.Open("presentation.pptx").Chunks()
     if err != nil {
         log.Fatal(err)
     }
@@ -168,6 +180,7 @@ ext := tabula.Open("document.pdf")
 ext := tabula.Open("document.docx")
 ext := tabula.Open("document.odt")
 ext := tabula.Open("spreadsheet.xlsx")
+ext := tabula.Open("presentation.pptx")
 
 // From existing PDF reader (PDF only)
 r, _ := reader.Open("document.pdf")
@@ -180,9 +193,9 @@ ext := tabula.FromReader(r)
 |--------|-------------|---------|
 | `Pages(1, 2, 3)` | Extract specific pages (1-indexed) | PDF |
 | `PageRange(1, 10)` | Extract page range (inclusive) | PDF |
-| `ExcludeHeaders()` | Exclude detected headers | PDF, DOCX, ODT, XLSX |
-| `ExcludeFooters()` | Exclude detected footers | PDF, DOCX, ODT, XLSX |
-| `ExcludeHeadersAndFooters()` | Exclude both | PDF, DOCX, ODT, XLSX |
+| `ExcludeHeaders()` | Exclude detected headers | PDF, DOCX, ODT, XLSX, PPTX |
+| `ExcludeFooters()` | Exclude detected footers | PDF, DOCX, ODT, XLSX, PPTX |
+| `ExcludeHeadersAndFooters()` | Exclude both | PDF, DOCX, ODT, XLSX, PPTX |
 | `JoinParagraphs()` | Join text fragments into paragraphs | PDF |
 | `ByColumn()` | Process multi-column layouts column by column | PDF |
 | `PreserveLayout()` | Maintain spatial positioning | PDF |
@@ -191,13 +204,13 @@ ext := tabula.FromReader(r)
 
 | Method | Returns | Description | Formats |
 |--------|---------|-------------|---------|
-| `Text()` | `string` | Plain text content | PDF, DOCX, ODT, XLSX |
-| `ToMarkdown()` | `string` | Markdown-formatted content | PDF, DOCX, ODT, XLSX |
-| `ToMarkdownWithOptions(opts)` | `string` | Markdown with custom options | PDF, DOCX, ODT, XLSX |
-| `Document()` | `*model.Document` | Full document structure | PDF, DOCX, ODT, XLSX |
-| `Chunks()` | `*rag.ChunkCollection` | Semantic chunks for RAG | PDF, DOCX, ODT, XLSX |
-| `ChunksWithConfig(config, sizeConfig)` | `*rag.ChunkCollection` | Chunks with custom sizing | PDF, DOCX, ODT, XLSX |
-| `PageCount()` | `int` | Number of pages (sheets for XLSX) | PDF, DOCX, ODT, XLSX |
+| `Text()` | `string` | Plain text content | PDF, DOCX, ODT, XLSX, PPTX |
+| `ToMarkdown()` | `string` | Markdown-formatted content | PDF, DOCX, ODT, XLSX, PPTX |
+| `ToMarkdownWithOptions(opts)` | `string` | Markdown with custom options | PDF, DOCX, ODT, XLSX, PPTX |
+| `Document()` | `*model.Document` | Full document structure | PDF, DOCX, ODT, XLSX, PPTX |
+| `Chunks()` | `*rag.ChunkCollection` | Semantic chunks for RAG | PDF, DOCX, ODT, XLSX, PPTX |
+| `ChunksWithConfig(config, sizeConfig)` | `*rag.ChunkCollection` | Chunks with custom sizing | PDF, DOCX, ODT, XLSX, PPTX |
+| `PageCount()` | `int` | Number of pages/sheets/slides | PDF, DOCX, ODT, XLSX, PPTX |
 | `Fragments()` | `[]text.TextFragment` | Raw text fragments with positions | PDF |
 | `Lines()` | `[]layout.Line` | Detected text lines | PDF |
 | `Paragraphs()` | `[]layout.Paragraph` | Detected paragraphs | PDF |
@@ -207,9 +220,11 @@ ext := tabula.FromReader(r)
 | `Elements()` | `[]layout.LayoutElement` | All elements in reading order | PDF |
 | `Analyze()` | `*layout.AnalysisResult` | Complete layout analysis | PDF |
 
-**Note on PDF-only methods:** The methods marked "PDF" in the tables above (`Pages`, `PageRange`, `JoinParagraphs`, `ByColumn`, `PreserveLayout`, `Fragments`, `Lines`, `Paragraphs`, `Headings`, `Lists`, `Blocks`, `Elements`, `Analyze`) exist because PDFs lack semantic structure - they store raw text fragments at arbitrary positions, requiring layout analysis to reconstruct document structure. DOCX, ODT, and XLSX files already contain explicit semantic markup in their XML, so these detection methods aren't needed. Use `Document()` to access the semantic structure for all formats.
+**Note on PDF-only methods:** The methods marked "PDF" in the tables above (`Pages`, `PageRange`, `JoinParagraphs`, `ByColumn`, `PreserveLayout`, `Fragments`, `Lines`, `Paragraphs`, `Headings`, `Lists`, `Blocks`, `Elements`, `Analyze`) exist because PDFs lack semantic structure - they store raw text fragments at arbitrary positions, requiring layout analysis to reconstruct document structure. DOCX, ODT, XLSX, and PPTX files already contain explicit semantic markup in their XML, so these detection methods aren't needed. Use `Document()` to access the semantic structure for all formats.
 
 **Note on XLSX:** For Excel files, each sheet becomes a page, and the sheet data is represented as a table element. `PageCount()` returns the number of sheets. `Text()` returns tab-separated values, while `ToMarkdown()` formats each sheet as a markdown table.
+
+**Note on PPTX:** For PowerPoint files, each slide becomes a page. `PageCount()` returns the number of slides. Slide titles are extracted as headings, bullet points as lists, and tables are preserved. Use `ExcludeHeadersAndFooters()` to remove slide footers, dates, and slide numbers.
 
 ### Inspection Methods (non-terminal, PDF only)
 
@@ -257,7 +272,7 @@ result := chunks.
 ```go
 import "github.com/tsawler/tabula/rag"
 
-// Options supported by all formats (PDF, DOCX, ODT)
+// Options supported by all formats (PDF, DOCX, ODT, XLSX, PPTX)
 opts := rag.MarkdownOptions{
     IncludeMetadata:        true,   // YAML front matter with document metadata
     IncludeTableOfContents: true,   // Generated TOC from headings
@@ -270,6 +285,7 @@ markdown, _, _ := tabula.Open("doc.pdf").ToMarkdownWithOptions(opts)
 markdown, _, _ := tabula.Open("doc.docx").ToMarkdownWithOptions(opts)
 markdown, _, _ := tabula.Open("doc.odt").ToMarkdownWithOptions(opts)
 markdown, _, _ := tabula.Open("spreadsheet.xlsx").ToMarkdownWithOptions(opts)
+markdown, _, _ := tabula.Open("presentation.pptx").ToMarkdownWithOptions(opts)
 
 // PDF-only options (used via RAG chunking pipeline)
 pdfOpts := rag.MarkdownOptions{

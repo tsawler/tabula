@@ -22,6 +22,8 @@ const (
 	ODT
 	// XLSX indicates a Microsoft Excel (.xlsx) document.
 	XLSX
+	// PPTX indicates a Microsoft PowerPoint (.pptx) document.
+	PPTX
 )
 
 // String returns the string representation of the format.
@@ -35,6 +37,8 @@ func (f Format) String() string {
 		return "ODT"
 	case XLSX:
 		return "XLSX"
+	case PPTX:
+		return "PPTX"
 	default:
 		return "Unknown"
 	}
@@ -51,6 +55,8 @@ func (f Format) Extension() string {
 		return ".odt"
 	case XLSX:
 		return ".xlsx"
+	case PPTX:
+		return ".pptx"
 	default:
 		return ""
 	}
@@ -68,6 +74,8 @@ func Detect(filename string) Format {
 		return ODT
 	case ".xlsx":
 		return XLSX
+	case ".pptx":
+		return PPTX
 	default:
 		return Unknown
 	}
@@ -156,8 +164,7 @@ func detectZIPFormat(r io.ReaderAt, size int64) (Format, error) {
 		case strings.HasPrefix(f.Name, "xl/"):
 			return XLSX, nil
 		case strings.HasPrefix(f.Name, "ppt/"):
-			// Future: return PPTX
-			return Unknown, nil
+			return PPTX, nil
 		}
 	}
 
