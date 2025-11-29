@@ -215,16 +215,16 @@ type headerFooterPropsXML struct {
 
 // masterPageXML represents a master page (<style:master-page>).
 type masterPageXML struct {
-	XMLName        xml.Name           `xml:"master-page"`
-	Name           string             `xml:"name,attr"`
-	PageLayoutName string             `xml:"page-layout-name,attr"`
-	DisplayName    string             `xml:"display-name,attr"`
-	Header         *masterHeaderXML   `xml:"header"`
-	Footer         *masterFooterXML   `xml:"footer"`
-	HeaderLeft     *masterHeaderXML   `xml:"header-left"`
-	FooterLeft     *masterFooterXML   `xml:"footer-left"`
-	HeaderFirst    *masterHeaderXML   `xml:"header-first"`
-	FooterFirst    *masterFooterXML   `xml:"footer-first"`
+	XMLName        xml.Name         `xml:"master-page"`
+	Name           string           `xml:"name,attr"`
+	PageLayoutName string           `xml:"page-layout-name,attr"`
+	DisplayName    string           `xml:"display-name,attr"`
+	Header         *masterHeaderXML `xml:"header"`
+	Footer         *masterFooterXML `xml:"footer"`
+	HeaderLeft     *masterHeaderXML `xml:"header-left"`
+	FooterLeft     *masterFooterXML `xml:"footer-left"`
+	HeaderFirst    *masterHeaderXML `xml:"header-first"`
+	FooterFirst    *masterFooterXML `xml:"footer-first"`
 }
 
 // masterHeaderXML represents header content in a master page (<style:header>).
