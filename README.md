@@ -14,6 +14,7 @@ A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval
 - **Multi-Format Support** - PDF (.pdf), Word (.docx), OpenDocument (.odt), Excel (.xlsx), PowerPoint (.pptx), and HTML (.html, .htm) files
 - **Layout Analysis** - Detect headings, paragraphs, lists, and tables
 - **Header/Footer Detection** - Automatically identify and exclude repeating content
+- **HTML Navigation Filtering** - Remove headers, footers, nav, and sidebars from web pages with configurable exclusion modes
 - **RAG-Ready Chunking** - Semantic document chunking with metadata
 - **Markdown Export** - Convert extracted content to markdown
 - **PDF 1.0-1.7 Support** - Including modern XRef streams (PDF 1.5+)
@@ -83,7 +84,15 @@ text, warnings, err := tabula.Open("presentation.pptx").
     Text()
 
 // HTML (extracts text from headings, paragraphs, lists, tables)
+// Use navigation exclusion to remove headers, footers, and nav elements
 text, warnings, err := tabula.Open("page.html").Text()
+
+// HTML from URL with navigation filtering
+import "github.com/tsawler/tabula/htmldoc"
+resp, _ := http.Get("https://example.com")
+reader, _ := htmldoc.OpenReader(resp.Body)
+opts := htmldoc.ExtractOptions{NavigationExclusion: htmldoc.NavigationExclusionStandard}
+text, _ := reader.TextWithOptions(opts)
 ```
 
 ### Extract as Markdown
@@ -113,7 +122,14 @@ markdown, warnings, err := tabula.Open("presentation.pptx").
     ToMarkdown()
 
 // HTML (preserves headings, lists, tables, code blocks)
+// Use navigation exclusion to remove headers, footers, and nav elements
 markdown, warnings, err := tabula.Open("page.html").ToMarkdown()
+
+// HTML with aggressive navigation filtering
+import "github.com/tsawler/tabula/htmldoc"
+reader, _ := htmldoc.OpenReader(resp.Body)
+opts := htmldoc.ExtractOptions{NavigationExclusion: htmldoc.NavigationExclusionAggressive}
+markdown, _ := reader.MarkdownWithOptions(opts)
 ```
 
 ### RAG Chunking
@@ -218,7 +234,7 @@ ext := tabula.FromHTMLReader(resp.Body)
 | `ByColumn()` | Process multi-column layouts column by column | PDF |
 | `PreserveLayout()` | Maintain spatial positioning | PDF |
 
-**Note:** HTML files are single-page documents, so page selection options don't apply. Header/footer exclusion options are available but have no effect on HTML (the HTML parser extracts semantic content, not positional headers/footers).
+**Note:** HTML files are single-page documents, so page selection options don't apply. For HTML navigation/header/footer removal, use the `htmldoc` package directly with `NavigationExclusionMode` options (see below).
 
 ### Terminal Operations
 
@@ -246,7 +262,7 @@ ext := tabula.FromHTMLReader(resp.Body)
 
 **Note on PPTX:** For PowerPoint files, each slide becomes a page. `PageCount()` returns the number of slides. Slide titles are extracted as headings, bullet points as lists, and tables are preserved. Use `ExcludeHeadersAndFooters()` to remove slide footers, dates, and slide numbers.
 
-**Note on HTML:** For HTML files, the entire document is treated as a single page. `PageCount()` returns 1. Semantic elements are preserved: headings (`<h1>`-`<h6>`), paragraphs (`<p>`), lists (`<ul>`, `<ol>`), tables (`<table>` with colspan/rowspan), code blocks (`<pre>`, `<code>`), and blockquotes (`<blockquote>`). Metadata is extracted from `<title>` and `<meta>` tags.
+**Note on HTML:** For HTML files, the entire document is treated as a single page. `PageCount()` returns 1. Semantic elements are preserved: headings (`<h1>`-`<h6>`), paragraphs (`<p>`), lists (`<ul>`, `<ol>`), tables (`<table>` with colspan/rowspan), code blocks (`<pre>`, `<code>`), and blockquotes (`<blockquote>`). Metadata is extracted from `<title>` and `<meta>` tags. For navigation/header/footer removal, use the `htmldoc` package with `NavigationExclusionMode` (see HTML Navigation Filtering section below).
 
 ### Inspection Methods (non-terminal, PDF only)
 
@@ -258,6 +274,37 @@ isCharLevel, _ := ext.IsCharacterLevel()  // Detect character-level PDFs
 isMultiCol, _ := ext.IsMultiColumn()      // Detect multi-column layouts
 pageCount, _ := ext.PageCount()           // Get page count (works with DOCX and ODT too)
 ```
+
+### HTML Navigation Filtering
+
+When processing HTML content (especially web pages), use the `htmldoc` package directly to filter out navigation, headers, footers, and sidebars:
+
+```go
+import "github.com/tsawler/tabula/htmldoc"
+
+// From HTTP response
+resp, _ := http.Get("https://example.com/article")
+defer resp.Body.Close()
+reader, _ := htmldoc.OpenReader(resp.Body)
+
+// Choose exclusion mode
+opts := htmldoc.ExtractOptions{
+    NavigationExclusion: htmldoc.NavigationExclusionStandard,
+}
+
+// Extract clean text or markdown
+text, _ := reader.TextWithOptions(opts)
+markdown, _ := reader.MarkdownWithOptions(opts)
+```
+
+**Navigation Exclusion Modes:**
+
+| Mode | Description |
+|------|-------------|
+| `NavigationExclusionNone` | Include all content without filtering |
+| `NavigationExclusionExplicit` | Skip only semantic HTML5 elements: `<nav>`, `<aside>`, and ARIA roles. `<header>`/`<footer>` only when top-level |
+| `NavigationExclusionStandard` | Explicit + class/id pattern matching (nav, navbar, menu, footer, sidebar, etc.) |
+| `NavigationExclusionAggressive` | Standard + link-density heuristics (excludes sections with >60% link text) |
 
 ## RAG Integration
 
