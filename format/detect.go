@@ -26,6 +26,8 @@ const (
 	PPTX
 	// HTML indicates an HTML document.
 	HTML
+	// EPUB indicates an EPUB e-book document.
+	EPUB
 )
 
 // String returns the string representation of the format.
@@ -43,6 +45,8 @@ func (f Format) String() string {
 		return "PPTX"
 	case HTML:
 		return "HTML"
+	case EPUB:
+		return "EPUB"
 	default:
 		return "Unknown"
 	}
@@ -63,6 +67,8 @@ func (f Format) Extension() string {
 		return ".pptx"
 	case HTML:
 		return ".html"
+	case EPUB:
+		return ".epub"
 	default:
 		return ""
 	}
@@ -84,6 +90,8 @@ func Detect(filename string) Format {
 		return PPTX
 	case ".html", ".htm":
 		return HTML
+	case ".epub":
+		return EPUB
 	default:
 		return Unknown
 	}
@@ -183,14 +191,14 @@ func DetectFromReader(r io.ReaderAt, size int64) (Format, error) {
 	return Unknown, nil
 }
 
-// detectZIPFormat inspects a ZIP archive to determine if it's DOCX, XLSX, PPTX, ODT, etc.
+// detectZIPFormat inspects a ZIP archive to determine if it's DOCX, XLSX, PPTX, ODT, EPUB, etc.
 func detectZIPFormat(r io.ReaderAt, size int64) (Format, error) {
 	zr, err := zip.NewReader(r, size)
 	if err != nil {
 		return Unknown, err
 	}
 
-	// Check for OpenDocument Format first (has mimetype file at the start)
+	// Check for OpenDocument Format and EPUB first (both have mimetype file at the start)
 	for _, f := range zr.File {
 		if f.Name == "mimetype" {
 			rc, err := f.Open()
@@ -198,11 +206,21 @@ func detectZIPFormat(r io.ReaderAt, size int64) (Format, error) {
 				data := make([]byte, 256)
 				n, _ := rc.Read(data)
 				rc.Close()
-				mimeType := string(data[:n])
+				mimeType := strings.TrimSpace(string(data[:n]))
 				if strings.Contains(mimeType, "application/vnd.oasis.opendocument.text") {
 					return ODT, nil
 				}
+				if mimeType == "application/epub+zip" {
+					return EPUB, nil
+				}
 			}
+		}
+	}
+
+	// Check for EPUB container (META-INF/container.xml)
+	for _, f := range zr.File {
+		if f.Name == "META-INF/container.xml" {
+			return EPUB, nil
 		}
 	}
 

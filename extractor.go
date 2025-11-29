@@ -7,6 +7,7 @@ import (
 
 	"github.com/tsawler/tabula/core"
 	"github.com/tsawler/tabula/docx"
+	"github.com/tsawler/tabula/epubdoc"
 	"github.com/tsawler/tabula/format"
 	"github.com/tsawler/tabula/htmldoc"
 	"github.com/tsawler/tabula/layout"
@@ -27,7 +28,7 @@ type extractedPage struct {
 	page      *pages.Page
 }
 
-// Extractor provides a fluent interface for extracting content from PDFs, DOCX, ODT, XLSX, PPTX, and HTML files.
+// Extractor provides a fluent interface for extracting content from PDFs, DOCX, ODT, XLSX, PPTX, HTML, and EPUB files.
 // Each configuration method returns a new Extractor instance, making it
 // safe for concurrent use and allowing method chaining.
 type Extractor struct {
@@ -36,12 +37,13 @@ type Extractor struct {
 	format   format.Format
 
 	// Readers (only one will be used based on format)
-	reader     *reader.Reader   // PDF reader
-	docxReader *docx.Reader     // DOCX reader
-	odtReader  *odt.Reader      // ODT reader
-	xlsxReader *xlsx.Reader     // XLSX reader
-	pptxReader *pptx.Reader     // PPTX reader
-	htmlReader *htmldoc.Reader  // HTML reader
+	reader     *reader.Reader    // PDF reader
+	docxReader *docx.Reader      // DOCX reader
+	odtReader  *odt.Reader       // ODT reader
+	xlsxReader *xlsx.Reader      // XLSX reader
+	pptxReader *pptx.Reader      // PPTX reader
+	htmlReader *htmldoc.Reader   // HTML reader
+	epubReader *epubdoc.Reader   // EPUB reader
 
 	// Lifecycle
 	ownsReader   bool // true if we opened the reader and should close it
@@ -69,6 +71,7 @@ func (e *Extractor) clone() *Extractor {
 		xlsxReader:   e.xlsxReader,
 		pptxReader:   e.pptxReader,
 		htmlReader:   e.htmlReader,
+		epubReader:   e.epubReader,
 		ownsReader:   e.ownsReader,
 		readerOpened: e.readerOpened,
 		options:      e.options.clone(),
@@ -138,6 +141,16 @@ func (e *Extractor) ensureReader() error {
 		e.readerOpened = true
 		return nil
 
+	case format.EPUB:
+		er, err := epubdoc.Open(e.filename)
+		if err != nil {
+			return fmt.Errorf("failed to open EPUB: %w", err)
+		}
+		e.epubReader = er
+		e.ownsReader = true
+		e.readerOpened = true
+		return nil
+
 	case format.PDF:
 		r, err := reader.Open(e.filename)
 		if err != nil {
@@ -190,6 +203,12 @@ func (e *Extractor) Close() error {
 		if e.htmlReader != nil {
 			err := e.htmlReader.Close()
 			e.htmlReader = nil
+			e.ownsReader = false
+			return err
+		}
+		if e.epubReader != nil {
+			err := e.epubReader.Close()
+			e.epubReader = nil
 			e.ownsReader = false
 			return err
 		}
@@ -462,6 +481,15 @@ func (e *Extractor) Text() (string, []Warning, error) {
 		return text, e.warnings, nil
 	}
 
+	// Handle EPUB files
+	if e.format == format.EPUB {
+		text, err := e.epubReader.Text()
+		if err != nil {
+			return "", e.warnings, err
+		}
+		return text, e.warnings, nil
+	}
+
 	// PDF processing
 	pageIndices, err := e.resolvePages()
 	if err != nil {
@@ -724,6 +752,19 @@ func (e *Extractor) ToMarkdownWithOptions(opts rag.MarkdownOptions) (string, []W
 		return md, nil, nil
 	}
 
+	// For EPUB files, use the native markdown method
+	if e.format == format.EPUB {
+		if err := e.ensureReader(); err != nil {
+			return "", nil, err
+		}
+		defer e.Close()
+		md, err := e.epubReader.Markdown()
+		if err != nil {
+			return "", nil, err
+		}
+		return md, nil, nil
+	}
+
 	// For PDF files, use the RAG chunking pipeline
 	chunks, warnings, err := e.Chunks()
 	if err != nil {
@@ -816,6 +857,10 @@ func (e *Extractor) PageCount() (int, error) {
 
 	if e.format == format.HTML {
 		return e.htmlReader.PageCount()
+	}
+
+	if e.format == format.EPUB {
+		return e.epubReader.ChapterCount(), nil
 	}
 
 	return e.reader.PageCount()
@@ -1440,6 +1485,15 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 	// Handle HTML files
 	if e.format == format.HTML {
 		doc, err := e.htmlReader.Document()
+		if err != nil {
+			return nil, e.warnings, err
+		}
+		return doc, e.warnings, nil
+	}
+
+	// Handle EPUB files
+	if e.format == format.EPUB {
+		doc, err := e.epubReader.Document()
 		if err != nil {
 			return nil, e.warnings, err
 		}
