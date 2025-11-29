@@ -9,9 +9,9 @@ import (
 
 // Container-related errors.
 var (
-	ErrNoContainer = errors.New("epub: missing META-INF/container.xml")
+	ErrNoContainer      = errors.New("epub: missing META-INF/container.xml")
 	ErrInvalidContainer = errors.New("epub: invalid container.xml")
-	ErrNoRootfile = errors.New("epub: no rootfile found in container.xml")
+	ErrNoRootfile       = errors.New("epub: no rootfile found in container.xml")
 )
 
 // containerXML represents the structure of META-INF/container.xml.

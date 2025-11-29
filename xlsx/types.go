@@ -12,7 +12,7 @@ const (
 
 // workbookXML represents the xl/workbook.xml file structure.
 type workbookXML struct {
-	XMLName xml.Name `xml:"workbook"`
+	XMLName xml.Name  `xml:"workbook"`
 	Sheets  sheetsXML `xml:"sheets"`
 }
 
@@ -28,9 +28,9 @@ type sheetRefXML struct {
 
 // worksheetXML represents a xl/worksheets/sheet*.xml file structure.
 type worksheetXML struct {
-	XMLName    xml.Name      `xml:"worksheet"`
-	Dimension  dimensionXML  `xml:"dimension"`
-	SheetData  sheetDataXML  `xml:"sheetData"`
+	XMLName    xml.Name       `xml:"worksheet"`
+	Dimension  dimensionXML   `xml:"dimension"`
+	SheetData  sheetDataXML   `xml:"sheetData"`
 	MergeCells *mergeCellsXML `xml:"mergeCells"`
 }
 
@@ -48,12 +48,12 @@ type rowXML struct {
 }
 
 type cellXML struct {
-	R string `xml:"r,attr"` // Cell reference (e.g., "A1")
-	T string `xml:"t,attr"` // Type: s=shared string, n=number, b=bool, str=inline string, e=error
-	S int    `xml:"s,attr"` // Style index
-	V string `xml:"v"`      // Value
-	F string `xml:"f"`      // Formula (optional)
-	Is *inlineStrXML `xml:"is"` // Inline string (optional)
+	R  string        `xml:"r,attr"` // Cell reference (e.g., "A1")
+	T  string        `xml:"t,attr"` // Type: s=shared string, n=number, b=bool, str=inline string, e=error
+	S  int           `xml:"s,attr"` // Style index
+	V  string        `xml:"v"`      // Value
+	F  string        `xml:"f"`      // Formula (optional)
+	Is *inlineStrXML `xml:"is"`     // Inline string (optional)
 }
 
 type inlineStrXML struct {
@@ -77,8 +77,8 @@ type sharedStringsXML struct {
 }
 
 type siXML struct {
-	T string  `xml:"t"` // Simple text
-	R []rXML  `xml:"r"` // Rich text runs
+	T string `xml:"t"` // Simple text
+	R []rXML `xml:"r"` // Rich text runs
 }
 
 type rXML struct {
@@ -87,9 +87,9 @@ type rXML struct {
 
 // stylesXML represents the xl/styles.xml file structure.
 type stylesXML struct {
-	XMLName   xml.Name      `xml:"styleSheet"`
-	NumFmts   *numFmtsXML   `xml:"numFmts"`
-	CellXfs   *cellXfsXML   `xml:"cellXfs"`
+	XMLName xml.Name    `xml:"styleSheet"`
+	NumFmts *numFmtsXML `xml:"numFmts"`
+	CellXfs *cellXfsXML `xml:"cellXfs"`
 }
 
 type numFmtsXML struct {

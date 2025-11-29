@@ -23,13 +23,13 @@ type TextBlock struct {
 
 // Paragraph represents a paragraph within a text block.
 type Paragraph struct {
-	Text      string
-	Level     int    // Bullet/indent level (0 = top level)
-	IsBullet  bool   // Has bullet point
-	IsNumbered bool  // Is numbered list
+	Text       string
+	Level      int    // Bullet/indent level (0 = top level)
+	IsBullet   bool   // Has bullet point
+	IsNumbered bool   // Is numbered list
 	BulletChar string // Bullet character (if custom)
-	Alignment string // l, ctr, r, just
-	Runs      []Run  // Text runs with formatting
+	Alignment  string // l, ctr, r, just
+	Runs       []Run  // Text runs with formatting
 }
 
 // Run represents a text run with consistent formatting.

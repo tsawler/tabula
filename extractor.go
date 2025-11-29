@@ -37,13 +37,13 @@ type Extractor struct {
 	format   format.Format
 
 	// Readers (only one will be used based on format)
-	reader     *reader.Reader    // PDF reader
-	docxReader *docx.Reader      // DOCX reader
-	odtReader  *odt.Reader       // ODT reader
-	xlsxReader *xlsx.Reader      // XLSX reader
-	pptxReader *pptx.Reader      // PPTX reader
-	htmlReader *htmldoc.Reader   // HTML reader
-	epubReader *epubdoc.Reader   // EPUB reader
+	reader     *reader.Reader  // PDF reader
+	docxReader *docx.Reader    // DOCX reader
+	odtReader  *odt.Reader     // ODT reader
+	xlsxReader *xlsx.Reader    // XLSX reader
+	pptxReader *pptx.Reader    // PPTX reader
+	htmlReader *htmldoc.Reader // HTML reader
+	epubReader *epubdoc.Reader // EPUB reader
 
 	// Lifecycle
 	ownsReader   bool // true if we opened the reader and should close it
