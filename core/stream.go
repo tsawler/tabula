@@ -6,8 +6,9 @@ import (
 	"github.com/tsawler/tabula/internal/filters"
 )
 
-// Decode decodes the stream data according to its Filter(s)
-// Returns decoded data or error
+// Decode decodes the stream data according to the Filter(s) specified in the
+// stream dictionary. It supports FlateDecode, ASCIIHexDecode, ASCII85Decode,
+// and filter chains. Returns the decoded data or an error.
 func (s *Stream) Decode() ([]byte, error) {
 	// Check if there's a filter
 	filterObj := s.Dict.Get("Filter")
@@ -59,7 +60,8 @@ func (s *Stream) Decode() ([]byte, error) {
 	return nil, fmt.Errorf("invalid Filter type: %T", filterObj)
 }
 
-// decodeWithFilter applies a single filter to data
+// decodeWithFilter applies a single decompression filter to data.
+// The filterName should be a PDF filter name (e.g., "FlateDecode", "ASCIIHexDecode").
 func decodeWithFilter(data []byte, filterName string, params Dict) ([]byte, error) {
 	switch filterName {
 	case "FlateDecode", "Fl":
@@ -99,7 +101,8 @@ func decodeWithFilter(data []byte, filterName string, params Dict) ([]byte, erro
 	}
 }
 
-// paramsObjToDict converts a decode params object to a Dict
+// paramsObjToDict converts a DecodeParms object to a Dict.
+// Returns nil if the object is nil, Null, or not a Dict.
 func paramsObjToDict(obj Object) Dict {
 	if obj == nil {
 		return nil
@@ -117,8 +120,8 @@ func paramsObjToDict(obj Object) Dict {
 	return nil
 }
 
-// dictToParams converts a core.Dict to filters.Params
-// Converts PDF objects to Go primitives
+// dictToParams converts a core.Dict to filters.Params, translating PDF object
+// types to Go primitive types (Int->int, Real->float64, Bool->bool, etc.).
 func dictToParams(dict Dict) filters.Params {
 	if dict == nil {
 		return nil

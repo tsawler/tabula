@@ -5,26 +5,28 @@ import (
 	"fmt"
 )
 
-// ObjectStream represents a PDF Object Stream (Type /ObjStm)
-// Object streams (PDF 1.5+) store multiple objects in a single compressed stream
+// ObjectStream represents a PDF Object Stream (Type /ObjStm), introduced in PDF 1.5.
+// Object streams store multiple objects in a single compressed stream, providing
+// better compression than storing objects individually.
 type ObjectStream struct {
-	stream  *Stream              // The underlying stream object
+	stream  *Stream              // Underlying stream object
 	n       int                  // Number of objects in stream
 	first   int                  // Byte offset of first object in decoded data
-	extends *IndirectRef         // Optional reference to another ObjStm
+	extends *IndirectRef         // Optional reference to another ObjStm this one extends
 	objects map[int]Object       // Cached parsed objects (index -> object)
 	offsets []objectStreamOffset // Parsed offset pairs from header
 	decoded []byte               // Decoded stream data (cached)
 }
 
-// objectStreamOffset represents an object number and its offset within the stream
+// objectStreamOffset pairs an object number with its byte offset within the decoded data.
 type objectStreamOffset struct {
 	ObjNum int // Object number
 	Offset int // Byte offset within decoded data (relative to First)
 }
 
-// NewObjectStream creates an ObjectStream from a Stream object
-// Returns an error if the stream is not a valid object stream
+// NewObjectStream creates an ObjectStream from a Stream object.
+// The stream must have Type /ObjStm and required entries /N and /First.
+// Returns an error if the stream is not a valid object stream.
 func NewObjectStream(stream *Stream) (*ObjectStream, error) {
 	if stream == nil {
 		return nil, fmt.Errorf("stream is nil")
@@ -89,22 +91,23 @@ func NewObjectStream(stream *Stream) (*ObjectStream, error) {
 	return os, nil
 }
 
-// N returns the number of objects in the stream
+// N returns the number of objects stored in the stream.
 func (os *ObjectStream) N() int {
 	return os.n
 }
 
-// First returns the byte offset to the first object in the decoded data
+// First returns the byte offset to the first object's data in the decoded stream.
+// The header (object number/offset pairs) precedes this offset.
 func (os *ObjectStream) First() int {
 	return os.first
 }
 
-// Extends returns the reference to another object stream this one extends, or nil
+// Extends returns the reference to another object stream this one extends, or nil.
 func (os *ObjectStream) Extends() *IndirectRef {
 	return os.extends
 }
 
-// decode decodes the stream data and parses the header
+// decode decodes the stream data and parses the header. Called lazily on first access.
 func (os *ObjectStream) decode() error {
 	if os.decoded != nil {
 		return nil // Already decoded
@@ -126,8 +129,8 @@ func (os *ObjectStream) decode() error {
 	return nil
 }
 
-// parseHeader parses the object stream header containing N pairs of integers
-// Format: objNum1 offset1 objNum2 offset2 ... objNumN offsetN
+// parseHeader parses the object stream header containing N pairs of integers.
+// Format: "objNum1 offset1 objNum2 offset2 ... objNumN offsetN"
 func (os *ObjectStream) parseHeader() error {
 	if os.first > len(os.decoded) {
 		return fmt.Errorf("First offset (%d) exceeds decoded data length (%d)", os.first, len(os.decoded))
@@ -168,8 +171,9 @@ func (os *ObjectStream) parseHeader() error {
 	return nil
 }
 
-// GetObjectByIndex extracts an object by its index within the stream (0-based)
-// The index corresponds to the position in the header, not the object number
+// GetObjectByIndex extracts an object by its index within the stream (0-based).
+// Returns the object, its object number, and any error. The index corresponds
+// to the position in the header, not the object number.
 func (os *ObjectStream) GetObjectByIndex(index int) (Object, int, error) {
 	// Ensure stream is decoded
 	if err := os.decode(); err != nil {
@@ -219,8 +223,8 @@ func (os *ObjectStream) GetObjectByIndex(index int) (Object, int, error) {
 	return obj, os.offsets[index].ObjNum, nil
 }
 
-// GetObjectByNumber finds and extracts an object by its object number
-// Returns the object and its index, or an error if not found
+// GetObjectByNumber finds and extracts an object by its object number.
+// Returns the object, its index within the stream, and any error.
 func (os *ObjectStream) GetObjectByNumber(objNum int) (Object, int, error) {
 	// Ensure stream is decoded
 	if err := os.decode(); err != nil {
@@ -238,7 +242,7 @@ func (os *ObjectStream) GetObjectByNumber(objNum int) (Object, int, error) {
 	return nil, 0, fmt.Errorf("object %d not found in object stream", objNum)
 }
 
-// ObjectNumbers returns a slice of all object numbers stored in this stream
+// ObjectNumbers returns a slice of all object numbers stored in this stream.
 func (os *ObjectStream) ObjectNumbers() ([]int, error) {
 	// Ensure stream is decoded
 	if err := os.decode(); err != nil {
@@ -252,7 +256,7 @@ func (os *ObjectStream) ObjectNumbers() ([]int, error) {
 	return nums, nil
 }
 
-// ContainsObject checks if an object number is stored in this stream
+// ContainsObject reports whether the given object number is stored in this stream.
 func (os *ObjectStream) ContainsObject(objNum int) (bool, error) {
 	// Ensure stream is decoded
 	if err := os.decode(); err != nil {
