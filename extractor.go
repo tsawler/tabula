@@ -15,6 +15,7 @@ import (
 	"github.com/tsawler/tabula/rag"
 	"github.com/tsawler/tabula/reader"
 	"github.com/tsawler/tabula/text"
+	"github.com/tsawler/tabula/xlsx"
 )
 
 // extractedPage holds the data extracted from a single page.
@@ -24,7 +25,7 @@ type extractedPage struct {
 	page      *pages.Page
 }
 
-// Extractor provides a fluent interface for extracting content from PDFs, DOCX, and ODT files.
+// Extractor provides a fluent interface for extracting content from PDFs, DOCX, ODT, and XLSX files.
 // Each configuration method returns a new Extractor instance, making it
 // safe for concurrent use and allowing method chaining.
 type Extractor struct {
@@ -36,6 +37,7 @@ type Extractor struct {
 	reader     *reader.Reader // PDF reader
 	docxReader *docx.Reader   // DOCX reader
 	odtReader  *odt.Reader    // ODT reader
+	xlsxReader *xlsx.Reader   // XLSX reader
 
 	// Lifecycle
 	ownsReader   bool // true if we opened the reader and should close it
@@ -60,6 +62,7 @@ func (e *Extractor) clone() *Extractor {
 		reader:       e.reader,
 		docxReader:   e.docxReader,
 		odtReader:    e.odtReader,
+		xlsxReader:   e.xlsxReader,
 		ownsReader:   e.ownsReader,
 		readerOpened: e.readerOpened,
 		options:      e.options.clone(),
@@ -99,6 +102,16 @@ func (e *Extractor) ensureReader() error {
 		e.readerOpened = true
 		return nil
 
+	case format.XLSX:
+		xr, err := xlsx.Open(e.filename)
+		if err != nil {
+			return fmt.Errorf("failed to open XLSX: %w", err)
+		}
+		e.xlsxReader = xr
+		e.ownsReader = true
+		e.readerOpened = true
+		return nil
+
 	case format.PDF:
 		r, err := reader.Open(e.filename)
 		if err != nil {
@@ -133,6 +146,12 @@ func (e *Extractor) Close() error {
 		if e.odtReader != nil {
 			err := e.odtReader.Close()
 			e.odtReader = nil
+			e.ownsReader = false
+			return err
+		}
+		if e.xlsxReader != nil {
+			err := e.xlsxReader.Close()
+			e.xlsxReader = nil
 			e.ownsReader = false
 			return err
 		}
@@ -364,6 +383,19 @@ func (e *Extractor) Text() (string, []Warning, error) {
 		return text, e.warnings, nil
 	}
 
+	// Handle XLSX files
+	if e.format == format.XLSX {
+		opts := xlsx.ExtractOptions{
+			ExcludeHeaders: e.options.excludeHeaders,
+			ExcludeFooters: e.options.excludeFooters,
+		}
+		text, err := e.xlsxReader.TextWithOptions(opts)
+		if err != nil {
+			return "", e.warnings, err
+		}
+		return text, e.warnings, nil
+	}
+
 	// PDF processing
 	pageIndices, err := e.resolvePages()
 	if err != nil {
@@ -573,6 +605,23 @@ func (e *Extractor) ToMarkdownWithOptions(opts rag.MarkdownOptions) (string, []W
 		return md, nil, nil
 	}
 
+	// For XLSX files, use the native markdown method
+	if e.format == format.XLSX {
+		if err := e.ensureReader(); err != nil {
+			return "", nil, err
+		}
+		defer e.Close()
+		xlsxOpts := xlsx.ExtractOptions{
+			ExcludeHeaders: e.options.excludeHeaders,
+			ExcludeFooters: e.options.excludeFooters,
+		}
+		md, err := e.xlsxReader.MarkdownWithRAGOptions(xlsxOpts, opts)
+		if err != nil {
+			return "", nil, err
+		}
+		return md, nil, nil
+	}
+
 	// For PDF files, use the RAG chunking pipeline
 	chunks, warnings, err := e.Chunks()
 	if err != nil {
@@ -653,6 +702,10 @@ func (e *Extractor) PageCount() (int, error) {
 
 	if e.format == format.ODT {
 		return e.odtReader.PageCount()
+	}
+
+	if e.format == format.XLSX {
+		return e.xlsxReader.PageCount()
 	}
 
 	return e.reader.PageCount()
@@ -1250,6 +1303,15 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 	// Handle ODT files
 	if e.format == format.ODT {
 		doc, err := e.odtReader.Document()
+		if err != nil {
+			return nil, e.warnings, err
+		}
+		return doc, e.warnings, nil
+	}
+
+	// Handle XLSX files
+	if e.format == format.XLSX {
+		doc, err := e.xlsxReader.Document()
 		if err != nil {
 			return nil, e.warnings, err
 		}

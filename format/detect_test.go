@@ -13,6 +13,7 @@ func TestFormat_String(t *testing.T) {
 		{PDF, "PDF"},
 		{DOCX, "DOCX"},
 		{ODT, "ODT"},
+		{XLSX, "XLSX"},
 		{Unknown, "Unknown"},
 		{Format(99), "Unknown"},
 	}
@@ -32,6 +33,7 @@ func TestFormat_Extension(t *testing.T) {
 		{PDF, ".pdf"},
 		{DOCX, ".docx"},
 		{ODT, ".odt"},
+		{XLSX, ".xlsx"},
 		{Unknown, ""},
 	}
 
@@ -56,14 +58,17 @@ func TestDetect(t *testing.T) {
 		{"document.odt", ODT},
 		{"document.ODT", ODT},
 		{"document.Odt", ODT},
+		{"document.xlsx", XLSX},
+		{"document.XLSX", XLSX},
+		{"document.Xlsx", XLSX},
 		{"document.txt", Unknown},
-		{"document.xlsx", Unknown},
 		{"document.pptx", Unknown},
 		{"document", Unknown},
 		{"", Unknown},
 		{"/path/to/file.pdf", PDF},
 		{"/path/to/file.docx", DOCX},
 		{"/path/to/file.odt", ODT},
+		{"/path/to/file.xlsx", XLSX},
 	}
 
 	for _, tt := range tests {
