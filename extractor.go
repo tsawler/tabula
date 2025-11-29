@@ -418,7 +418,10 @@ func (e *Extractor) Text() (string, []Warning, error) {
 
 		// Extract text
 		var pageText string
-		if e.options.joinParagraphs {
+		if e.options.preserveLayout {
+			width, _ := pd.page.Width()
+			pageText = e.extractPreserveLayout(fragments, width)
+		} else if e.options.joinParagraphs {
 			pageText = e.extractWithParagraphs(fragments, pd.page)
 		} else if e.options.byColumn {
 			pageText = e.extractByColumn(fragments, pd.page)
@@ -1707,6 +1710,172 @@ func abs(x float64) float64 {
 		return -x
 	}
 	return x
+}
+
+// extractPreserveLayout maintains spatial positioning by inserting spaces
+// to approximate the visual layout of the original document. This is useful
+// for forms, invoices, or any document where spatial positioning carries meaning.
+// The output is designed to look correct when displayed in a monospace font.
+func (e *Extractor) extractPreserveLayout(fragments []text.TextFragment, pageWidth float64) string {
+	if len(fragments) == 0 {
+		return ""
+	}
+
+	// Configuration for layout preservation
+	const (
+		defaultCharsPerLine = 80  // Default width in characters
+		minCharsPerLine     = 40  // Minimum width
+		maxCharsPerLine     = 200 // Maximum width
+	)
+
+	// Calculate character width based on page width and desired output width
+	// Use average font size to determine appropriate scaling
+	var totalFontSize float64
+	var fontCount int
+	for _, frag := range fragments {
+		if frag.FontSize > 0 {
+			totalFontSize += frag.FontSize
+			fontCount++
+		}
+	}
+
+	// Determine character width for spacing calculations
+	var charWidth float64
+	if fontCount > 0 {
+		avgFontSize := totalFontSize / float64(fontCount)
+		// Approximate character width as 0.6 * font size (typical for monospace)
+		charWidth = avgFontSize * 0.6
+	} else {
+		// Fallback: divide page into defaultCharsPerLine columns
+		charWidth = pageWidth / float64(defaultCharsPerLine)
+	}
+
+	// Ensure reasonable character width
+	if charWidth <= 0 {
+		charWidth = pageWidth / float64(defaultCharsPerLine)
+	}
+
+	// Calculate output width in characters
+	charsPerLine := int(pageWidth / charWidth)
+	if charsPerLine < minCharsPerLine {
+		charsPerLine = minCharsPerLine
+		charWidth = pageWidth / float64(charsPerLine)
+	} else if charsPerLine > maxCharsPerLine {
+		charsPerLine = maxCharsPerLine
+		charWidth = pageWidth / float64(charsPerLine)
+	}
+
+	// Sort fragments by position (top to bottom, left to right)
+	sorted := make([]text.TextFragment, len(fragments))
+	copy(sorted, fragments)
+
+	sort.SliceStable(sorted, func(i, j int) bool {
+		// Group by Y (with tolerance for same line)
+		yDiff := sorted[i].Y - sorted[j].Y
+		if abs(yDiff) > sorted[i].Height*0.5 {
+			return yDiff > 0 // Higher Y first (PDF coordinates)
+		}
+		return sorted[i].X < sorted[j].X // Then left to right
+	})
+
+	// Group fragments by line
+	type line struct {
+		y         float64
+		height    float64
+		fragments []text.TextFragment
+	}
+
+	var lines []line
+	var currentLine *line
+
+	for _, frag := range sorted {
+		if currentLine == nil {
+			currentLine = &line{
+				y:         frag.Y,
+				height:    frag.Height,
+				fragments: []text.TextFragment{frag},
+			}
+			continue
+		}
+
+		// Check if same line (within tolerance)
+		if abs(frag.Y-currentLine.y) <= currentLine.height*0.5 {
+			currentLine.fragments = append(currentLine.fragments, frag)
+			// Update height if this fragment is taller
+			if frag.Height > currentLine.height {
+				currentLine.height = frag.Height
+			}
+		} else {
+			// New line
+			lines = append(lines, *currentLine)
+			currentLine = &line{
+				y:         frag.Y,
+				height:    frag.Height,
+				fragments: []text.TextFragment{frag},
+			}
+		}
+	}
+	if currentLine != nil {
+		lines = append(lines, *currentLine)
+	}
+
+	// Build output with spacing to preserve layout
+	var result strings.Builder
+	var lastLineY float64
+	firstLine := true
+
+	for _, ln := range lines {
+		// Calculate blank lines between this line and the previous
+		if !firstLine {
+			// Calculate vertical gap in line heights
+			verticalGap := lastLineY - ln.y // PDF Y decreases going down
+			lineHeight := ln.height
+			if lineHeight <= 0 {
+				lineHeight = charWidth * 1.2 // Estimate based on char width
+			}
+
+			// How many line heights is the gap?
+			gapInLines := int(verticalGap/lineHeight + 0.5)
+			if gapInLines < 1 {
+				gapInLines = 1
+			}
+
+			// Add newlines (1 for normal line break, more for vertical gaps)
+			for i := 0; i < gapInLines; i++ {
+				result.WriteString("\n")
+			}
+		}
+		firstLine = false
+		lastLineY = ln.y
+
+		// Build the line with proper horizontal spacing
+		var lineBuilder strings.Builder
+		currentCol := 0
+
+		for _, frag := range ln.fragments {
+			// Calculate target column position
+			targetCol := int(frag.X / charWidth)
+			if targetCol < 0 {
+				targetCol = 0
+			}
+
+			// Add spaces to reach target column
+			spacesNeeded := targetCol - currentCol
+			if spacesNeeded > 0 {
+				lineBuilder.WriteString(strings.Repeat(" ", spacesNeeded))
+				currentCol = targetCol
+			}
+
+			// Add the text
+			text := frag.Text
+			lineBuilder.WriteString(text)
+			currentCol += len(text)
+		}
+
+		result.WriteString(lineBuilder.String())
+	}
+
+	return result.String()
 }
 
 // isCharacterLevel detects if fragments appear to be character-level

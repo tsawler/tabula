@@ -198,7 +198,7 @@ ext := tabula.FromReader(r)
 | `Elements()` | `[]layout.LayoutElement` | All elements in reading order | PDF |
 | `Analyze()` | `*layout.AnalysisResult` | Complete layout analysis | PDF |
 
-**Note on PDF-only methods:** The methods marked "PDF" in the table above (`Fragments`, `Lines`, `Paragraphs`, `Headings`, `Lists`, `Blocks`, `Elements`, `Analyze`) exist because PDFs lack semantic structure - they store raw text fragments at arbitrary positions, requiring layout analysis to reconstruct document structure. DOCX and ODT files already contain explicit semantic markup (paragraphs, headings, lists) in their XML, so these detection methods aren't needed. Use `Document()` to access the semantic structure for all formats.
+**Note on PDF-only methods:** The methods marked "PDF" in the tables above (`Pages`, `PageRange`, `JoinParagraphs`, `ByColumn`, `PreserveLayout`, `Fragments`, `Lines`, `Paragraphs`, `Headings`, `Lists`, `Blocks`, `Elements`, `Analyze`) exist because PDFs lack semantic structure - they store raw text fragments at arbitrary positions, requiring layout analysis to reconstruct document structure. DOCX and ODT files already contain explicit semantic markup (paragraphs, headings, lists) in their XML, so these detection methods aren't needed. Use `Document()` to access the semantic structure for all formats.
 
 ### Inspection Methods (non-terminal, PDF only)
 
