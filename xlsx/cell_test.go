@@ -133,16 +133,16 @@ func TestCellRef(t *testing.T) {
 
 func TestParseRangeRef(t *testing.T) {
 	tests := []struct {
-		ref                                      string
-		wantStartCol, wantStartRow               int
-		wantEndCol, wantEndRow                   int
-		wantErr                                  bool
+		ref                        string
+		wantStartCol, wantStartRow int
+		wantEndCol, wantEndRow     int
+		wantErr                    bool
 	}{
 		{"A1:B2", 0, 0, 1, 1, false},
 		{"A1:D10", 0, 0, 3, 9, false},
 		{"B5:F20", 1, 4, 5, 19, false},
 		{"AA1:AB10", 26, 0, 27, 9, false},
-		{"A1", 0, 0, 0, 0, true},  // No colon
+		{"A1", 0, 0, 0, 0, true},   // No colon
 		{"A1:B", 0, 0, 0, 0, true}, // Invalid end
 	}
 

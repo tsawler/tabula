@@ -47,9 +47,9 @@ type dcElement struct {
 type opfMeta struct {
 	Property string `xml:"property,attr"`
 	Refines  string `xml:"refines,attr"`
-	Name     string `xml:"name,attr"`  // EPUB 2 style
+	Name     string `xml:"name,attr"`    // EPUB 2 style
 	Content  string `xml:"content,attr"` // EPUB 2 style
-	Value    string `xml:",chardata"`  // EPUB 3 style
+	Value    string `xml:",chardata"`    // EPUB 3 style
 }
 
 type opfManifest struct {
@@ -64,8 +64,8 @@ type opfItem struct {
 }
 
 type opfSpine struct {
-	Toc      string        `xml:"toc,attr"` // NCX ID for EPUB 2
-	ItemRefs []opfItemRef  `xml:"itemref"`
+	Toc      string       `xml:"toc,attr"` // NCX ID for EPUB 2
+	ItemRefs []opfItemRef `xml:"itemref"`
 }
 
 type opfItemRef struct {

@@ -3,14 +3,14 @@ package htmldoc
 
 // parsedElement represents a parsed element from the HTML document.
 type parsedElement struct {
-	Type       ElementType
-	Text       string
-	Level      int         // For headings (1-6)
-	Items      []listItem  // For lists
-	Ordered    bool        // For lists
-	Table      *ParsedTable
-	LinkURL    string      // For links
-	IsCode     bool        // For code blocks
+	Type    ElementType
+	Text    string
+	Level   int        // For headings (1-6)
+	Items   []listItem // For lists
+	Ordered bool       // For lists
+	Table   *ParsedTable
+	LinkURL string // For links
+	IsCode  bool   // For code blocks
 }
 
 // ElementType represents the type of HTML element.
@@ -65,10 +65,10 @@ type ParsedTable struct {
 
 // TableCell represents a cell in an HTML table.
 type TableCell struct {
-	Text    string
+	Text     string
 	IsHeader bool
-	RowSpan int
-	ColSpan int
+	RowSpan  int
+	ColSpan  int
 }
 
 // ToMarkdown converts the table to markdown format.

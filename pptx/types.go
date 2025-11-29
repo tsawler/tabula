@@ -13,9 +13,9 @@ const (
 
 // presentationXML represents the ppt/presentation.xml file structure.
 type presentationXML struct {
-	XMLName     xml.Name       `xml:"presentation"`
+	XMLName     xml.Name        `xml:"presentation"`
 	SlideIdList *slideIdListXML `xml:"sldIdLst"`
-	SlideSz     *slideSzXML    `xml:"sldSz"`
+	SlideSz     *slideSzXML     `xml:"sldSz"`
 }
 
 type slideIdListXML struct {
@@ -44,11 +44,11 @@ type cSldXML struct {
 
 // spTreeXML represents the shape tree containing all shapes on a slide.
 type spTreeXML struct {
-	NvGrpSpPr nvGrpSpPrXML `xml:"nvGrpSpPr"`
-	Sp        []spXML      `xml:"sp"`        // Regular shapes
-	Pic       []picXML     `xml:"pic"`       // Pictures
+	NvGrpSpPr    nvGrpSpPrXML      `xml:"nvGrpSpPr"`
+	Sp           []spXML           `xml:"sp"`           // Regular shapes
+	Pic          []picXML          `xml:"pic"`          // Pictures
 	GraphicFrame []graphicFrameXML `xml:"graphicFrame"` // Tables, charts, etc.
-	GrpSp     []grpSpXML   `xml:"grpSp"`     // Grouped shapes
+	GrpSp        []grpSpXML        `xml:"grpSp"`        // Grouped shapes
 }
 
 type nvGrpSpPrXML struct {
@@ -69,8 +69,8 @@ type spXML struct {
 }
 
 type nvSpPrXML struct {
-	CNvPr   cNvPrXML   `xml:"cNvPr"`
-	NvPr    nvPrXML    `xml:"nvPr"`
+	CNvPr cNvPrXML `xml:"cNvPr"`
+	NvPr  nvPrXML  `xml:"nvPr"`
 }
 
 type nvPrXML struct {
@@ -113,21 +113,21 @@ type bodyPrXML struct {
 
 // pXML represents a paragraph.
 type pXML struct {
-	PPr *pPrXML `xml:"pPr"` // Paragraph properties
-	R   []rXML  `xml:"r"`   // Text runs
-	Br  []brXML `xml:"br"`  // Line breaks
-	Fld []fldXML `xml:"fld"` // Fields (like slide number)
-	EndParaRPr *rPrXML `xml:"endParaRPr"` // End paragraph run properties
+	PPr        *pPrXML  `xml:"pPr"`        // Paragraph properties
+	R          []rXML   `xml:"r"`          // Text runs
+	Br         []brXML  `xml:"br"`         // Line breaks
+	Fld        []fldXML `xml:"fld"`        // Fields (like slide number)
+	EndParaRPr *rPrXML  `xml:"endParaRPr"` // End paragraph run properties
 }
 
 type pPrXML struct {
-	Lvl     int      `xml:"lvl,attr"`     // Bullet level (0-8)
-	Algn    string   `xml:"algn,attr"`    // Alignment: l, ctr, r, just
-	MarL    int      `xml:"marL,attr"`    // Left margin in EMUs
-	Indent  int      `xml:"indent,attr"`  // First line indent in EMUs
-	BuNone  *struct{} `xml:"buNone"`      // No bullet
-	BuChar  *buCharXML `xml:"buChar"`     // Character bullet
-	BuAutoNum *buAutoNumXML `xml:"buAutoNum"` // Numbered list
+	Lvl       int           `xml:"lvl,attr"`    // Bullet level (0-8)
+	Algn      string        `xml:"algn,attr"`   // Alignment: l, ctr, r, just
+	MarL      int           `xml:"marL,attr"`   // Left margin in EMUs
+	Indent    int           `xml:"indent,attr"` // First line indent in EMUs
+	BuNone    *struct{}     `xml:"buNone"`      // No bullet
+	BuChar    *buCharXML    `xml:"buChar"`      // Character bullet
+	BuAutoNum *buAutoNumXML `xml:"buAutoNum"`   // Numbered list
 }
 
 type buCharXML struct {
@@ -146,11 +146,11 @@ type rXML struct {
 }
 
 type rPrXML struct {
-	Lang   string `xml:"lang,attr"`
-	Sz     int    `xml:"sz,attr"`    // Font size in hundredths of a point
-	B      *int   `xml:"b,attr"`     // Bold (1 = true)
-	I      *int   `xml:"i,attr"`     // Italic (1 = true)
-	U      string `xml:"u,attr"`     // Underline type
+	Lang string `xml:"lang,attr"`
+	Sz   int    `xml:"sz,attr"` // Font size in hundredths of a point
+	B    *int   `xml:"b,attr"`  // Bold (1 = true)
+	I    *int   `xml:"i,attr"`  // Italic (1 = true)
+	U    string `xml:"u,attr"`  // Underline type
 }
 
 type brXML struct{} // Line break
@@ -162,7 +162,7 @@ type fldXML struct {
 
 // picXML represents a picture element.
 type picXML struct {
-	NvPicPr nvPicPrXML `xml:"nvPicPr"`
+	NvPicPr  nvPicPrXML  `xml:"nvPicPr"`
 	BlipFill blipFillXML `xml:"blipFill"`
 }
 
@@ -193,8 +193,8 @@ type graphicXML struct {
 }
 
 type graphicDataXML struct {
-	URI string   `xml:"uri,attr"`
-	Tbl *tblXML  `xml:"tbl"` // Table
+	URI string  `xml:"uri,attr"`
+	Tbl *tblXML `xml:"tbl"` // Table
 }
 
 // tblXML represents a table.

@@ -68,11 +68,11 @@ func (c *Cell) IsEmpty() bool {
 
 // Sheet represents a worksheet in the workbook.
 type Sheet struct {
-	Name     string
-	Index    int
-	Rows     [][]Cell
-	MaxRow   int // Maximum row index (0-indexed)
-	MaxCol   int // Maximum column index (0-indexed)
+	Name   string
+	Index  int
+	Rows   [][]Cell
+	MaxRow int // Maximum row index (0-indexed)
+	MaxCol int // Maximum column index (0-indexed)
 
 	// Merged cell regions
 	MergedRegions []MergedRegion
