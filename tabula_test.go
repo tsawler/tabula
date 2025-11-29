@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/tsawler/tabula/rag"
+	"github.com/tsawler/tabula/text"
 )
 
 // newZipWriter creates a zip.Writer wrapper for test DOCX creation.
@@ -666,4 +667,153 @@ func createMinimalDOCXWithContent(path, content string) error {
 	w.Write([]byte(document))
 
 	return nil
+}
+
+func TestPreserveLayout(t *testing.T) {
+	pdfPath := testPDFPath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	// Extract text with PreserveLayout
+	text, _, err := Open(pdfPath).Pages(1).PreserveLayout().Text()
+	if err != nil {
+		t.Fatalf("failed to extract text with PreserveLayout: %v", err)
+	}
+
+	if len(text) == 0 {
+		t.Error("expected non-empty text")
+	}
+
+	// PreserveLayout should contain spaces for positioning
+	// The output should still contain the word "Dinosaurs"
+	if !strings.Contains(text, "Dinosaurs") {
+		t.Error("expected text to contain 'Dinosaurs'")
+	}
+}
+
+func TestPreserveLayoutWithForm(t *testing.T) {
+	// Test with a form-like PDF if available
+	pdfPath := testPDFPath("form.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("form.pdf not found:", pdfPath)
+	}
+
+	text, _, err := Open(pdfPath).PreserveLayout().Text()
+	if err != nil {
+		t.Fatalf("failed to extract text: %v", err)
+	}
+
+	if len(text) == 0 {
+		t.Error("expected non-empty text")
+	}
+}
+
+func TestPreserveLayoutVsNormal(t *testing.T) {
+	pdfPath := testPDFPath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	// Get normal text
+	normalText, _, err := Open(pdfPath).Pages(1).Text()
+	if err != nil {
+		t.Fatalf("failed to extract normal text: %v", err)
+	}
+
+	// Get preserve layout text
+	layoutText, _, err := Open(pdfPath).Pages(1).PreserveLayout().Text()
+	if err != nil {
+		t.Fatalf("failed to extract layout text: %v", err)
+	}
+
+	// Both should be non-empty
+	if len(normalText) == 0 || len(layoutText) == 0 {
+		t.Error("expected non-empty text from both methods")
+	}
+
+	// Layout preserved text typically has more spaces
+	normalSpaces := strings.Count(normalText, " ")
+	layoutSpaces := strings.Count(layoutText, " ")
+
+	// PreserveLayout should generally have more spaces due to positioning
+	// (though this isn't always true for all documents)
+	t.Logf("Normal text has %d spaces, PreserveLayout has %d spaces", normalSpaces, layoutSpaces)
+}
+
+func TestExtractPreserveLayoutUnit(t *testing.T) {
+	// Test with synthetic fragments simulating a form-like layout:
+	// Name: ____________    Date: ____________
+	// Address: _________________________________
+
+	ext := &Extractor{}
+
+	// Page width of 612 points (US Letter)
+	pageWidth := 612.0
+
+	// Create fragments that simulate a form layout
+	// Font size 12, so charWidth ~7.2 points
+	fragments := []text.TextFragment{
+		// First line: "Name:" at left, "Date:" at right
+		{Text: "Name:", X: 72, Y: 720, Width: 35, Height: 12, FontSize: 12},
+		{Text: "Date:", X: 400, Y: 720, Width: 30, Height: 12, FontSize: 12},
+		// Second line: "Address:" at left
+		{Text: "Address:", X: 72, Y: 700, Width: 50, Height: 12, FontSize: 12},
+	}
+
+	result := ext.extractPreserveLayout(fragments, pageWidth)
+
+	// Check that output is non-empty
+	if len(result) == 0 {
+		t.Error("expected non-empty result")
+	}
+
+	// Check that we have both "Name:" and "Date:" on the same line
+	lines := strings.Split(result, "\n")
+	if len(lines) < 2 {
+		t.Errorf("expected at least 2 lines, got %d", len(lines))
+	}
+
+	// First line should have Name: and Date: with spacing between them
+	if len(lines) > 0 {
+		firstLine := lines[0]
+		if !strings.Contains(firstLine, "Name:") {
+			t.Error("expected first line to contain 'Name:'")
+		}
+		if !strings.Contains(firstLine, "Date:") {
+			t.Error("expected first line to contain 'Date:'")
+		}
+
+		// There should be significant space between Name: and Date:
+		nameIdx := strings.Index(firstLine, "Name:")
+		dateIdx := strings.Index(firstLine, "Date:")
+		if dateIdx <= nameIdx+10 {
+			t.Error("expected significant spacing between 'Name:' and 'Date:'")
+		}
+	}
+
+	// Second line (or later) should have Address:
+	found := false
+	for i := 1; i < len(lines); i++ {
+		if strings.Contains(lines[i], "Address:") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'Address:' on a line after the first")
+	}
+}
+
+func TestExtractPreserveLayoutEmpty(t *testing.T) {
+	ext := &Extractor{}
+	result := ext.extractPreserveLayout(nil, 612)
+	if result != "" {
+		t.Errorf("expected empty string for nil fragments, got %q", result)
+	}
+
+	result = ext.extractPreserveLayout([]text.TextFragment{}, 612)
+	if result != "" {
+		t.Errorf("expected empty string for empty fragments, got %q", result)
+	}
 }
