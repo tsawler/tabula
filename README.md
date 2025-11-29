@@ -6,12 +6,12 @@
 
 # Tabula
 
-A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval-Augmented Generation) workflows. Supports PDF, DOCX, ODT, XLSX, and PPTX files.
+A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval-Augmented Generation) workflows. Supports PDF, DOCX, ODT, XLSX, PPTX, and HTML files.
 
 ## Features
 
 - **Fluent API** - Chain methods for clean, readable code
-- **Multi-Format Support** - PDF (.pdf), Word (.docx), OpenDocument (.odt), Excel (.xlsx), and PowerPoint (.pptx) files
+- **Multi-Format Support** - PDF (.pdf), Word (.docx), OpenDocument (.odt), Excel (.xlsx), PowerPoint (.pptx), and HTML (.html, .htm) files
 - **Layout Analysis** - Detect headings, paragraphs, lists, and tables
 - **Header/Footer Detection** - Automatically identify and exclude repeating content
 - **RAG-Ready Chunking** - Semantic document chunking with metadata
@@ -40,12 +40,13 @@ import (
 )
 
 func main() {
-    // Works with PDF, DOCX, ODT, XLSX, and PPTX files
+    // Works with PDF, DOCX, ODT, XLSX, PPTX, and HTML files
     text, warnings, err := tabula.Open("document.pdf").Text()
     // text, warnings, err := tabula.Open("document.docx").Text()
     // text, warnings, err := tabula.Open("document.odt").Text()
     // text, warnings, err := tabula.Open("spreadsheet.xlsx").Text()
     // text, warnings, err := tabula.Open("presentation.pptx").Text()
+    // text, warnings, err := tabula.Open("page.html").Text()
     if err != nil {
         log.Fatal(err)
     }
@@ -68,7 +69,7 @@ text, warnings, err := tabula.Open("document.pdf").
     JoinParagraphs().            // Join text into paragraphs (PDF only)
     Text()
 
-// DOCX/ODT/XLSX/PPTX with header/footer exclusion
+// DOCX/ODT with header/footer exclusion
 text, warnings, err := tabula.Open("document.docx").
     ExcludeHeadersAndFooters().  // Remove headers/footers
     Text()
@@ -80,6 +81,9 @@ text, warnings, err := tabula.Open("spreadsheet.xlsx").Text()
 text, warnings, err := tabula.Open("presentation.pptx").
     ExcludeHeadersAndFooters().  // Remove slide footers and numbers
     Text()
+
+// HTML (extracts text from headings, paragraphs, lists, tables)
+text, warnings, err := tabula.Open("page.html").Text()
 ```
 
 ### Extract as Markdown
@@ -107,6 +111,9 @@ markdown, warnings, err := tabula.Open("spreadsheet.xlsx").ToMarkdown()
 markdown, warnings, err := tabula.Open("presentation.pptx").
     ExcludeHeadersAndFooters().
     ToMarkdown()
+
+// HTML (preserves headings, lists, tables, code blocks)
+markdown, warnings, err := tabula.Open("page.html").ToMarkdown()
 ```
 
 ### RAG Chunking
@@ -122,12 +129,13 @@ import (
 )
 
 func main() {
-    // Works with PDF, DOCX, ODT, XLSX, and PPTX
+    // Works with PDF, DOCX, ODT, XLSX, PPTX, and HTML
     chunks, warnings, err := tabula.Open("document.pdf").Chunks()
     // chunks, warnings, err := tabula.Open("document.docx").Chunks()
     // chunks, warnings, err := tabula.Open("document.odt").Chunks()
     // chunks, warnings, err := tabula.Open("spreadsheet.xlsx").Chunks()
     // chunks, warnings, err := tabula.Open("presentation.pptx").Chunks()
+    // chunks, warnings, err := tabula.Open("page.html").Chunks()
     if err != nil {
         log.Fatal(err)
     }
@@ -181,10 +189,20 @@ ext := tabula.Open("document.docx")
 ext := tabula.Open("document.odt")
 ext := tabula.Open("spreadsheet.xlsx")
 ext := tabula.Open("presentation.pptx")
+ext := tabula.Open("page.html")
 
 // From existing PDF reader (PDF only)
 r, _ := reader.Open("document.pdf")
 ext := tabula.FromReader(r)
+
+// From HTML string (useful for web scraping)
+html := `<html><body><h1>Hello</h1><p>World</p></body></html>`
+ext := tabula.FromHTMLString(html)
+
+// From HTML io.Reader (useful for HTTP responses)
+resp, _ := http.Get("https://example.com/page")
+defer resp.Body.Close()
+ext := tabula.FromHTMLReader(resp.Body)
 ```
 
 ### Fluent Options
@@ -200,17 +218,19 @@ ext := tabula.FromReader(r)
 | `ByColumn()` | Process multi-column layouts column by column | PDF |
 | `PreserveLayout()` | Maintain spatial positioning | PDF |
 
+**Note:** HTML files are single-page documents, so page selection options don't apply. Header/footer exclusion options are available but have no effect on HTML (the HTML parser extracts semantic content, not positional headers/footers).
+
 ### Terminal Operations
 
 | Method | Returns | Description | Formats |
 |--------|---------|-------------|---------|
-| `Text()` | `string` | Plain text content | PDF, DOCX, ODT, XLSX, PPTX |
-| `ToMarkdown()` | `string` | Markdown-formatted content | PDF, DOCX, ODT, XLSX, PPTX |
-| `ToMarkdownWithOptions(opts)` | `string` | Markdown with custom options | PDF, DOCX, ODT, XLSX, PPTX |
-| `Document()` | `*model.Document` | Full document structure | PDF, DOCX, ODT, XLSX, PPTX |
-| `Chunks()` | `*rag.ChunkCollection` | Semantic chunks for RAG | PDF, DOCX, ODT, XLSX, PPTX |
-| `ChunksWithConfig(config, sizeConfig)` | `*rag.ChunkCollection` | Chunks with custom sizing | PDF, DOCX, ODT, XLSX, PPTX |
-| `PageCount()` | `int` | Number of pages/sheets/slides | PDF, DOCX, ODT, XLSX, PPTX |
+| `Text()` | `string` | Plain text content | PDF, DOCX, ODT, XLSX, PPTX, HTML |
+| `ToMarkdown()` | `string` | Markdown-formatted content | PDF, DOCX, ODT, XLSX, PPTX, HTML |
+| `ToMarkdownWithOptions(opts)` | `string` | Markdown with custom options | PDF, DOCX, ODT, XLSX, PPTX, HTML |
+| `Document()` | `*model.Document` | Full document structure | PDF, DOCX, ODT, XLSX, PPTX, HTML |
+| `Chunks()` | `*rag.ChunkCollection` | Semantic chunks for RAG | PDF, DOCX, ODT, XLSX, PPTX, HTML |
+| `ChunksWithConfig(config, sizeConfig)` | `*rag.ChunkCollection` | Chunks with custom sizing | PDF, DOCX, ODT, XLSX, PPTX, HTML |
+| `PageCount()` | `int` | Number of pages/sheets/slides | PDF, DOCX, ODT, XLSX, PPTX, HTML |
 | `Fragments()` | `[]text.TextFragment` | Raw text fragments with positions | PDF |
 | `Lines()` | `[]layout.Line` | Detected text lines | PDF |
 | `Paragraphs()` | `[]layout.Paragraph` | Detected paragraphs | PDF |
@@ -220,11 +240,13 @@ ext := tabula.FromReader(r)
 | `Elements()` | `[]layout.LayoutElement` | All elements in reading order | PDF |
 | `Analyze()` | `*layout.AnalysisResult` | Complete layout analysis | PDF |
 
-**Note on PDF-only methods:** The methods marked "PDF" in the tables above (`Pages`, `PageRange`, `JoinParagraphs`, `ByColumn`, `PreserveLayout`, `Fragments`, `Lines`, `Paragraphs`, `Headings`, `Lists`, `Blocks`, `Elements`, `Analyze`) exist because PDFs lack semantic structure - they store raw text fragments at arbitrary positions, requiring layout analysis to reconstruct document structure. DOCX, ODT, XLSX, and PPTX files already contain explicit semantic markup in their XML, so these detection methods aren't needed. Use `Document()` to access the semantic structure for all formats.
+**Note on PDF-only methods:** The methods marked "PDF" in the tables above (`Pages`, `PageRange`, `JoinParagraphs`, `ByColumn`, `PreserveLayout`, `Fragments`, `Lines`, `Paragraphs`, `Headings`, `Lists`, `Blocks`, `Elements`, `Analyze`) exist because PDFs lack semantic structure - they store raw text fragments at arbitrary positions, requiring layout analysis to reconstruct document structure. DOCX, ODT, XLSX, PPTX, and HTML files already contain explicit semantic markup, so these detection methods aren't needed. Use `Document()` to access the semantic structure for all formats.
 
 **Note on XLSX:** For Excel files, each sheet becomes a page, and the sheet data is represented as a table element. `PageCount()` returns the number of sheets. `Text()` returns tab-separated values, while `ToMarkdown()` formats each sheet as a markdown table.
 
 **Note on PPTX:** For PowerPoint files, each slide becomes a page. `PageCount()` returns the number of slides. Slide titles are extracted as headings, bullet points as lists, and tables are preserved. Use `ExcludeHeadersAndFooters()` to remove slide footers, dates, and slide numbers.
+
+**Note on HTML:** For HTML files, the entire document is treated as a single page. `PageCount()` returns 1. Semantic elements are preserved: headings (`<h1>`-`<h6>`), paragraphs (`<p>`), lists (`<ul>`, `<ol>`), tables (`<table>` with colspan/rowspan), code blocks (`<pre>`, `<code>`), and blockquotes (`<blockquote>`). Metadata is extracted from `<title>` and `<meta>` tags.
 
 ### Inspection Methods (non-terminal, PDF only)
 
@@ -272,7 +294,7 @@ result := chunks.
 ```go
 import "github.com/tsawler/tabula/rag"
 
-// Options supported by all formats (PDF, DOCX, ODT, XLSX, PPTX)
+// Options supported by all formats (PDF, DOCX, ODT, XLSX, PPTX, HTML)
 opts := rag.MarkdownOptions{
     IncludeMetadata:        true,   // YAML front matter with document metadata
     IncludeTableOfContents: true,   // Generated TOC from headings
@@ -286,6 +308,7 @@ markdown, _, _ := tabula.Open("doc.docx").ToMarkdownWithOptions(opts)
 markdown, _, _ := tabula.Open("doc.odt").ToMarkdownWithOptions(opts)
 markdown, _, _ := tabula.Open("spreadsheet.xlsx").ToMarkdownWithOptions(opts)
 markdown, _, _ := tabula.Open("presentation.pptx").ToMarkdownWithOptions(opts)
+markdown, _, _ := tabula.Open("page.html").ToMarkdownWithOptions(opts)
 
 // PDF-only options (used via RAG chunking pipeline)
 pdfOpts := rag.MarkdownOptions{

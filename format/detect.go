@@ -24,6 +24,8 @@ const (
 	XLSX
 	// PPTX indicates a Microsoft PowerPoint (.pptx) document.
 	PPTX
+	// HTML indicates an HTML document.
+	HTML
 )
 
 // String returns the string representation of the format.
@@ -39,6 +41,8 @@ func (f Format) String() string {
 		return "XLSX"
 	case PPTX:
 		return "PPTX"
+	case HTML:
+		return "HTML"
 	default:
 		return "Unknown"
 	}
@@ -57,6 +61,8 @@ func (f Format) Extension() string {
 		return ".xlsx"
 	case PPTX:
 		return ".pptx"
+	case HTML:
+		return ".html"
 	default:
 		return ""
 	}
@@ -76,6 +82,8 @@ func Detect(filename string) Format {
 		return XLSX
 	case ".pptx":
 		return PPTX
+	case ".html", ".htm":
+		return HTML
 	default:
 		return Unknown
 	}
@@ -101,15 +109,55 @@ func DetectFromMagic(data []byte) Format {
 		return Unknown
 	}
 
+	// HTML detection: check for <!DOCTYPE or <html or <?xml
+	if detectHTMLMagic(data) {
+		return HTML
+	}
+
 	return Unknown
+}
+
+// detectHTMLMagic checks if the data looks like HTML content.
+func detectHTMLMagic(data []byte) bool {
+	// Trim leading whitespace
+	start := 0
+	for start < len(data) && (data[start] == ' ' || data[start] == '\t' || data[start] == '\n' || data[start] == '\r') {
+		start++
+	}
+	if start >= len(data) {
+		return false
+	}
+	data = data[start:]
+
+	// Check for common HTML signatures (case-insensitive for DOCTYPE)
+	upper := strings.ToUpper(string(data))
+	if strings.HasPrefix(upper, "<!DOCTYPE HTML") {
+		return true
+	}
+	if strings.HasPrefix(upper, "<HTML") {
+		return true
+	}
+	// XML declaration followed by html-like content could be XHTML
+	if strings.HasPrefix(upper, "<?XML") && strings.Contains(upper[:min(500, len(upper))], "<HTML") {
+		return true
+	}
+
+	return false
+}
+
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // DetectFromReader inspects the content to determine format.
 // This is more reliable than extension-based detection and can
 // distinguish between different ZIP-based formats (DOCX, XLSX, PPTX).
 func DetectFromReader(r io.ReaderAt, size int64) (Format, error) {
-	// Read magic bytes first
-	magic := make([]byte, 8)
+	// Read magic bytes first (need more for HTML detection)
+	magic := make([]byte, 512)
 	n, err := r.ReadAt(magic, 0)
 	if err != nil && err != io.EOF {
 		return Unknown, err
@@ -125,6 +173,11 @@ func DetectFromReader(r io.ReaderAt, size int64) (Format, error) {
 	if len(magic) >= 4 && magic[0] == 0x50 && magic[1] == 0x4B && magic[2] == 0x03 && magic[3] == 0x04 {
 		// It's a ZIP archive - check contents to determine specific format
 		return detectZIPFormat(r, size)
+	}
+
+	// Check for HTML
+	if detectHTMLMagic(magic) {
+		return HTML, nil
 	}
 
 	return Unknown, nil
