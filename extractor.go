@@ -12,6 +12,7 @@ import (
 	"github.com/tsawler/tabula/model"
 	"github.com/tsawler/tabula/odt"
 	"github.com/tsawler/tabula/pages"
+	"github.com/tsawler/tabula/pptx"
 	"github.com/tsawler/tabula/rag"
 	"github.com/tsawler/tabula/reader"
 	"github.com/tsawler/tabula/text"
@@ -25,7 +26,7 @@ type extractedPage struct {
 	page      *pages.Page
 }
 
-// Extractor provides a fluent interface for extracting content from PDFs, DOCX, ODT, and XLSX files.
+// Extractor provides a fluent interface for extracting content from PDFs, DOCX, ODT, XLSX, and PPTX files.
 // Each configuration method returns a new Extractor instance, making it
 // safe for concurrent use and allowing method chaining.
 type Extractor struct {
@@ -38,6 +39,7 @@ type Extractor struct {
 	docxReader *docx.Reader   // DOCX reader
 	odtReader  *odt.Reader    // ODT reader
 	xlsxReader *xlsx.Reader   // XLSX reader
+	pptxReader *pptx.Reader   // PPTX reader
 
 	// Lifecycle
 	ownsReader   bool // true if we opened the reader and should close it
@@ -63,6 +65,7 @@ func (e *Extractor) clone() *Extractor {
 		docxReader:   e.docxReader,
 		odtReader:    e.odtReader,
 		xlsxReader:   e.xlsxReader,
+		pptxReader:   e.pptxReader,
 		ownsReader:   e.ownsReader,
 		readerOpened: e.readerOpened,
 		options:      e.options.clone(),
@@ -112,6 +115,16 @@ func (e *Extractor) ensureReader() error {
 		e.readerOpened = true
 		return nil
 
+	case format.PPTX:
+		pr, err := pptx.Open(e.filename)
+		if err != nil {
+			return fmt.Errorf("failed to open PPTX: %w", err)
+		}
+		e.pptxReader = pr
+		e.ownsReader = true
+		e.readerOpened = true
+		return nil
+
 	case format.PDF:
 		r, err := reader.Open(e.filename)
 		if err != nil {
@@ -152,6 +165,12 @@ func (e *Extractor) Close() error {
 		if e.xlsxReader != nil {
 			err := e.xlsxReader.Close()
 			e.xlsxReader = nil
+			e.ownsReader = false
+			return err
+		}
+		if e.pptxReader != nil {
+			err := e.pptxReader.Close()
+			e.pptxReader = nil
 			e.ownsReader = false
 			return err
 		}
@@ -396,6 +415,21 @@ func (e *Extractor) Text() (string, []Warning, error) {
 		return text, e.warnings, nil
 	}
 
+	// Handle PPTX files
+	if e.format == format.PPTX {
+		opts := pptx.ExtractOptions{
+			ExcludeHeaders: e.options.excludeHeaders,
+			ExcludeFooters: e.options.excludeFooters,
+			IncludeNotes:   true,
+			IncludeTitles:  true,
+		}
+		text, err := e.pptxReader.TextWithOptions(opts)
+		if err != nil {
+			return "", e.warnings, err
+		}
+		return text, e.warnings, nil
+	}
+
 	// PDF processing
 	pageIndices, err := e.resolvePages()
 	if err != nil {
@@ -622,6 +656,25 @@ func (e *Extractor) ToMarkdownWithOptions(opts rag.MarkdownOptions) (string, []W
 		return md, nil, nil
 	}
 
+	// For PPTX files, use the native markdown method
+	if e.format == format.PPTX {
+		if err := e.ensureReader(); err != nil {
+			return "", nil, err
+		}
+		defer e.Close()
+		pptxOpts := pptx.ExtractOptions{
+			ExcludeHeaders: e.options.excludeHeaders,
+			ExcludeFooters: e.options.excludeFooters,
+			IncludeNotes:   true,
+			IncludeTitles:  true,
+		}
+		md, err := e.pptxReader.MarkdownWithRAGOptions(pptxOpts, opts)
+		if err != nil {
+			return "", nil, err
+		}
+		return md, nil, nil
+	}
+
 	// For PDF files, use the RAG chunking pipeline
 	chunks, warnings, err := e.Chunks()
 	if err != nil {
@@ -706,6 +759,10 @@ func (e *Extractor) PageCount() (int, error) {
 
 	if e.format == format.XLSX {
 		return e.xlsxReader.PageCount()
+	}
+
+	if e.format == format.PPTX {
+		return e.pptxReader.PageCount()
 	}
 
 	return e.reader.PageCount()
@@ -1312,6 +1369,15 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 	// Handle XLSX files
 	if e.format == format.XLSX {
 		doc, err := e.xlsxReader.Document()
+		if err != nil {
+			return nil, e.warnings, err
+		}
+		return doc, e.warnings, nil
+	}
+
+	// Handle PPTX files
+	if e.format == format.PPTX {
+		doc, err := e.pptxReader.Document()
 		if err != nil {
 			return nil, e.warnings, err
 		}
