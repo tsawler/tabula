@@ -20,6 +20,8 @@ const (
 	DOCX
 	// ODT indicates an OpenDocument Text (.odt) document.
 	ODT
+	// XLSX indicates a Microsoft Excel (.xlsx) document.
+	XLSX
 )
 
 // String returns the string representation of the format.
@@ -31,6 +33,8 @@ func (f Format) String() string {
 		return "DOCX"
 	case ODT:
 		return "ODT"
+	case XLSX:
+		return "XLSX"
 	default:
 		return "Unknown"
 	}
@@ -45,6 +49,8 @@ func (f Format) Extension() string {
 		return ".docx"
 	case ODT:
 		return ".odt"
+	case XLSX:
+		return ".xlsx"
 	default:
 		return ""
 	}
@@ -60,6 +66,8 @@ func Detect(filename string) Format {
 		return DOCX
 	case ".odt":
 		return ODT
+	case ".xlsx":
+		return XLSX
 	default:
 		return Unknown
 	}
@@ -146,8 +154,7 @@ func detectZIPFormat(r io.ReaderAt, size int64) (Format, error) {
 		case strings.HasPrefix(f.Name, "word/"):
 			return DOCX, nil
 		case strings.HasPrefix(f.Name, "xl/"):
-			// Future: return XLSX
-			return Unknown, nil
+			return XLSX, nil
 		case strings.HasPrefix(f.Name, "ppt/"):
 			// Future: return PPTX
 			return Unknown, nil
