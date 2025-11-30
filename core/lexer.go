@@ -7,42 +7,45 @@ import (
 	"io"
 )
 
-// TokenType represents the type of token
+// TokenType identifies the type of a lexical token.
 type TokenType int
 
+// Token type constants for PDF lexical elements.
 const (
-	TokenEOF TokenType = iota
-	TokenWhitespace
-	TokenComment
-	TokenKeyword     // true, false, null, obj, endobj, stream, endstream, etc.
-	TokenInteger     // 123
-	TokenReal        // 3.14
-	TokenString      // (hello)
-	TokenHexString   // <48656C6C6F>
-	TokenName        // /Type
-	TokenArrayStart  // [
-	TokenArrayEnd    // ]
-	TokenDictStart   // <<
-	TokenDictEnd     // >>
-	TokenIndirectRef // R (after two numbers)
+	TokenEOF         TokenType = iota // End of input
+	TokenWhitespace                   // Whitespace (space, tab, newline, etc.)
+	TokenComment                      // Comment (% to end of line)
+	TokenKeyword                      // Keywords: true, false, null, obj, endobj, stream, endstream
+	TokenInteger                      // Integer literal (e.g., 123, -45)
+	TokenReal                         // Real number literal (e.g., 3.14, -0.5)
+	TokenString                       // Literal string: (hello)
+	TokenHexString                    // Hexadecimal string: <48656C6C6F>
+	TokenName                         // Name object: /Type
+	TokenArrayStart                   // Array start: [
+	TokenArrayEnd                     // Array end: ]
+	TokenDictStart                    // Dictionary start: <<
+	TokenDictEnd                      // Dictionary end: >>
+	TokenIndirectRef                  // Indirect reference marker: R
 )
 
-// Token represents a lexical token
+// Token represents a lexical token from PDF input.
 type Token struct {
-	Type  TokenType
-	Value []byte
-	Pos   int64 // Position in stream
+	Type  TokenType // Token type
+	Value []byte    // Raw token value (without delimiters for strings/names)
+	Pos   int64     // Byte position in the input stream
 }
 
-// Lexer performs lexical analysis of PDF content
+// Lexer performs lexical analysis of PDF content, breaking the input into tokens.
+// It handles all PDF lexical elements including strings with escape sequences,
+// hexadecimal strings, names with # escapes, and nested parentheses.
 type Lexer struct {
 	reader *bufio.Reader
-	pos    int64
-	line   int
-	col    int
+	pos    int64 // Current byte position in the input
+	line   int   // Current line number (for error reporting)
+	col    int   // Current column number
 }
 
-// NewLexer creates a new lexer
+// NewLexer creates a new lexer for the given reader.
 func NewLexer(r io.Reader) *Lexer {
 	return &Lexer{
 		reader: bufio.NewReader(r),
@@ -52,7 +55,8 @@ func NewLexer(r io.Reader) *Lexer {
 	}
 }
 
-// NextToken returns the next token from the input
+// NextToken returns the next token from the input.
+// It skips whitespace and returns TokenEOF when the input is exhausted.
 func (l *Lexer) NextToken() (*Token, error) {
 	// Skip whitespace but don't return it as a token
 	l.skipWhitespace()
@@ -116,7 +120,7 @@ func (l *Lexer) NextToken() (*Token, error) {
 	return nil, fmt.Errorf("unexpected character '%c' at position %d", b, l.pos)
 }
 
-// readByte reads a single byte and advances position
+// readByte reads a single byte, advances position, and tracks line/column.
 func (l *Lexer) readByte() (byte, error) {
 	b, err := l.reader.ReadByte()
 	if err != nil {
@@ -131,7 +135,7 @@ func (l *Lexer) readByte() (byte, error) {
 	return b, nil
 }
 
-// peek looks at the next byte without consuming it
+// peek returns the next byte without consuming it.
 func (l *Lexer) peek() (byte, error) {
 	bytes, err := l.reader.Peek(1)
 	if err != nil {
@@ -140,12 +144,12 @@ func (l *Lexer) peek() (byte, error) {
 	return bytes[0], nil
 }
 
-// peekN looks at the next n bytes without consuming them
+// peekN returns the next n bytes without consuming them.
 func (l *Lexer) peekN(n int) ([]byte, error) {
 	return l.reader.Peek(n)
 }
 
-// unreadByte unreads the last byte
+// unreadByte pushes the last byte back onto the input.
 func (l *Lexer) unreadByte() error {
 	err := l.reader.UnreadByte()
 	if err != nil {
@@ -156,8 +160,8 @@ func (l *Lexer) unreadByte() error {
 	return nil
 }
 
-// skipWhitespace skips all whitespace characters
-// PDF whitespace: space (0x20), tab (0x09), LF (0x0A), CR (0x0D), FF (0x0C), null (0x00)
+// skipWhitespace skips all PDF whitespace characters.
+// PDF whitespace includes: space (0x20), tab (0x09), LF (0x0A), CR (0x0D), FF (0x0C), null (0x00).
 func (l *Lexer) skipWhitespace() error {
 	for {
 		b, err := l.peek()
@@ -171,7 +175,7 @@ func (l *Lexer) skipWhitespace() error {
 	}
 }
 
-// readComment reads a comment (% to end of line)
+// readComment reads a comment from % to end of line.
 func (l *Lexer) readComment() (*Token, error) {
 	startPos := l.pos
 	var buf bytes.Buffer
@@ -217,7 +221,8 @@ func (l *Lexer) readComment() (*Token, error) {
 	return &Token{Type: TokenComment, Value: buf.Bytes(), Pos: startPos}, nil
 }
 
-// readString reads a literal string (hello)
+// readString reads a literal string "(hello)" with escape sequence handling.
+// Supports nested parentheses and escape sequences: \n, \r, \t, \b, \f, \\, \(, \), \ddd (octal).
 func (l *Lexer) readString() (*Token, error) {
 	startPos := l.pos
 	var buf bytes.Buffer
@@ -303,7 +308,8 @@ func (l *Lexer) readString() (*Token, error) {
 	return &Token{Type: TokenString, Value: buf.Bytes(), Pos: startPos}, nil
 }
 
-// readHexString reads a hexadecimal string <48656C6C6F>
+// readHexString reads a hexadecimal string "<48656C6C6F>".
+// Whitespace within the string is ignored. Odd-length strings are padded with 0.
 func (l *Lexer) readHexString() (*Token, error) {
 	startPos := l.pos
 	var buf bytes.Buffer
@@ -348,7 +354,8 @@ func (l *Lexer) readHexString() (*Token, error) {
 	return &Token{Type: TokenHexString, Value: buf.Bytes(), Pos: startPos}, nil
 }
 
-// readName reads a name object /Type
+// readName reads a name object "/Type".
+// Handles #xx escape sequences for special characters.
 func (l *Lexer) readName() (*Token, error) {
 	startPos := l.pos
 	var buf bytes.Buffer
@@ -405,7 +412,7 @@ func (l *Lexer) readName() (*Token, error) {
 	return &Token{Type: TokenName, Value: buf.Bytes(), Pos: startPos}, nil
 }
 
-// readNumber reads an integer or real number
+// readNumber reads an integer or real number (e.g., 123, -45, 3.14).
 func (l *Lexer) readNumber() (*Token, error) {
 	startPos := l.pos
 	var buf bytes.Buffer
@@ -443,7 +450,7 @@ func (l *Lexer) readNumber() (*Token, error) {
 	return &Token{Type: tokenType, Value: buf.Bytes(), Pos: startPos}, nil
 }
 
-// readKeyword reads a keyword (true, false, null, R, obj, endobj, etc.)
+// readKeyword reads a keyword (true, false, null, R, obj, endobj, stream, endstream).
 func (l *Lexer) readKeyword() (*Token, error) {
 	startPos := l.pos
 	var buf bytes.Buffer
@@ -475,34 +482,39 @@ func (l *Lexer) readKeyword() (*Token, error) {
 	return &Token{Type: TokenKeyword, Value: value, Pos: startPos}, nil
 }
 
-// Helper functions
-
+// isWhitespace reports whether b is a PDF whitespace character.
 func isWhitespace(b byte) bool {
 	// PDF whitespace: space, tab, LF, CR, FF, null
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == '\f' || b == 0
 }
 
+// isDelimiter reports whether b is a PDF delimiter character.
 func isDelimiter(b byte) bool {
 	return b == '(' || b == ')' || b == '<' || b == '>' || b == '[' || b == ']' ||
 		b == '{' || b == '}' || b == '/' || b == '%'
 }
 
+// isDigit reports whether b is an ASCII digit.
 func isDigit(b byte) bool {
 	return b >= '0' && b <= '9'
 }
 
+// isOctalDigit reports whether b is an octal digit (0-7).
 func isOctalDigit(b byte) bool {
 	return b >= '0' && b <= '7'
 }
 
+// isHexDigit reports whether b is a hexadecimal digit.
 func isHexDigit(b byte) bool {
 	return (b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')
 }
 
+// isAlpha reports whether b is an ASCII letter.
 func isAlpha(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
 }
 
+// hexValue returns the numeric value of a hex digit.
 func hexValue(b byte) byte {
 	if b >= '0' && b <= '9' {
 		return b - '0'
@@ -516,8 +528,8 @@ func hexValue(b byte) byte {
 	return 0
 }
 
-// ReadBytes reads exactly n bytes from the underlying reader
-// This is used for reading binary stream data
+// ReadBytes reads exactly n bytes from the underlying reader.
+// Used for reading binary stream data where tokenization is not appropriate.
 func (l *Lexer) ReadBytes(n int) ([]byte, error) {
 	data := make([]byte, n)
 	totalRead := 0
@@ -541,7 +553,7 @@ func (l *Lexer) ReadBytes(n int) ([]byte, error) {
 	return data, nil
 }
 
-// SkipBytes skips exactly n bytes from the underlying reader
+// SkipBytes discards exactly n bytes from the underlying reader.
 func (l *Lexer) SkipBytes(n int) error {
 	for i := 0; i < n; i++ {
 		_, err := l.readByte()
@@ -552,12 +564,12 @@ func (l *Lexer) SkipBytes(n int) error {
 	return nil
 }
 
-// Peek returns the next byte without consuming it (public wrapper for peek)
+// Peek returns the next byte without consuming it.
 func (l *Lexer) Peek() (byte, error) {
 	return l.peek()
 }
 
-// ReadByte reads and returns a single byte (public wrapper for readByte)
+// ReadByte reads and returns a single byte, advancing the position.
 func (l *Lexer) ReadByte() (byte, error) {
 	return l.readByte()
 }

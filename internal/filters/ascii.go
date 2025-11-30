@@ -5,9 +5,9 @@ import (
 	"fmt"
 )
 
-// ASCIIHexDecode decodes ASCII hex encoded data
-// Format: data encoded as hexadecimal digits (0-9, A-F)
-// Whitespace is ignored, > marks end of data
+// ASCIIHexDecode decodes ASCII hexadecimal encoded data.
+// Each pair of hexadecimal digits (0-9, A-F, a-f) represents one byte.
+// Whitespace is ignored, and > marks end of data.
 func ASCIIHexDecode(data []byte) ([]byte, error) {
 	var result bytes.Buffer
 
@@ -67,11 +67,10 @@ func ASCIIHexDecode(data []byte) ([]byte, error) {
 	return result.Bytes(), nil
 }
 
-// ASCII85Decode decodes ASCII base-85 encoded data
-// Format: data encoded in base-85 (Ascii85)
-// Uses characters ! to u (33 to 117)
-// Special case: z represents four zero bytes
-// ~> marks end of data
+// ASCII85Decode decodes ASCII base-85 (Ascii85) encoded data.
+// Each group of 5 ASCII characters (! to u, values 33-117) represents 4 bytes.
+// The special character 'z' represents four zero bytes. The sequence ~> marks
+// end of data.
 func ASCII85Decode(data []byte) ([]byte, error) {
 	var result bytes.Buffer
 
@@ -151,7 +150,7 @@ func ASCII85Decode(data []byte) ([]byte, error) {
 	return result.Bytes(), nil
 }
 
-// hexDigitToByte converts a hex character to its numeric value
+// hexDigitToByte converts a hexadecimal character to its numeric value (0-15).
 func hexDigitToByte(c byte) (byte, error) {
 	switch {
 	case c >= '0' && c <= '9':
@@ -165,7 +164,7 @@ func hexDigitToByte(c byte) (byte, error) {
 	}
 }
 
-// isWhitespace checks if a byte is PDF whitespace
+// isWhitespace reports whether c is a PDF whitespace character.
 func isWhitespace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == 0
 }

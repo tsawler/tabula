@@ -13,14 +13,16 @@ func min(a, b int) int {
 	return b
 }
 
-// Parser parses PDF objects using the Lexer
+// Parser parses PDF objects from an io.Reader using a Lexer for tokenization.
+// It supports parsing all PDF object types including indirect objects and streams.
 type Parser struct {
 	lexer        *Lexer
-	currentToken *Token
-	peekToken    *Token
+	currentToken *Token // Current token being processed
+	peekToken    *Token // Next token (lookahead)
 }
 
-// NewParser creates a new PDF parser
+// NewParser creates a new PDF parser for the given reader.
+// It initializes the lexer and loads the first two tokens for lookahead.
 func NewParser(r io.Reader) *Parser {
 	p := &Parser{
 		lexer: NewLexer(r),
@@ -31,7 +33,7 @@ func NewParser(r io.Reader) *Parser {
 	return p
 }
 
-// nextToken advances to the next token
+// nextToken advances the parser to the next token by shifting the lookahead.
 func (p *Parser) nextToken() error {
 	p.currentToken = p.peekToken
 	token, err := p.lexer.NextToken()
@@ -42,7 +44,7 @@ func (p *Parser) nextToken() error {
 	return nil
 }
 
-// skipComments skips any comment tokens
+// skipComments skips over any consecutive comment tokens.
 func (p *Parser) skipComments() error {
 	for p.currentToken != nil && p.currentToken.Type == TokenComment {
 		if err := p.nextToken(); err != nil {
@@ -52,7 +54,9 @@ func (p *Parser) skipComments() error {
 	return nil
 }
 
-// ParseObject parses a PDF object
+// ParseObject parses and returns the next PDF object from the input.
+// It handles all PDF object types: null, boolean, integer, real, string,
+// name, array, dictionary, and indirect references.
 func (p *Parser) ParseObject() (Object, error) {
 	// Skip any comments
 	if err := p.skipComments(); err != nil {
@@ -133,7 +137,8 @@ func (p *Parser) ParseObject() (Object, error) {
 	}
 }
 
-// parseNumber parses an integer, real, or indirect reference
+// parseNumber parses an integer, real number, or indirect reference.
+// Indirect references are detected by lookahead: "num gen R" pattern.
 func (p *Parser) parseNumber() (Object, error) {
 	firstToken := string(p.currentToken.Value)
 
@@ -178,7 +183,7 @@ func (p *Parser) parseNumber() (Object, error) {
 	return Int(firstInt), nil
 }
 
-// parseArray parses an array object
+// parseArray parses a PDF array "[obj1 obj2 ...]".
 func (p *Parser) parseArray() (Object, error) {
 	if p.currentToken.Type != TokenArrayStart {
 		return nil, fmt.Errorf("expected '[', got %v", p.currentToken.Type)
@@ -215,7 +220,7 @@ func (p *Parser) parseArray() (Object, error) {
 	return arr, nil
 }
 
-// parseDict parses a dictionary object
+// parseDict parses a PDF dictionary "<< /Key value ... >>".
 func (p *Parser) parseDict() (Object, error) {
 	if p.currentToken.Type != TokenDictStart {
 		return nil, fmt.Errorf("expected '<<', got %v", p.currentToken.Type)
@@ -260,7 +265,8 @@ func (p *Parser) parseDict() (Object, error) {
 	return dict, nil
 }
 
-// ParseIndirectObject parses an indirect object (num gen obj ... endobj)
+// ParseIndirectObject parses an indirect object definition.
+// Format: "num gen obj <object> endobj" or "num gen obj <dict> stream ... endstream endobj"
 func (p *Parser) ParseIndirectObject() (*IndirectObject, error) {
 	// Skip comments
 	if err := p.skipComments(); err != nil {
@@ -330,7 +336,8 @@ func (p *Parser) ParseIndirectObject() (*IndirectObject, error) {
 	}, nil
 }
 
-// parseStream parses a stream object (after the stream keyword)
+// parseStream parses a stream object after the "stream" keyword.
+// It reads the binary data according to the /Length entry in the dictionary.
 func (p *Parser) parseStream(dict Dict) (*Stream, error) {
 	// We're at the 'stream' keyword
 	if p.currentToken.Type != TokenKeyword || string(p.currentToken.Value) != "stream" {

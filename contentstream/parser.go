@@ -8,21 +8,22 @@ import (
 	"github.com/tsawler/tabula/core"
 )
 
-// Operation represents a single content stream operation
-// consisting of an operator and its operands
+// Operation represents a single content stream operation consisting of an
+// operator and its operands. Operands are PDF objects that precede the operator.
 type Operation struct {
 	Operator string        // The operator (e.g., "Tj", "Tm", "q")
 	Operands []core.Object // The operands
 }
 
-// Parser parses PDF content streams
+// Parser parses PDF content streams into a sequence of operations.
+// Each operation consists of an operator and its operands.
 type Parser struct {
 	data []byte
 	pos  int
 	ops  []Operation
 }
 
-// NewParser creates a new content stream parser
+// NewParser creates a new content stream parser for the given data.
 func NewParser(data []byte) *Parser {
 	return &Parser{
 		data: data,
@@ -31,7 +32,7 @@ func NewParser(data []byte) *Parser {
 	}
 }
 
-// Parse parses the content stream and returns a list of operations
+// Parse parses the content stream and returns all operations in order.
 func (p *Parser) Parse() ([]Operation, error) {
 	for p.pos < len(p.data) {
 		// Skip whitespace
@@ -53,7 +54,8 @@ func (p *Parser) Parse() ([]Operation, error) {
 // operandStack temporarily holds operands until we hit an operator
 var operandStack []core.Object
 
-// parseNext parses the next token (operand or operator)
+// parseNext parses the next token, which is either an operand (pushed onto the
+// stack) or an operator (which consumes the operand stack and creates an Operation).
 func (p *Parser) parseNext() error {
 	start := p.pos
 
@@ -80,7 +82,8 @@ func (p *Parser) parseNext() error {
 	return nil
 }
 
-// parseOperator parses an operator and creates an operation
+// parseOperator parses an operator and creates an operation with the current
+// operand stack, then clears the stack.
 func (p *Parser) parseOperator() error {
 	start := p.pos
 
@@ -116,7 +119,8 @@ func (p *Parser) parseOperator() error {
 	return nil
 }
 
-// parseOperand parses a single operand (number, string, name, array, dict, etc.)
+// parseOperand parses a single operand, which can be a number, string, name,
+// array, dictionary, boolean, or null.
 func (p *Parser) parseOperand() (core.Object, error) {
 	p.skipWhitespace()
 
@@ -182,7 +186,7 @@ func (p *Parser) parseOperand() (core.Object, error) {
 	return nil, fmt.Errorf("unexpected character at position %d: %c", p.pos, c)
 }
 
-// parseNumber parses an integer or real number
+// parseNumber parses an integer or real number operand.
 func (p *Parser) parseNumber() (core.Object, error) {
 	start := p.pos
 	hasDecimal := false
@@ -222,7 +226,7 @@ func (p *Parser) parseNumber() (core.Object, error) {
 	return core.Int(val), nil
 }
 
-// parseString parses a literal string (...)
+// parseString parses a literal string (...) with escape sequence handling.
 func (p *Parser) parseString() (core.Object, error) {
 	if p.data[p.pos] != '(' {
 		return nil, fmt.Errorf("string must start with '('")
@@ -284,7 +288,7 @@ func (p *Parser) parseString() (core.Object, error) {
 	return core.String(result.String()), nil
 }
 
-// parseHexString parses a hex string <...>
+// parseHexString parses a hexadecimal string <...>.
 func (p *Parser) parseHexString() (core.Object, error) {
 	if p.data[p.pos] != '<' {
 		return nil, fmt.Errorf("hex string must start with '<'")
@@ -341,7 +345,7 @@ func (p *Parser) parseHexString() (core.Object, error) {
 	return core.String(result.String()), nil
 }
 
-// parseName parses a name /Name
+// parseName parses a name object /Name with # escape handling.
 func (p *Parser) parseName() (core.Object, error) {
 	if p.data[p.pos] != '/' {
 		return nil, fmt.Errorf("name must start with '/'")
@@ -380,7 +384,7 @@ func (p *Parser) parseName() (core.Object, error) {
 	return core.Name(result.String()), nil
 }
 
-// parseArray parses an array [...]
+// parseArray parses an array [...] of operands.
 func (p *Parser) parseArray() (core.Object, error) {
 	if p.data[p.pos] != '[' {
 		return nil, fmt.Errorf("array must start with '['")
@@ -412,7 +416,7 @@ func (p *Parser) parseArray() (core.Object, error) {
 	return arr, nil
 }
 
-// parseDict parses a dictionary <<...>>
+// parseDict parses a dictionary <<...>> (rare in content streams).
 func (p *Parser) parseDict() (core.Object, error) {
 	if p.pos+1 >= len(p.data) || p.data[p.pos] != '<' || p.data[p.pos+1] != '<' {
 		return nil, fmt.Errorf("dictionary must start with '<<'")
@@ -456,7 +460,7 @@ func (p *Parser) parseDict() (core.Object, error) {
 	return dict, nil
 }
 
-// skipWhitespace skips whitespace characters
+// skipWhitespace advances past PDF whitespace characters.
 func (p *Parser) skipWhitespace() {
 	for p.pos < len(p.data) && isWhitespace(p.data[p.pos]) {
 		p.pos++
@@ -465,24 +469,29 @@ func (p *Parser) skipWhitespace() {
 
 // Helper functions
 
+// isWhitespace reports whether c is a PDF whitespace character.
 func isWhitespace(c byte) bool {
 	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f' || c == 0
 }
 
+// isLetter reports whether c is an ASCII letter.
 func isLetter(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
 }
 
+// isDelimiter reports whether c is a PDF delimiter character.
 func isDelimiter(c byte) bool {
 	return c == '(' || c == ')' || c == '<' || c == '>' ||
 		c == '[' || c == ']' || c == '{' || c == '}' ||
 		c == '/' || c == '%'
 }
 
+// isHexDigit reports whether c is a hexadecimal digit.
 func isHexDigit(c byte) bool {
 	return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')
 }
 
+// hexValue returns the numeric value of a hexadecimal digit.
 func hexValue(c byte) byte {
 	if c >= '0' && c <= '9' {
 		return c - '0'

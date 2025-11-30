@@ -15,30 +15,31 @@ import (
 )
 
 // xTolerance is the tolerance for X position comparison as a fraction of font size.
-// Handles PDF generators (Word/Quartz) that place fragments in correct stream
+// Handles PDF generators (Word, Quartz) that place fragments in correct stream
 // order but with slightly overlapping or disordered X coordinates.
 const xTolerance = 0.25
 
-// TextFragment represents a piece of extracted text with position
+// TextFragment represents a piece of extracted text with position and font information.
 type TextFragment struct {
-	Text      string
-	X, Y      float64
-	Width     float64
-	Height    float64
-	FontName  string
-	FontSize  float64
+	Text      string    // Decoded text content
+	X, Y      float64   // Position in page coordinates
+	Width     float64   // Width of the text in page units
+	Height    float64   // Height (typically font size)
+	FontName  string    // Name of the font used
+	FontSize  float64   // Font size in page units
 	Direction Direction // Text direction (LTR, RTL, Neutral)
 }
 
-// Extractor extracts text from content streams
+// Extractor extracts text fragments from PDF content streams.
+// It maintains graphics state and registered fonts to properly decode and position text.
 type Extractor struct {
-	gs    *graphicsstate.GraphicsState
-	fonts map[string]*font.Font
+	gs    *graphicsstate.GraphicsState // Graphics state tracker
+	fonts map[string]*font.Font        // Registered fonts by name
 
-	fragments []TextFragment
+	fragments []TextFragment // Extracted text fragments
 }
 
-// NewExtractor creates a new text extractor
+// NewExtractor creates a new text extractor with initialized graphics state.
 func NewExtractor() *Extractor {
 	return &Extractor{
 		gs:        graphicsstate.NewGraphicsState(),
@@ -47,19 +48,20 @@ func NewExtractor() *Extractor {
 	}
 }
 
-// RegisterFont registers a font for use during extraction
+// RegisterFont registers a font by name for use during extraction.
+// The baseFont and subtype are used to create a basic font with default metrics.
 func (e *Extractor) RegisterFont(name, baseFont, subtype string) {
 	e.fonts[name] = font.NewFont(name, baseFont, subtype)
 }
 
-// RegisterParsedFont registers a pre-parsed font for use during extraction
-// This is useful when you have already parsed the font with its ToUnicode CMap
+// RegisterParsedFont registers a pre-parsed font for use during extraction.
+// Use this when you have already parsed the font with its ToUnicode CMap and widths.
 func (e *Extractor) RegisterParsedFont(name string, f *font.Font) {
 	e.fonts[name] = f
 }
 
-// RegisterFontsFromPage parses and registers all fonts from a page's resources
-// This is the recommended way to prepare the extractor for text extraction from a page
+// RegisterFontsFromPage parses and registers all fonts from a page's resources.
+// This is the recommended way to prepare the extractor before extracting text from a page.
 func (e *Extractor) RegisterFontsFromPage(page *pages.Page, resolver func(core.IndirectRef) (core.Object, error)) error {
 	// Get page resources
 	resources, err := page.Resources()
@@ -70,8 +72,8 @@ func (e *Extractor) RegisterFontsFromPage(page *pages.Page, resolver func(core.I
 	return e.RegisterFontsFromResources(resources, resolver)
 }
 
-// RegisterFontsFromResources parses and registers all fonts from a resources dictionary
-// This is useful when working with page resources directly
+// RegisterFontsFromResources parses and registers all fonts from a resources dictionary.
+// Use this when working with page resources directly rather than through a Page object.
 func (e *Extractor) RegisterFontsFromResources(resources core.Dict, resolver func(core.IndirectRef) (core.Object, error)) error {
 	// Get Font dictionary
 	fontDictObj := resources.Get("Font")
@@ -145,7 +147,7 @@ func (e *Extractor) RegisterFontsFromResources(resources core.Dict, resolver fun
 	return nil
 }
 
-// resolveIfRef resolves an object if it's an indirect reference, otherwise returns it as-is
+// resolveIfRef resolves an indirect reference, or returns the object unchanged if not a reference.
 func resolveIfRef(obj core.Object, resolver func(core.IndirectRef) (core.Object, error)) (core.Object, error) {
 	if ref, ok := obj.(core.IndirectRef); ok {
 		return resolver(ref)
@@ -153,7 +155,7 @@ func resolveIfRef(obj core.Object, resolver func(core.IndirectRef) (core.Object,
 	return obj, nil
 }
 
-// Extract extracts text from content stream operations
+// Extract extracts text fragments from parsed content stream operations.
 func (e *Extractor) Extract(operations []contentstream.Operation) ([]TextFragment, error) {
 	e.fragments = make([]TextFragment, 0)
 
@@ -166,7 +168,7 @@ func (e *Extractor) Extract(operations []contentstream.Operation) ([]TextFragmen
 	return e.fragments, nil
 }
 
-// ExtractFromBytes parses and extracts text from raw content stream data
+// ExtractFromBytes parses raw content stream data and extracts text fragments.
 func (e *Extractor) ExtractFromBytes(data []byte) ([]TextFragment, error) {
 	parser := contentstream.NewParser(data)
 	operations, err := parser.Parse()
@@ -177,7 +179,8 @@ func (e *Extractor) ExtractFromBytes(data []byte) ([]TextFragment, error) {
 	return e.Extract(operations)
 }
 
-// processOperation processes a single content stream operation
+// processOperation processes a single content stream operation, updating graphics
+// state and extracting text as appropriate.
 func (e *Extractor) processOperation(op contentstream.Operation) error {
 	switch op.Operator {
 	// Graphics state
@@ -332,7 +335,7 @@ func (e *Extractor) processOperation(op contentstream.Operation) error {
 	return nil
 }
 
-// showText processes text showing operation
+// showText processes a text showing operation (Tj), decoding and positioning the text.
 func (e *Extractor) showText(data []byte) {
 	x, y := e.gs.GetTextPosition()
 	fontSize := e.gs.GetEffectiveFontSize() // Use effective size (accounts for text matrix)
@@ -407,7 +410,8 @@ func (e *Extractor) showText(data []byte) {
 	e.gs.ShowTextWithWidth(string(data), scaledWidth)
 }
 
-// showTextArray processes text array showing operation
+// showTextArray processes a text array showing operation (TJ).
+// Arrays contain strings interleaved with position adjustments.
 func (e *Extractor) showTextArray(arr core.Array) {
 	for _, item := range arr {
 		switch v := item.(type) {
@@ -436,7 +440,9 @@ func (e *Extractor) showTextArray(arr core.Array) {
 	}
 }
 
-// GetText returns all extracted text concatenated with smart spacing and RTL support
+// GetText returns all extracted text as a string with smart spacing.
+// Handles both LTR and RTL text, grouping fragments into lines and adding
+// appropriate word and line breaks.
 func (e *Extractor) GetText() string {
 	if len(e.fragments) == 0 {
 		return ""
@@ -491,18 +497,19 @@ func (e *Extractor) GetText() string {
 	return sb.String()
 }
 
-// lineMetrics holds computed metrics for a line to enable smart spacing decisions
+// lineMetrics holds computed metrics for a line to enable smart spacing decisions.
+// These metrics help distinguish word-level PDFs from character-level PDFs.
 type lineMetrics struct {
 	isCharacterLevel  bool    // True if fragments are single/few characters each
 	hasExplicitSpaces bool    // True if line has explicit space character fragments
 	avgFragmentLen    float64 // Average number of characters per fragment
-	medianGap         float64 // Median gap between fragments (for character-level)
+	medianGap         float64 // 10th percentile gap (baseline inter-character gap)
 	avgGap            float64 // Average gap between fragments
 	maxNonSpaceGap    float64 // Maximum gap between non-space fragments
 	typicalCharGap    float64 // Typical inter-character gap (25th percentile)
 }
 
-// calculateLineMetrics computes metrics for a line to enable smart spacing
+// calculateLineMetrics computes metrics for a line to enable smart spacing decisions.
 func (e *Extractor) calculateLineMetrics(fragments []TextFragment, lineDir Direction) lineMetrics {
 	metrics := lineMetrics{}
 
@@ -583,8 +590,8 @@ func (e *Extractor) calculateLineMetrics(fragments []TextFragment, lineDir Direc
 	return metrics
 }
 
-// shouldInsertSpaceSmart determines if a space should be inserted between two fragments
-// using line-level metrics to handle both word-level and character-level PDFs
+// shouldInsertSpaceSmart determines if a space should be inserted between two fragments.
+// It uses line-level metrics to handle both word-level and character-level PDFs correctly.
 func (e *Extractor) shouldInsertSpaceSmart(frag, nextFrag TextFragment, horizontalDist float64, metrics lineMetrics) bool {
 	// If current fragment ends with whitespace or next fragment starts with whitespace,
 	// don't insert additional space - the space is already in the text stream
@@ -641,12 +648,12 @@ func (e *Extractor) shouldInsertSpaceSmart(frag, nextFrag TextFragment, horizont
 	return horizontalDist >= threshold
 }
 
-// isWhitespace checks if a byte is a whitespace character
+// isWhitespace reports whether b is a whitespace character.
 func isWhitespace(b byte) bool {
 	return b == ' ' || b == '\t' || b == '\n' || b == '\r'
 }
 
-// groupFragmentsByLine groups fragments into lines based on Y coordinate
+// groupFragmentsByLine groups fragments into lines based on Y coordinate proximity.
 func (e *Extractor) groupFragmentsByLine() [][]TextFragment {
 	if len(e.fragments) == 0 {
 		return nil
@@ -679,7 +686,7 @@ func (e *Extractor) groupFragmentsByLine() [][]TextFragment {
 	return lines
 }
 
-// detectLineDirection determines the dominant direction of a line
+// detectLineDirection determines the dominant text direction of a line.
 func (e *Extractor) detectLineDirection(fragments []TextFragment) Direction {
 	ltrCount := 0
 	rtlCount := 0
@@ -705,7 +712,8 @@ func (e *Extractor) detectLineDirection(fragments []TextFragment) Direction {
 	return LTR
 }
 
-// reorderFragmentsForReading reorders fragments based on reading direction
+// reorderFragmentsForReading reorders fragments for proper reading order based on direction.
+// LTR text is sorted left-to-right, RTL text is sorted right-to-left.
 func (e *Extractor) reorderFragmentsForReading(fragments []TextFragment, lineDir Direction) []TextFragment {
 	if len(fragments) <= 1 {
 		return fragments
@@ -737,8 +745,8 @@ func (e *Extractor) reorderFragmentsForReading(fragments []TextFragment, lineDir
 	return ordered
 }
 
-// calculateHorizontalDistance calculates the gap between two fragments
-// accounting for text direction
+// calculateHorizontalDistance calculates the gap between two fragments,
+// accounting for text direction.
 func calculateHorizontalDistance(frag, nextFrag TextFragment, lineDir Direction) float64 {
 	if lineDir == RTL {
 		// For RTL, distance is from end of next fragment to start of current
@@ -750,7 +758,8 @@ func calculateHorizontalDistance(frag, nextFrag TextFragment, lineDir Direction)
 }
 
 // shouldInsertSpace determines if a space should be inserted between two fragments
-// based on the horizontal gap and font metrics
+// based on the horizontal gap and font metrics. This is a simpler version of
+// shouldInsertSpaceSmart used for word-level PDFs.
 func (e *Extractor) shouldInsertSpace(frag, nextFrag TextFragment, horizontalDist float64) bool {
 	// If fragments overlap or are very close, no space
 	if horizontalDist < 0 || horizontalDist < frag.FontSize*0.05 {
@@ -771,7 +780,7 @@ func (e *Extractor) shouldInsertSpace(frag, nextFrag TextFragment, horizontalDis
 	return horizontalDist >= threshold
 }
 
-// getSpaceWidth returns the expected width of a space character for the given font and size
+// getSpaceWidth returns the expected width of a space character for the given font and size.
 func (e *Extractor) getSpaceWidth(fontName string, fontSize float64) float64 {
 	// Get font from registered fonts
 	if f, ok := e.fonts[fontName]; ok {
@@ -790,7 +799,7 @@ func (e *Extractor) getSpaceWidth(fontName string, fontSize float64) float64 {
 	return fontSize * 0.25
 }
 
-// abs returns the absolute value of a float64
+// abs returns the absolute value of x.
 func abs(x float64) float64 {
 	if x < 0 {
 		return -x
@@ -798,13 +807,12 @@ func abs(x float64) float64 {
 	return x
 }
 
-// GetFragments returns all text fragments
+// GetFragments returns all extracted text fragments.
 func (e *Extractor) GetFragments() []TextFragment {
 	return e.fragments
 }
 
-// Helper functions
-
+// toFloat converts a PDF numeric object to float64.
 func toFloat(obj core.Object) (float64, bool) {
 	switch v := obj.(type) {
 	case core.Int:

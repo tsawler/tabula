@@ -1,6 +1,6 @@
 package model
 
-// ElementType represents the type of page element
+// ElementType identifies the type of a page element.
 type ElementType int
 
 const (
@@ -14,6 +14,7 @@ const (
 	ElementTypeCaption
 )
 
+// String returns the name of the element type.
 func (et ElementType) String() string {
 	switch et {
 	case ElementTypeParagraph:
@@ -35,20 +36,21 @@ func (et ElementType) String() string {
 	}
 }
 
-// Element is the interface for all page elements
+// Element is the interface implemented by all page elements such as
+// paragraphs, headings, lists, tables, and images.
 type Element interface {
 	Type() ElementType
 	BoundingBox() BBox
 	ZIndex() int
 }
 
-// TextElement is an interface for elements containing text
+// TextElement is the interface for elements that contain text content.
 type TextElement interface {
 	Element
 	GetText() string
 }
 
-// Paragraph represents a paragraph of text
+// Paragraph represents a paragraph of text with position, style, and alignment.
 type Paragraph struct {
 	Text      string
 	BBox      BBox
@@ -59,12 +61,13 @@ type Paragraph struct {
 	ZOrder    int
 }
 
+// Type returns ElementTypeParagraph.
 func (p *Paragraph) Type() ElementType { return ElementTypeParagraph }
 func (p *Paragraph) BoundingBox() BBox { return p.BBox }
 func (p *Paragraph) ZIndex() int       { return p.ZOrder }
 func (p *Paragraph) GetText() string   { return p.Text }
 
-// Heading represents a heading
+// Heading represents a heading with level (1-6), position, and style information.
 type Heading struct {
 	Text     string
 	Level    int // 1-6
@@ -75,12 +78,13 @@ type Heading struct {
 	ZOrder   int
 }
 
+// Type returns ElementTypeHeading.
 func (h *Heading) Type() ElementType { return ElementTypeHeading }
 func (h *Heading) BoundingBox() BBox { return h.BBox }
 func (h *Heading) ZIndex() int       { return h.ZOrder }
 func (h *Heading) GetText() string   { return h.Text }
 
-// List represents a list (ordered or unordered)
+// List represents an ordered or unordered list with items.
 type List struct {
 	Items   []ListItem
 	Ordered bool
@@ -88,6 +92,7 @@ type List struct {
 	ZOrder  int
 }
 
+// Type returns ElementTypeList.
 func (l *List) Type() ElementType { return ElementTypeList }
 func (l *List) BoundingBox() BBox { return l.BBox }
 func (l *List) ZIndex() int       { return l.ZOrder }
@@ -99,7 +104,7 @@ func (l *List) GetText() string {
 	return text
 }
 
-// ListItem represents a single list item
+// ListItem represents a single item within a list.
 type ListItem struct {
 	Text   string
 	BBox   BBox
@@ -107,7 +112,7 @@ type ListItem struct {
 	Level  int
 }
 
-// Image represents an embedded image
+// Image represents an embedded image with its binary data and format.
 type Image struct {
 	Data   []byte
 	Format ImageFormat
@@ -118,11 +123,12 @@ type Image struct {
 	AltText string
 }
 
+// Type returns ElementTypeImage.
 func (i *Image) Type() ElementType { return ElementTypeImage }
 func (i *Image) BoundingBox() BBox { return i.BBox }
 func (i *Image) ZIndex() int       { return i.ZOrder }
 
-// ImageFormat represents image format
+// ImageFormat identifies the format of an embedded image.
 type ImageFormat int
 
 const (
@@ -134,7 +140,7 @@ const (
 	ImageFormatJBIG2
 )
 
-// TextStyle represents text styling
+// TextStyle represents text styling attributes.
 type TextStyle struct {
 	Bold      bool
 	Italic    bool
@@ -142,7 +148,7 @@ type TextStyle struct {
 	Color     Color
 }
 
-// TextAlignment represents text alignment
+// TextAlignment represents horizontal text alignment.
 type TextAlignment int
 
 const (
@@ -152,12 +158,13 @@ const (
 	AlignJustify
 )
 
-// Color represents an RGB color
+// Color represents an RGB color with 8-bit components.
 type Color struct {
 	R, G, B uint8
 }
 
-// TextFragment represents a positioned piece of text
+// TextFragment represents a positioned piece of text extracted from a PDF page,
+// including its position, font, and transformation matrix.
 type TextFragment struct {
 	Text     string
 	BBox     BBox
@@ -167,7 +174,7 @@ type TextFragment struct {
 	Matrix   [6]float64 // Text transformation matrix
 }
 
-// Line represents a geometric line or rectangle
+// Line represents a geometric line or rectangle from PDF graphics operations.
 type Line struct {
 	Start    Point
 	End      Point

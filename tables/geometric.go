@@ -8,28 +8,33 @@ import (
 	"github.com/tsawler/tabula/model"
 )
 
-// GeometricDetector implements table detection using geometric heuristics
+// GeometricDetector implements table detection using geometric heuristics.
+// It analyzes spatial relationships between text fragments to identify tabular
+// structures based on alignment patterns, grid regularity, and visible lines.
 type GeometricDetector struct {
 	config Config
 }
 
-// NewGeometricDetector creates a new geometric detector
+// NewGeometricDetector creates a new geometric table detector with default configuration.
 func NewGeometricDetector() *GeometricDetector {
 	return &GeometricDetector{
 		config: DefaultConfig(),
 	}
 }
 
+// Name returns the detector's identifier ("geometric").
 func (d *GeometricDetector) Name() string {
 	return "geometric"
 }
 
+// Configure sets the detector configuration.
 func (d *GeometricDetector) Configure(config Config) error {
 	d.config = config
 	return nil
 }
 
-// Detect finds tables using geometric heuristics
+// Detect finds tables on a page using geometric heuristics. It clusters text
+// fragments by spatial proximity, then analyzes each cluster for tabular structure.
 func (d *GeometricDetector) Detect(page *model.Page) ([]*model.Table, error) {
 	if len(page.RawText) == 0 {
 		return nil, nil
@@ -50,7 +55,8 @@ func (d *GeometricDetector) Detect(page *model.Page) ([]*model.Table, error) {
 	return tables, nil
 }
 
-// clusterFragments groups text fragments that are spatially close
+// clusterFragments groups text fragments that are spatially close by vertical
+// proximity. Fragments separated by more than 50 points vertically start new clusters.
 func (d *GeometricDetector) clusterFragments(fragments []model.TextFragment) [][]model.TextFragment {
 	if len(fragments) == 0 {
 		return nil
@@ -90,7 +96,9 @@ func (d *GeometricDetector) clusterFragments(fragments []model.TextFragment) [][
 	return clusters
 }
 
-// detectTableInCluster attempts to find a table in a cluster of fragments
+// detectTableInCluster attempts to find a table in a cluster of fragments.
+// It builds a grid, calculates confidence score, assigns fragments to cells,
+// and optionally detects merged cells.
 func (d *GeometricDetector) detectTableInCluster(fragments []model.TextFragment, lines []model.Line) *model.Table {
 	if len(fragments) < d.config.MinRows*d.config.MinCols {
 		return nil
@@ -127,7 +135,8 @@ func (d *GeometricDetector) detectTableInCluster(fragments []model.TextFragment,
 	return table
 }
 
-// buildGrid constructs a grid from text fragments and lines
+// buildGrid constructs a grid from text fragment positions and detects which
+// grid lines have visible graphical lines.
 func (d *GeometricDetector) buildGrid(fragments []model.TextFragment, lines []model.Line) *model.TableGrid {
 	// Extract unique Y coordinates (row boundaries)
 	yCoords := d.extractRowBoundaries(fragments)
@@ -152,7 +161,8 @@ func (d *GeometricDetector) buildGrid(fragments []model.TextFragment, lines []mo
 	return grid
 }
 
-// extractRowBoundaries finds unique Y coordinates for row boundaries
+// extractRowBoundaries extracts unique Y coordinates for row boundaries by
+// clustering the top and bottom edges of all text fragments.
 func (d *GeometricDetector) extractRowBoundaries(fragments []model.TextFragment) []float64 {
 	if len(fragments) == 0 {
 		return nil
@@ -175,7 +185,8 @@ func (d *GeometricDetector) extractRowBoundaries(fragments []model.TextFragment)
 	return clustered
 }
 
-// extractColumnBoundaries finds unique X coordinates for column boundaries
+// extractColumnBoundaries extracts unique X coordinates for column boundaries by
+// clustering the left and right edges of all text fragments.
 func (d *GeometricDetector) extractColumnBoundaries(fragments []model.TextFragment) []float64 {
 	if len(fragments) == 0 {
 		return nil
@@ -193,7 +204,8 @@ func (d *GeometricDetector) extractColumnBoundaries(fragments []model.TextFragme
 	return d.clusterValues(xValues, d.config.AlignmentTolerance)
 }
 
-// clusterValues clusters nearby values
+// clusterValues clusters nearby values within the given tolerance, averaging
+// values that fall within the tolerance of the cluster center.
 func (d *GeometricDetector) clusterValues(values []float64, tolerance float64) []float64 {
 	if len(values) == 0 {
 		return nil
@@ -214,7 +226,8 @@ func (d *GeometricDetector) clusterValues(values []float64, tolerance float64) [
 	return clustered
 }
 
-// detectHorizontalLines checks which row boundaries have visible lines
+// detectHorizontalLines determines which row boundaries have visible horizontal
+// graphical lines within the alignment tolerance.
 func (d *GeometricDetector) detectHorizontalLines(yCoords []float64, lines []model.Line) []bool {
 	hasLines := make([]bool, len(yCoords))
 
@@ -232,7 +245,8 @@ func (d *GeometricDetector) detectHorizontalLines(yCoords []float64, lines []mod
 	return hasLines
 }
 
-// detectVerticalLines checks which column boundaries have visible lines
+// detectVerticalLines determines which column boundaries have visible vertical
+// graphical lines within the alignment tolerance.
 func (d *GeometricDetector) detectVerticalLines(xCoords []float64, lines []model.Line) []bool {
 	hasLines := make([]bool, len(xCoords))
 
@@ -250,7 +264,9 @@ func (d *GeometricDetector) detectVerticalLines(xCoords []float64, lines []model
 	return hasLines
 }
 
-// calculateConfidence computes a confidence score for the detected table
+// calculateConfidence computes a confidence score (0.0-1.0) for the detected table.
+// The score combines grid regularity (30%), alignment quality (30%), line presence (20%),
+// and cell occupancy (20%).
 func (d *GeometricDetector) calculateConfidence(grid *model.TableGrid, fragments []model.TextFragment, lines []model.Line) float64 {
 	score := 0.0
 	maxScore := 0.0
@@ -282,7 +298,9 @@ func (d *GeometricDetector) calculateConfidence(grid *model.TableGrid, fragments
 	return score / maxScore
 }
 
-// calculateGridRegularity measures how regular the grid is
+// calculateGridRegularity measures how regular the grid is by computing the
+// coefficient of variation of row heights and column widths. Lower variance
+// results in a higher score.
 func (d *GeometricDetector) calculateGridRegularity(grid *model.TableGrid) float64 {
 	if grid.RowCount() < 2 || grid.ColCount() < 2 {
 		return 0
@@ -314,7 +332,8 @@ func (d *GeometricDetector) calculateGridRegularity(grid *model.TableGrid) float
 	return (rowScore + colScore) / 2
 }
 
-// calculateAlignmentQuality measures how well fragments align to grid
+// calculateAlignmentQuality measures the fraction of text fragments whose edges
+// align well with grid lines (at least 2 edges within tolerance).
 func (d *GeometricDetector) calculateAlignmentQuality(fragments []model.TextFragment, grid *model.TableGrid) float64 {
 	if len(fragments) == 0 {
 		return 0
@@ -330,7 +349,8 @@ func (d *GeometricDetector) calculateAlignmentQuality(fragments []model.TextFrag
 	return float64(alignedCount) / float64(len(fragments))
 }
 
-// isAlignedToGrid checks if a fragment aligns well with grid lines
+// isAlignedToGrid reports whether a fragment has at least 2 of its 4 edges
+// aligned to grid lines within tolerance.
 func (d *GeometricDetector) isAlignedToGrid(frag model.TextFragment, grid *model.TableGrid) bool {
 	// Check if fragment edges are close to grid lines
 	leftAligned := d.isNearGridLine(frag.BBox.Left(), grid.Cols)
@@ -356,7 +376,8 @@ func (d *GeometricDetector) isAlignedToGrid(frag model.TextFragment, grid *model
 	return alignedCount >= 2
 }
 
-// isNearGridLine checks if a value is close to any grid line
+// isNearGridLine reports whether a value is within 2x the alignment tolerance
+// of any grid line.
 func (d *GeometricDetector) isNearGridLine(value float64, gridLines []float64) bool {
 	for _, line := range gridLines {
 		if math.Abs(value-line) < d.config.AlignmentTolerance*2 {
@@ -366,7 +387,8 @@ func (d *GeometricDetector) isNearGridLine(value float64, gridLines []float64) b
 	return false
 }
 
-// calculateLineScore measures presence of visible grid lines
+// calculateLineScore measures the fraction of grid boundaries that have visible
+// graphical lines, averaging horizontal and vertical line coverage.
 func (d *GeometricDetector) calculateLineScore(grid *model.TableGrid) float64 {
 	if len(grid.HasHLines) == 0 || len(grid.HasVLines) == 0 {
 		return 0
@@ -392,7 +414,8 @@ func (d *GeometricDetector) calculateLineScore(grid *model.TableGrid) float64 {
 	return (hScore + vScore) / 2
 }
 
-// calculateCellOccupancy measures how many cells contain text
+// calculateCellOccupancy measures the fraction of grid cells that contain at
+// least one text fragment.
 func (d *GeometricDetector) calculateCellOccupancy(fragments []model.TextFragment, grid *model.TableGrid) float64 {
 	occupiedCells := make(map[string]bool)
 
@@ -412,7 +435,8 @@ func (d *GeometricDetector) calculateCellOccupancy(fragments []model.TextFragmen
 	return float64(len(occupiedCells)) / float64(totalCells)
 }
 
-// assignFragmentsToCells assigns text fragments to table cells
+// assignFragmentsToCells places each text fragment into the appropriate table
+// cell based on its center position. Fragments in the same cell are concatenated.
 func (d *GeometricDetector) assignFragmentsToCells(table *model.Table, grid *model.TableGrid, fragments []model.TextFragment) {
 	for _, frag := range fragments {
 		row, col := d.findCell(frag.BBox.Center(), grid)
@@ -435,7 +459,8 @@ func (d *GeometricDetector) assignFragmentsToCells(table *model.Table, grid *mod
 	}
 }
 
-// findCell finds which cell contains a point
+// findCell returns the row and column indices of the cell containing the given
+// point, or -1 for both if the point is outside the grid.
 func (d *GeometricDetector) findCell(p model.Point, grid *model.TableGrid) (row, col int) {
 	row = -1
 	col = -1
@@ -459,7 +484,8 @@ func (d *GeometricDetector) findCell(p model.Point, grid *model.TableGrid) (row,
 	return row, col
 }
 
-// detectMergedCells detects cells that span multiple rows or columns
+// detectMergedCells detects cells that span multiple rows or columns by checking
+// if a cell's content bounding box intersects adjacent grid cells.
 func (d *GeometricDetector) detectMergedCells(table *model.Table, grid *model.TableGrid) {
 	// Simple heuristic: if a cell's content bbox spans multiple grid cells,
 	// it's likely a merged cell
@@ -493,7 +519,7 @@ func (d *GeometricDetector) detectMergedCells(table *model.Table, grid *model.Ta
 	}
 }
 
-// calculateTableBBox calculates the overall bounding box of the table
+// calculateTableBBox computes the overall bounding box of the table from the grid.
 func (d *GeometricDetector) calculateTableBBox(grid *model.TableGrid) model.BBox {
 	if grid.RowCount() == 0 || grid.ColCount() == 0 {
 		return model.BBox{}
@@ -507,7 +533,8 @@ func (d *GeometricDetector) calculateTableBBox(grid *model.TableGrid) model.BBox
 	}
 }
 
-// hasVisibleGrid checks if the table has visible grid lines
+// hasVisibleGrid reports whether at least 50% of the table's grid boundaries
+// have visible graphical lines.
 func (d *GeometricDetector) hasVisibleGrid(grid *model.TableGrid, lines []model.Line) bool {
 	// Consider table to have grid if at least 50% of lines are visible
 	totalLines := len(grid.HasHLines) + len(grid.HasVLines)
@@ -532,6 +559,7 @@ func (d *GeometricDetector) hasVisibleGrid(grid *model.TableGrid, lines []model.
 
 // Utility functions
 
+// mean computes the arithmetic mean of a slice of float64 values.
 func mean(values []float64) float64 {
 	if len(values) == 0 {
 		return 0
@@ -543,6 +571,7 @@ func mean(values []float64) float64 {
 	return sum / float64(len(values))
 }
 
+// variance computes the population variance of a slice of float64 values.
 func variance(values []float64) float64 {
 	if len(values) == 0 {
 		return 0

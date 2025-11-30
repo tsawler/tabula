@@ -7,11 +7,13 @@ import (
 	"io"
 )
 
-// Params represents decode parameters (map of key-value pairs)
+// Params represents decode parameters from PDF stream dictionaries.
+// Common parameters include Predictor, Columns, Colors, and BitsPerComponent.
 type Params map[string]interface{}
 
-// FlateDecode decodes Flate (zlib/deflate) compressed data
-// This is the most common compression filter in PDFs
+// FlateDecode decompresses Flate (zlib/deflate) compressed data.
+// This is the most common compression filter in PDFs. It optionally applies
+// a predictor algorithm for image data decompression.
 func FlateDecode(data []byte, params Params) ([]byte, error) {
 	// Decompress using zlib
 	decompressed, err := zlibDecompress(data)
@@ -35,7 +37,7 @@ func FlateDecode(data []byte, params Params) ([]byte, error) {
 	return decompressed, nil
 }
 
-// zlibDecompress decompresses zlib-compressed data
+// zlibDecompress decompresses zlib-compressed data using the standard library.
 func zlibDecompress(data []byte) ([]byte, error) {
 	reader, err := zlib.NewReader(bytes.NewReader(data))
 	if err != nil {
@@ -52,8 +54,9 @@ func zlibDecompress(data []byte) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-// applyPredictor applies PNG predictor algorithms
-// PDF supports PNG predictors for better compression of image data
+// applyPredictor applies prediction algorithms to improve compression.
+// Predictor 1 is identity (no prediction), 2 is TIFF Predictor 2,
+// and 10-15 are PNG predictors (None, Sub, Up, Average, Paeth).
 func applyPredictor(data []byte, predictor int, params Params) ([]byte, error) {
 	// Predictor values:
 	// 1 = No prediction (identity)
@@ -78,7 +81,8 @@ func applyPredictor(data []byte, predictor int, params Params) ([]byte, error) {
 	return nil, fmt.Errorf("unsupported predictor: %d", predictor)
 }
 
-// applyTIFFPredictor2 applies TIFF Predictor 2
+// applyTIFFPredictor2 applies TIFF Predictor 2, which predicts each sample
+// from the sample to its left. This is rarely used in PDFs.
 func applyTIFFPredictor2(data []byte, params Params) ([]byte, error) {
 	columns := getIntParam(params, "Columns", 1)
 	colors := getIntParam(params, "Colors", 1)
@@ -112,7 +116,8 @@ func applyTIFFPredictor2(data []byte, params Params) ([]byte, error) {
 	return result, nil
 }
 
-// applyPNGPredictor applies PNG predictor algorithms
+// applyPNGPredictor applies PNG predictor algorithms. Each row starts with
+// a predictor byte (0-4) that specifies which algorithm to use for that row.
 func applyPNGPredictor(data []byte, predictor int, params Params) ([]byte, error) {
 	columns := getIntParam(params, "Columns", 1)
 	colors := getIntParam(params, "Colors", 1)
@@ -151,7 +156,8 @@ func applyPNGPredictor(data []byte, predictor int, params Params) ([]byte, error
 	return result, nil
 }
 
-// decodePNGRow decodes a single PNG-predicted row
+// decodePNGRow decodes a single PNG-predicted row using the specified predictor.
+// Predictor types: 0=None, 1=Sub (left), 2=Up (above), 3=Average, 4=Paeth.
 func decodePNGRow(rowData []byte, predictor byte, bytesPerPixel int, rowNum int, prevRows []byte, rowLength int) ([]byte, error) {
 	result := make([]byte, len(rowData))
 
@@ -205,8 +211,8 @@ func decodePNGRow(rowData []byte, predictor byte, bytesPerPixel int, rowNum int,
 	return result, nil
 }
 
-// paethPredictor implements the Paeth predictor algorithm
-// This is used by PNG to predict pixel values
+// paethPredictor implements the Paeth predictor algorithm from the PNG specification.
+// It selects the neighbor (left, above, or upper-left) closest to a linear prediction.
 func paethPredictor(a, b, c byte) byte {
 	// a = left, b = above, c = upper left
 	p := int(a) + int(b) - int(c)
@@ -222,7 +228,8 @@ func paethPredictor(a, b, c byte) byte {
 	return c
 }
 
-// getIntParam gets an integer parameter from DecodeParms, with default
+// getIntParam extracts an integer parameter from Params, returning defaultValue
+// if the parameter is missing or cannot be converted to an integer.
 func getIntParam(params Params, key string, defaultValue int) int {
 	if params == nil {
 		return defaultValue
@@ -248,7 +255,7 @@ func getIntParam(params Params, key string, defaultValue int) int {
 	}
 }
 
-// abs returns the absolute value of an integer
+// abs returns the absolute value of an integer.
 func abs(x int) int {
 	if x < 0 {
 		return -x

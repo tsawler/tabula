@@ -1,5 +1,7 @@
-// Package layout provides document layout analysis including the unified
-// Layout Analyzer that orchestrates all detection components.
+// Package layout provides document layout analysis for extracting semantic
+// structure from PDF pages. It includes the unified Layout Analyzer that
+// orchestrates all detection components including column, line, block,
+// paragraph, heading, list, and reading order detection.
 package layout
 
 import (
@@ -9,7 +11,9 @@ import (
 	"github.com/tsawler/tabula/text"
 )
 
-// AnalyzerConfig holds configuration for the layout analyzer
+// AnalyzerConfig holds configuration options for the layout analyzer.
+// Each detection component has its own sub-configuration, and there are
+// flags to enable or disable optional analysis features.
 type AnalyzerConfig struct {
 	// Column detection configuration
 	ColumnConfig ColumnConfig
@@ -42,7 +46,8 @@ type AnalyzerConfig struct {
 	UseReadingOrder bool
 }
 
-// DefaultAnalyzerConfig returns sensible default configuration
+// DefaultAnalyzerConfig returns a configuration with sensible defaults for
+// typical document layout analysis, with all detection features enabled.
 func DefaultAnalyzerConfig() AnalyzerConfig {
 	return AnalyzerConfig{
 		ColumnConfig:       DefaultColumnConfig(),
@@ -58,7 +63,9 @@ func DefaultAnalyzerConfig() AnalyzerConfig {
 	}
 }
 
-// LayoutElement represents a detected layout element with its type and content
+// LayoutElement represents a detected layout element such as a paragraph,
+// heading, or list. It includes the element type, bounding box, text content,
+// and type-specific metadata.
 type LayoutElement struct {
 	// Type is the element type (paragraph, heading, list, etc.)
 	Type model.ElementType
@@ -91,7 +98,8 @@ type LayoutElement struct {
 	Children []LayoutElement
 }
 
-// ToModelElement converts the layout element to a model.Element
+// ToModelElement converts the layout element to the appropriate model.Element
+// implementation (Heading, List, or Paragraph) based on the element type.
 func (le *LayoutElement) ToModelElement() model.Element {
 	switch le.Type {
 	case model.ElementTypeHeading:
@@ -147,6 +155,8 @@ func (le *LayoutElement) ToModelElement() model.Element {
 	}
 }
 
+// fontSize returns the font size for the element, checking Heading, Paragraph,
+// and Lines in that order, defaulting to 12.0 if no font size is available.
 func (le *LayoutElement) fontSize() float64 {
 	if le.Heading != nil {
 		return le.Heading.FontSize
@@ -160,6 +170,7 @@ func (le *LayoutElement) fontSize() float64 {
 	return 12.0 // default
 }
 
+// toModelAlignment converts a layout LineAlignment to a model.TextAlignment.
 func toModelAlignment(align LineAlignment) model.TextAlignment {
 	switch align {
 	case AlignLeft:
@@ -175,7 +186,9 @@ func toModelAlignment(align LineAlignment) model.TextAlignment {
 	}
 }
 
-// AnalysisResult holds the complete layout analysis results
+// AnalysisResult holds the complete results from layout analysis, including
+// detected elements, intermediate analysis structures (columns, lines, blocks,
+// paragraphs, headings, lists), and statistics about the analysis.
 type AnalysisResult struct {
 	// Elements are all detected elements in reading order
 	Elements []LayoutElement
@@ -209,7 +222,7 @@ type AnalysisResult struct {
 	Stats AnalysisStats
 }
 
-// AnalysisStats contains statistics about the analysis
+// AnalysisStats contains counts of detected elements from the layout analysis.
 type AnalysisStats struct {
 	FragmentCount  int
 	LineCount      int
@@ -221,7 +234,8 @@ type AnalysisStats struct {
 	ElementCount   int
 }
 
-// GetElements returns all elements as model.Element interface
+// GetElements converts all layout elements to model.Element interfaces,
+// returning them in reading order.
 func (r *AnalysisResult) GetElements() []model.Element {
 	elements := make([]model.Element, len(r.Elements))
 	for i, le := range r.Elements {
@@ -230,7 +244,8 @@ func (r *AnalysisResult) GetElements() []model.Element {
 	return elements
 }
 
-// GetText returns all text in reading order
+// GetText returns all extracted text concatenated in reading order.
+// It prefers reading order text if available, falling back to paragraph text.
 func (r *AnalysisResult) GetText() string {
 	if r.ReadingOrder != nil {
 		return r.ReadingOrder.GetText()
@@ -241,7 +256,8 @@ func (r *AnalysisResult) GetText() string {
 	return ""
 }
 
-// GetMarkdown returns a markdown representation of the document
+// GetMarkdown returns a Markdown representation of the document with headings,
+// lists, and paragraphs formatted appropriately.
 func (r *AnalysisResult) GetMarkdown() string {
 	var result string
 
@@ -263,7 +279,9 @@ func (r *AnalysisResult) GetMarkdown() string {
 	return result
 }
 
-// Analyzer orchestrates all layout detection components
+// Analyzer orchestrates all layout detection components to extract semantic
+// structure from PDF pages. It combines column, line, block, paragraph,
+// heading, list, and reading order detection into a unified analysis pipeline.
 type Analyzer struct {
 	config AnalyzerConfig
 
@@ -277,12 +295,12 @@ type Analyzer struct {
 	readingOrderDetector *ReadingOrderDetector
 }
 
-// NewAnalyzer creates a new layout analyzer with default configuration
+// NewAnalyzer creates a new layout analyzer with default configuration.
 func NewAnalyzer() *Analyzer {
 	return NewAnalyzerWithConfig(DefaultAnalyzerConfig())
 }
 
-// NewAnalyzerWithConfig creates a new layout analyzer with custom configuration
+// NewAnalyzerWithConfig creates a new layout analyzer with the specified configuration.
 func NewAnalyzerWithConfig(config AnalyzerConfig) *Analyzer {
 	return &Analyzer{
 		config:               config,
@@ -296,7 +314,10 @@ func NewAnalyzerWithConfig(config AnalyzerConfig) *Analyzer {
 	}
 }
 
-// Analyze performs complete layout analysis on text fragments
+// Analyze performs complete layout analysis on the given text fragments.
+// It runs through all detection phases: column detection, reading order analysis,
+// line detection, block detection, paragraph detection, heading detection (if enabled),
+// list detection (if enabled), and finally builds a unified element tree.
 func (a *Analyzer) Analyze(fragments []text.TextFragment, pageWidth, pageHeight float64) *AnalysisResult {
 	result := &AnalysisResult{
 		PageWidth:  pageWidth,
@@ -366,7 +387,9 @@ func (a *Analyzer) Analyze(fragments []text.TextFragment, pageWidth, pageHeight 
 	return result
 }
 
-// buildElementTree creates a unified element tree from all detected components
+// buildElementTree creates a unified element tree from all detected components.
+// It merges headings, lists, and paragraphs, avoiding duplicates where elements
+// overlap, and sorts them into reading order.
 func (a *Analyzer) buildElementTree(result *AnalysisResult) []LayoutElement {
 	var elements []LayoutElement
 
@@ -450,7 +473,7 @@ func (a *Analyzer) buildElementTree(result *AnalysisResult) []LayoutElement {
 	return elements
 }
 
-// getListText extracts text from a list
+// getListText extracts all text from a list by concatenating item prefixes and text.
 func getListText(list *List) string {
 	var text string
 	for _, item := range list.Items {
@@ -459,7 +482,8 @@ func getListText(list *List) string {
 	return text
 }
 
-// bboxOverlaps checks if two bounding boxes overlap significantly
+// bboxOverlaps reports whether two bounding boxes overlap significantly
+// (more than 50% of the smaller box's area is covered by the overlap).
 func bboxOverlaps(a, b model.BBox) bool {
 	// Check for no overlap
 	if a.X+a.Width < b.X || b.X+b.Width < a.X {
@@ -484,7 +508,8 @@ func bboxOverlaps(a, b model.BBox) bool {
 	return overlapArea > smallerArea*0.5
 }
 
-// sortElementsByReadingOrder sorts elements by their reading order position
+// sortElementsByReadingOrder sorts elements according to reading order analysis.
+// If no reading order is available, falls back to top-to-bottom, left-to-right sorting.
 func sortElementsByReadingOrder(elements []LayoutElement, ro *ReadingOrderResult) {
 	if ro == nil || len(ro.Sections) == 0 {
 		// Fall back to simple top-to-bottom, left-to-right sorting
@@ -534,7 +559,7 @@ func sortElementsByReadingOrder(elements []LayoutElement, ro *ReadingOrderResult
 	})
 }
 
-// lineOverlapsElement checks if a line overlaps with an element's bounding box
+// lineOverlapsElement reports whether a line's bounding box overlaps with an element's bounding box.
 func lineOverlapsElement(line Line, elem LayoutElement) bool {
 	// Check Y overlap with tolerance
 	lineTop := line.BBox.Y + line.BBox.Height
@@ -555,6 +580,7 @@ func lineOverlapsElement(line Line, elem LayoutElement) bool {
 	return true
 }
 
+// minFloat returns the smaller of two float64 values.
 func minFloat(a, b float64) float64 {
 	if a < b {
 		return a
@@ -562,6 +588,7 @@ func minFloat(a, b float64) float64 {
 	return b
 }
 
+// maxFloat returns the larger of two float64 values.
 func maxFloat(a, b float64) float64 {
 	if a > b {
 		return a
@@ -569,6 +596,7 @@ func maxFloat(a, b float64) float64 {
 	return b
 }
 
+// absValue returns the absolute value of a float64.
 func absValue(x float64) float64 {
 	if x < 0 {
 		return -x
@@ -576,8 +604,9 @@ func absValue(x float64) float64 {
 	return x
 }
 
-// AnalyzeWithHeaderFooterFiltering performs analysis with header/footer filtering
-// This requires multiple pages to detect headers/footers
+// AnalyzeWithHeaderFooterFiltering performs layout analysis with automatic
+// header and footer detection and removal. This requires multiple pages to
+// identify repeated content at the top and bottom of pages.
 func (a *Analyzer) AnalyzeWithHeaderFooterFiltering(
 	pageFragments []PageFragments,
 	pageIndex int,
@@ -607,8 +636,9 @@ func (a *Analyzer) AnalyzeWithHeaderFooterFiltering(
 	return a.Analyze(filteredFragments, targetPage.PageWidth, targetPage.PageHeight)
 }
 
-// QuickAnalyze performs a fast analysis focusing on text structure
-// without detailed heading/list detection
+// QuickAnalyze performs a fast analysis focusing on text structure without
+// detailed heading or list detection. It only runs reading order and paragraph
+// detection for better performance when fine-grained structure is not needed.
 func (a *Analyzer) QuickAnalyze(fragments []text.TextFragment, pageWidth, pageHeight float64) *AnalysisResult {
 	result := &AnalysisResult{
 		PageWidth:  pageWidth,
