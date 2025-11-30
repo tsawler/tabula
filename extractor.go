@@ -2156,3 +2156,21 @@ func detectMultiColumn(fragments []text.TextFragment, pageWidth, pageHeight floa
 
 	return result != nil && result.ColumnCount > 1
 }
+
+// convertListType converts layout list type to model list type
+func convertListType(lt layout.ListType) model.ListType {
+	switch lt {
+	case layout.ListTypeBullet:
+		return model.ListTypeBullet
+	case layout.ListTypeNumbered:
+		return model.ListTypeNumbered
+	case layout.ListTypeLettered:
+		return model.ListTypeLettered
+	case layout.ListTypeRoman:
+		return model.ListTypeRoman
+	case layout.ListTypeCheckbox:
+		return model.ListTypeCheckbox
+	default:
+		return model.ListTypeUnknown
+	}
+}
