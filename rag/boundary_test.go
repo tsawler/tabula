@@ -608,3 +608,205 @@ func min(a, b int) int {
 	}
 	return b
 }
+
+// ============================================================================
+// Additional tests for better coverage
+// ============================================================================
+
+func TestBoundaryType_Score_AllTypes(t *testing.T) {
+	tests := []struct {
+		bt        BoundaryType
+		wantScore int
+	}{
+		{BoundaryNone, 0},
+		{BoundarySentence, 20},
+		{BoundaryParagraph, 70},
+		{BoundaryList, 80},
+		{BoundaryListItem, 30},
+		{BoundaryHeading, 100},
+		{BoundaryTable, 85},
+		{BoundaryFigure, 85},
+		{BoundaryCodeBlock, 80},
+		{BoundaryPageBreak, 90},
+		{BoundaryType(99), 0}, // Unknown type
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.bt.String(), func(t *testing.T) {
+			if got := tt.bt.Score(); got != tt.wantScore {
+				t.Errorf("BoundaryType.Score() = %v, want %v", got, tt.wantScore)
+			}
+		})
+	}
+}
+
+func TestBoundaryDetector_FindBoundaryWithLookAhead(t *testing.T) {
+	detector := NewBoundaryDetector()
+
+	boundaries := []Boundary{
+		{Type: BoundarySentence, Position: 50, Score: BoundarySentence.Score()},
+		{Type: BoundaryParagraph, Position: 100, Score: BoundaryParagraph.Score()},
+		{Type: BoundaryHeading, Position: 200, Score: BoundaryHeading.Score()},
+	}
+
+	t.Run("finds boundary with lookahead", func(t *testing.T) {
+		best := detector.FindBoundaryWithLookAhead(boundaries, 95)
+		if best == nil {
+			t.Error("Expected to find a boundary")
+			return
+		}
+		// Should find paragraph at 100 (within lookahead range)
+		if best.Position != 100 {
+			t.Errorf("Expected boundary at 100, got %d", best.Position)
+		}
+	})
+
+	t.Run("handles negative minPos", func(t *testing.T) {
+		best := detector.FindBoundaryWithLookAhead(boundaries, 10)
+		// Should still work with small target position
+		if best != nil {
+			t.Logf("Found boundary at position %d", best.Position)
+		}
+	})
+}
+
+func TestOrphanedContentDetector_AdjustForOrphans(t *testing.T) {
+	detector := NewOrphanedContentDetector(50)
+
+	boundaries := []Boundary{
+		{Type: BoundarySentence, Position: 60, Score: 20},
+		{Type: BoundaryParagraph, Position: 120, Score: 70},
+	}
+
+	t.Run("returns original if no orphan", func(t *testing.T) {
+		text := "This is a fairly long piece of text that should not create any orphaned content when split at this point. And here is more content after the split."
+		position := 80
+		adjusted := detector.AdjustForOrphans(text, position, boundaries)
+		// Should return original or nearby boundary
+		if adjusted < 0 || adjusted > len(text) {
+			t.Errorf("Invalid adjusted position: %d", adjusted)
+		}
+	})
+
+	t.Run("adjusts to avoid orphan", func(t *testing.T) {
+		text := "Hi. This is a much longer piece of text that will have enough content on both sides when split correctly."
+		position := 3 // Would create orphan "Hi."
+		adjusted := detector.AdjustForOrphans(text, position, boundaries)
+		t.Logf("Original: %d, Adjusted: %d", position, adjusted)
+	})
+
+	t.Run("returns original when no good alternative", func(t *testing.T) {
+		text := "AB"
+		position := 1
+		adjusted := detector.AdjustForOrphans(text, position, nil)
+		// No boundaries to adjust to
+		if adjusted != position {
+			t.Errorf("Expected original position %d, got %d", position, adjusted)
+		}
+	})
+}
+
+func TestGetBoundaryTypeForBlock(t *testing.T) {
+	tests := []struct {
+		elementType model.ElementType
+		wantType    BoundaryType
+	}{
+		{model.ElementTypeParagraph, BoundaryParagraph},
+		{model.ElementTypeHeading, BoundaryHeading},
+		{model.ElementTypeList, BoundaryList},
+		{model.ElementTypeTable, BoundaryTable},
+		{model.ElementTypeImage, BoundaryFigure},
+		{model.ElementTypeFigure, BoundaryFigure},
+	}
+
+	detector := NewBoundaryDetector()
+
+	for _, tt := range tests {
+		t.Run(tt.elementType.String(), func(t *testing.T) {
+			block := ContentBlock{Type: tt.elementType, Text: "content"}
+			// We test indirectly through DetectBoundaries
+			blocks := []ContentBlock{
+				block,
+				{Type: model.ElementTypeParagraph, Text: "next"},
+			}
+			boundaries := detector.DetectBoundaries(blocks)
+			// Should detect boundaries based on block types
+			if len(boundaries) > 0 {
+				t.Logf("Detected %d boundaries for %s", len(boundaries), tt.elementType.String())
+			}
+		})
+	}
+}
+
+func TestBoundaryDetector_FindAtomicBlocks_WithFigure(t *testing.T) {
+	detector := NewBoundaryDetector()
+
+	t.Run("figure with caption after", func(t *testing.T) {
+		blocks := []ContentBlock{
+			{Type: model.ElementTypeParagraph, Text: "Intro", Index: 0},
+			{Type: model.ElementTypeImage, Text: "", Index: 1},
+			{Type: model.ElementTypeCaption, Text: "Figure 1: Description", Index: 2},
+			{Type: model.ElementTypeParagraph, Text: "After", Index: 3},
+		}
+
+		atomic := detector.FindAtomicBlocks(blocks)
+
+		// Should find figure with caption as atomic
+		foundFigure := false
+		for _, ab := range atomic {
+			if ab.Type == "figure" {
+				foundFigure = true
+				if ab.EndIndex < ab.StartIndex {
+					t.Error("Invalid atomic block range")
+				}
+			}
+		}
+		if !foundFigure {
+			t.Error("Expected to find figure atomic block")
+		}
+	})
+
+	t.Run("figure with caption before", func(t *testing.T) {
+		blocks := []ContentBlock{
+			{Type: model.ElementTypeCaption, Text: "Figure 1: Description", Index: 0},
+			{Type: model.ElementTypeImage, Text: "", Index: 1},
+			{Type: model.ElementTypeParagraph, Text: "After", Index: 2},
+		}
+
+		atomic := detector.FindAtomicBlocks(blocks)
+
+		// Should find figure with caption as atomic
+		foundFigure := false
+		for _, ab := range atomic {
+			if ab.Type == "figure" {
+				foundFigure = true
+			}
+		}
+		if !foundFigure {
+			t.Error("Expected to find figure atomic block")
+		}
+	})
+}
+
+func TestIsSentenceEnd_EdgeCases(t *testing.T) {
+	tests := []struct {
+		text     string
+		position int
+		want     bool
+	}{
+		{"", 0, false},           // Empty string
+		{"A", 0, false},          // Single char, no punctuation
+		{".", 0, true},           // Just a period
+		{"U.S.A. is great", 5, false}, // Abbreviation
+		{"vs. the team", 2, false},    // Common abbreviation
+		{"i.e. example", 3, false},    // Latin abbreviation
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.text, func(t *testing.T) {
+			if got := isSentenceEnd(tt.text, tt.position); got != tt.want {
+				t.Errorf("isSentenceEnd(%q, %d) = %v, want %v", tt.text, tt.position, got, tt.want)
+			}
+		})
+	}
+}

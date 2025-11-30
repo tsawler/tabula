@@ -649,3 +649,210 @@ func BenchmarkFindXRef(b *testing.B) {
 		parser.FindXRef()
 	}
 }
+
+// ============================================================================
+// ParsePrevXRef tests
+// ============================================================================
+
+// TestParsePrevXRef_NoPrev tests parsing XRef when there's no Prev entry
+func TestParsePrevXRef_NoPrev(t *testing.T) {
+	table := NewXRefTable()
+	table.Trailer = Dict{"Size": Int(3)}
+
+	parser := NewXRefParser(strings.NewReader(""))
+	prevTable, err := parser.ParsePrevXRef(table)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if prevTable != nil {
+		t.Error("expected nil for table without /Prev")
+	}
+}
+
+// TestParsePrevXRef_InvalidPrevType tests error handling for invalid /Prev type
+func TestParsePrevXRef_InvalidPrevType(t *testing.T) {
+	table := NewXRefTable()
+	table.Trailer = Dict{
+		"Size": Int(3),
+		"Prev": String("invalid"), // Should be Int, not String
+	}
+
+	parser := NewXRefParser(strings.NewReader(""))
+	_, err := parser.ParsePrevXRef(table)
+	if err == nil {
+		t.Error("expected error for invalid /Prev type")
+	}
+}
+
+// TestParsePrevXRef_WithPrev tests parsing XRef with a /Prev entry
+func TestParsePrevXRef_WithPrev(t *testing.T) {
+	// Create a PDF with two XRef tables (incremental update)
+	// Previous XRef at offset 0
+	prevXRef := `xref
+0 2
+0000000000 65535 f
+0000000017 00000 n
+trailer
+<< /Size 2 /Root 1 0 R >>
+`
+	// Padding to position main xref at known offset
+	mainOffset := len(prevXRef)
+
+	// Main XRef at known offset with /Prev pointing to 0
+	mainXRef := `xref
+0 3
+0000000000 65535 f
+0000000017 00000 n
+0000000100 00000 n
+trailer
+<< /Size 3 /Root 1 0 R /Prev 0 >>
+startxref
+` + string(rune(mainOffset+'0')) + `
+%%EOF`
+
+	fullPDF := prevXRef + mainXRef
+
+	reader := strings.NewReader(fullPDF)
+	parser := NewXRefParser(reader)
+
+	// Parse main XRef first
+	mainTable, err := parser.ParseXRef(int64(mainOffset))
+	if err != nil {
+		t.Fatalf("failed to parse main xref: %v", err)
+	}
+
+	// Verify main table has /Prev
+	prevObj := mainTable.Trailer.Get("Prev")
+	if prevObj == nil {
+		t.Fatal("main table should have /Prev")
+	}
+
+	// Now parse previous XRef
+	prevTable, err := parser.ParsePrevXRef(mainTable)
+	if err != nil {
+		t.Fatalf("ParsePrevXRef() error = %v", err)
+	}
+
+	if prevTable == nil {
+		t.Fatal("expected non-nil prev table")
+	}
+
+	// Previous table should have 2 entries
+	if prevTable.Size() != 2 {
+		t.Errorf("prev table size = %d, want 2", prevTable.Size())
+	}
+}
+
+// ============================================================================
+// ParseAllXRefs tests
+// ============================================================================
+
+// TestParseAllXRefs_Single tests parsing a PDF with single XRef
+func TestParseAllXRefs_Single(t *testing.T) {
+	input := `%PDF-1.4
+some content
+xref
+0 2
+0000000000 65535 f
+0000000017 00000 n
+trailer
+<< /Size 2 /Root 1 0 R >>
+startxref
+22
+%%EOF`
+
+	reader := strings.NewReader(input)
+	parser := NewXRefParser(reader)
+
+	tables, err := parser.ParseAllXRefs()
+	if err != nil {
+		t.Fatalf("ParseAllXRefs() error = %v", err)
+	}
+
+	if len(tables) != 1 {
+		t.Errorf("expected 1 table, got %d", len(tables))
+	}
+
+	if tables[0].Size() != 2 {
+		t.Errorf("table size = %d, want 2", tables[0].Size())
+	}
+}
+
+// TestParseAllXRefs_Error tests error handling
+func TestParseAllXRefs_Error(t *testing.T) {
+	// Invalid PDF without startxref
+	input := `%PDF-1.4
+some content without xref
+%%EOF`
+
+	reader := strings.NewReader(input)
+	parser := NewXRefParser(reader)
+
+	_, err := parser.ParseAllXRefs()
+	if err == nil {
+		t.Error("expected error for PDF without startxref")
+	}
+}
+
+// ============================================================================
+// MergeXRefTables edge cases
+// ============================================================================
+
+// TestMergeXRefTables_Empty tests merging zero tables
+func TestMergeXRefTables_Empty(t *testing.T) {
+	merged := MergeXRefTables()
+	if merged == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if merged.Size() != 0 {
+		t.Errorf("expected empty table, got size %d", merged.Size())
+	}
+}
+
+// TestMergeXRefTables_Single tests merging single table
+func TestMergeXRefTables_Single(t *testing.T) {
+	table := NewXRefTable()
+	table.Set(1, &XRefEntry{Offset: 100, InUse: true})
+	table.Trailer = Dict{"Size": Int(2)}
+
+	merged := MergeXRefTables(table)
+	if merged.Size() != 1 {
+		t.Errorf("expected size 1, got %d", merged.Size())
+	}
+
+	entry, ok := merged.Get(1)
+	if !ok || entry.Offset != 100 {
+		t.Error("expected entry 1 with offset 100")
+	}
+}
+
+// ============================================================================
+// parseEntry edge cases
+// ============================================================================
+
+// TestParseEntry_InvalidFlag tests error handling for invalid in-use flag
+func TestParseEntry_InvalidFlag(t *testing.T) {
+	parser := &XRefParser{}
+	_, err := parser.parseEntry("0000000017 00000 x ")
+	if err == nil {
+		t.Error("expected error for invalid flag 'x'")
+	}
+}
+
+// TestParseEntry_InvalidGeneration tests error for non-numeric generation
+func TestParseEntry_InvalidGeneration(t *testing.T) {
+	parser := &XRefParser{}
+	_, err := parser.parseEntry("0000000017 abcde n ")
+	if err == nil {
+		t.Error("expected error for invalid generation")
+	}
+}
+
+// TestParseEntry_InvalidOffset tests error for non-numeric offset
+func TestParseEntry_InvalidOffset(t *testing.T) {
+	parser := &XRefParser{}
+	_, err := parser.parseEntry("abcdefghij 00000 n ")
+	if err == nil {
+		t.Error("expected error for invalid offset")
+	}
+}
