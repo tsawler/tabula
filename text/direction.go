@@ -4,7 +4,8 @@ import (
 	"unicode"
 )
 
-// Direction represents text direction
+// Direction represents the writing direction of text.
+// It is used to detect and handle bidirectional text (bidi) in documents.
 type Direction int
 
 const (
@@ -16,7 +17,7 @@ const (
 	Neutral
 )
 
-// String returns string representation of direction
+// String returns a string representation of the direction ("LTR", "RTL", or "Neutral").
 func (d Direction) String() string {
 	switch d {
 	case LTR:
@@ -30,8 +31,10 @@ func (d Direction) String() string {
 	}
 }
 
-// DetectDirection detects the dominant text direction of a string
-// based on Unicode character properties
+// DetectDirection analyzes a string and returns its dominant text direction
+// based on Unicode character properties. It counts strong directional characters
+// and returns the direction with the higher count, or Neutral if no strong
+// directional characters are present.
 func DetectDirection(text string) Direction {
 	if text == "" {
 		return Neutral
@@ -62,8 +65,9 @@ func DetectDirection(text string) Direction {
 	return LTR
 }
 
-// GetCharDirection returns the direction of a single character
-// based on Unicode character properties
+// GetCharDirection returns the inherent direction of a single Unicode character.
+// Digits, punctuation, whitespace, and symbols are Neutral; RTL scripts (Arabic,
+// Hebrew, Syriac, Thaana, N'Ko) return RTL; all other scripts return LTR.
 func GetCharDirection(r rune) Direction {
 	// Numbers and neutral characters (check first, before script checks)
 	if unicode.IsDigit(r) || unicode.IsPunct(r) || unicode.IsSpace(r) || unicode.IsSymbol(r) {
@@ -89,12 +93,13 @@ func GetCharDirection(r rune) Direction {
 	return LTR
 }
 
-// isArabic checks if rune is in Arabic Unicode block
-// Arabic: U+0600–U+06FF
-// Arabic Supplement: U+0750–U+077F
-// Arabic Extended-A: U+08A0–U+08FF
-// Arabic Presentation Forms-A: U+FB50–U+FDFF
-// Arabic Presentation Forms-B: U+FE70–U+FEFF
+// isArabic reports whether r is in an Arabic Unicode block.
+// This includes:
+//   - Arabic: U+0600–U+06FF
+//   - Arabic Supplement: U+0750–U+077F
+//   - Arabic Extended-A: U+08A0–U+08FF
+//   - Arabic Presentation Forms-A: U+FB50–U+FDFF
+//   - Arabic Presentation Forms-B: U+FE70–U+FEFF
 func isArabic(r rune) bool {
 	return (r >= 0x0600 && r <= 0x06FF) ||
 		(r >= 0x0750 && r <= 0x077F) ||
@@ -103,37 +108,38 @@ func isArabic(r rune) bool {
 		(r >= 0xFE70 && r <= 0xFEFF)
 }
 
-// isHebrew checks if rune is in Hebrew Unicode block
-// Hebrew: U+0590–U+05FF
-// Hebrew Presentation Forms: U+FB1D–U+FB4F
+// isHebrew reports whether r is in a Hebrew Unicode block.
+// This includes:
+//   - Hebrew: U+0590–U+05FF
+//   - Hebrew Presentation Forms: U+FB1D–U+FB4F
 func isHebrew(r rune) bool {
 	return (r >= 0x0590 && r <= 0x05FF) ||
 		(r >= 0xFB1D && r <= 0xFB4F)
 }
 
-// isSyriac checks if rune is in Syriac Unicode block
-// Syriac: U+0700–U+074F
+// isSyriac reports whether r is in the Syriac Unicode block (U+0700–U+074F).
 func isSyriac(r rune) bool {
 	return r >= 0x0700 && r <= 0x074F
 }
 
-// isThaana checks if rune is in Thaana Unicode block (Maldivian)
-// Thaana: U+0780–U+07BF
+// isThaana reports whether r is in the Thaana Unicode block (U+0780–U+07BF).
+// Thaana is the script used to write Maldivian (Dhivehi).
 func isThaana(r rune) bool {
 	return r >= 0x0780 && r <= 0x07BF
 }
 
-// isNKo checks if rune is in N'Ko Unicode block (West African)
-// N'Ko: U+07C0–U+07FF
+// isNKo reports whether r is in the N'Ko Unicode block (U+07C0–U+07FF).
+// N'Ko is a script used for Manding languages in West Africa.
 func isNKo(r rune) bool {
 	return r >= 0x07C0 && r <= 0x07FF
 }
 
-// isLatin checks if rune is in Latin Unicode blocks
-// Basic Latin: U+0000–U+007F
-// Latin-1 Supplement: U+0080–U+00FF
-// Latin Extended-A: U+0100–U+017F
-// Latin Extended-B: U+0180–U+024F
+// isLatin reports whether r is in a Latin Unicode block.
+// This includes:
+//   - Basic Latin: U+0000–U+007F
+//   - Latin-1 Supplement: U+0080–U+00FF
+//   - Latin Extended-A: U+0100–U+017F
+//   - Latin Extended-B: U+0180–U+024F
 func isLatin(r rune) bool {
 	return (r >= 0x0000 && r <= 0x007F) ||
 		(r >= 0x0080 && r <= 0x00FF) ||
@@ -141,46 +147,46 @@ func isLatin(r rune) bool {
 		(r >= 0x0180 && r <= 0x024F)
 }
 
-// isCyrillic checks if rune is in Cyrillic Unicode block
-// Cyrillic: U+0400–U+04FF
-// Cyrillic Supplement: U+0500–U+052F
+// isCyrillic reports whether r is in a Cyrillic Unicode block.
+// This includes:
+//   - Cyrillic: U+0400–U+04FF
+//   - Cyrillic Supplement: U+0500–U+052F
 func isCyrillic(r rune) bool {
 	return (r >= 0x0400 && r <= 0x04FF) ||
 		(r >= 0x0500 && r <= 0x052F)
 }
 
-// isGreek checks if rune is in Greek Unicode block
-// Greek and Coptic: U+0370–U+03FF
-// Greek Extended: U+1F00–U+1FFF
+// isGreek reports whether r is in a Greek Unicode block.
+// This includes:
+//   - Greek and Coptic: U+0370–U+03FF
+//   - Greek Extended: U+1F00–U+1FFF
 func isGreek(r rune) bool {
 	return (r >= 0x0370 && r <= 0x03FF) ||
 		(r >= 0x1F00 && r <= 0x1FFF)
 }
 
-// isArmenian checks if rune is in Armenian Unicode block
-// Armenian: U+0530–U+058F
+// isArmenian reports whether r is in the Armenian Unicode block (U+0530–U+058F).
 func isArmenian(r rune) bool {
 	return r >= 0x0530 && r <= 0x058F
 }
 
-// isGeorgian checks if rune is in Georgian Unicode block
-// Georgian: U+10A0–U+10FF
+// isGeorgian reports whether r is in the Georgian Unicode block (U+10A0–U+10FF).
 func isGeorgian(r rune) bool {
 	return r >= 0x10A0 && r <= 0x10FF
 }
 
-// isThai checks if rune is in Thai Unicode block
-// Thai: U+0E00–U+0E7F
+// isThai reports whether r is in the Thai Unicode block (U+0E00–U+0E7F).
 func isThai(r rune) bool {
 	return r >= 0x0E00 && r <= 0x0E7F
 }
 
-// isCJK checks if rune is in CJK (Chinese, Japanese, Korean) Unicode blocks
-// CJK Unified Ideographs: U+4E00–U+9FFF
-// CJK Extension A: U+3400–U+4DBF
-// Hiragana: U+3040–U+309F
-// Katakana: U+30A0–U+30FF
-// Hangul: U+AC00–U+D7AF
+// isCJK reports whether r is in a CJK (Chinese, Japanese, Korean) Unicode block.
+// This includes:
+//   - CJK Unified Ideographs: U+4E00–U+9FFF
+//   - CJK Extension A: U+3400–U+4DBF
+//   - Hiragana: U+3040–U+309F
+//   - Katakana: U+30A0–U+30FF
+//   - Hangul: U+AC00–U+D7AF
 func isCJK(r rune) bool {
 	return (r >= 0x4E00 && r <= 0x9FFF) ||
 		(r >= 0x3400 && r <= 0x4DBF) ||

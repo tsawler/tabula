@@ -2,19 +2,20 @@ package model
 
 import "math"
 
-// Point represents a 2D point
+// Point represents a 2D point with X and Y coordinates.
 type Point struct {
 	X, Y float64
 }
 
-// Distance calculates the Euclidean distance to another point
+// Distance returns the Euclidean distance between p and another point.
 func (p Point) Distance(other Point) float64 {
 	dx := p.X - other.X
 	dy := p.Y - other.Y
 	return math.Sqrt(dx*dx + dy*dy)
 }
 
-// BBox represents a bounding box (rectangle)
+// BBox represents an axis-aligned bounding box (rectangle).
+// In PDF coordinates, Y increases upward, so Y is the bottom edge.
 type BBox struct {
 	X      float64 // Left
 	Y      float64 // Bottom (PDF coordinate system)
@@ -22,12 +23,12 @@ type BBox struct {
 	Height float64
 }
 
-// NewBBox creates a bounding box from coordinates
+// NewBBox creates a bounding box from the given coordinates.
 func NewBBox(x, y, width, height float64) BBox {
 	return BBox{X: x, Y: y, Width: width, Height: height}
 }
 
-// NewBBoxFromPoints creates a bounding box from two points
+// NewBBoxFromPoints creates a bounding box that encloses the two given points.
 func NewBBoxFromPoints(p1, p2 Point) BBox {
 	x := math.Min(p1.X, p2.X)
 	y := math.Min(p1.Y, p2.Y)
@@ -36,27 +37,27 @@ func NewBBoxFromPoints(p1, p2 Point) BBox {
 	return BBox{X: x, Y: y, Width: width, Height: height}
 }
 
-// Left returns the left edge X coordinate
+// Left returns the X coordinate of the left edge.
 func (b BBox) Left() float64 {
 	return b.X
 }
 
-// Right returns the right edge X coordinate
+// Right returns the X coordinate of the right edge.
 func (b BBox) Right() float64 {
 	return b.X + b.Width
 }
 
-// Bottom returns the bottom edge Y coordinate
+// Bottom returns the Y coordinate of the bottom edge.
 func (b BBox) Bottom() float64 {
 	return b.Y
 }
 
-// Top returns the top edge Y coordinate
+// Top returns the Y coordinate of the top edge.
 func (b BBox) Top() float64 {
 	return b.Y + b.Height
 }
 
-// Center returns the center point
+// Center returns the center point of the bounding box.
 func (b BBox) Center() Point {
 	return Point{
 		X: b.X + b.Width/2,
@@ -64,13 +65,13 @@ func (b BBox) Center() Point {
 	}
 }
 
-// Contains checks if a point is inside the bounding box
+// Contains reports whether the point p is inside the bounding box.
 func (b BBox) Contains(p Point) bool {
 	return p.X >= b.Left() && p.X <= b.Right() &&
 		p.Y >= b.Bottom() && p.Y <= b.Top()
 }
 
-// Intersects checks if two bounding boxes intersect
+// Intersects reports whether b and other have any overlapping area.
 func (b BBox) Intersects(other BBox) bool {
 	return !(b.Right() < other.Left() ||
 		b.Left() > other.Right() ||
@@ -78,7 +79,8 @@ func (b BBox) Intersects(other BBox) bool {
 		b.Bottom() > other.Top())
 }
 
-// Intersection returns the intersection of two bounding boxes
+// Intersection returns the bounding box of the overlapping region,
+// or an empty BBox if the boxes do not intersect.
 func (b BBox) Intersection(other BBox) BBox {
 	if !b.Intersects(other) {
 		return BBox{}
@@ -97,7 +99,7 @@ func (b BBox) Intersection(other BBox) BBox {
 	}
 }
 
-// Union returns the union of two bounding boxes
+// Union returns the smallest bounding box that contains both b and other.
 func (b BBox) Union(other BBox) BBox {
 	x := math.Min(b.Left(), other.Left())
 	y := math.Min(b.Bottom(), other.Bottom())
@@ -112,12 +114,12 @@ func (b BBox) Union(other BBox) BBox {
 	}
 }
 
-// Area returns the area of the bounding box
+// Area returns the area of the bounding box (Width * Height).
 func (b BBox) Area() float64 {
 	return b.Width * b.Height
 }
 
-// Expand expands the bounding box by a margin on all sides
+// Expand returns a new bounding box expanded by margin on all four sides.
 func (b BBox) Expand(margin float64) BBox {
 	return BBox{
 		X:      b.X - margin,
@@ -127,8 +129,8 @@ func (b BBox) Expand(margin float64) BBox {
 	}
 }
 
-// OverlapRatio calculates the overlap ratio with another box
-// Returns value between 0 and 1
+// OverlapRatio returns the ratio of intersection area to the smaller box's area.
+// Returns a value between 0 (no overlap) and 1 (complete overlap).
 func (b BBox) OverlapRatio(other BBox) float64 {
 	if !b.Intersects(other) {
 		return 0
@@ -144,25 +146,26 @@ func (b BBox) OverlapRatio(other BBox) float64 {
 	return intersection.Area() / minArea
 }
 
-// IsEmpty returns true if the bounding box has zero area
+// IsEmpty reports whether the bounding box has zero or negative dimensions.
 func (b BBox) IsEmpty() bool {
 	return b.Width <= 0 || b.Height <= 0
 }
 
-// IsValid returns true if the bounding box has positive dimensions
+// IsValid reports whether the bounding box has positive width and height.
 func (b BBox) IsValid() bool {
 	return b.Width > 0 && b.Height > 0
 }
 
-// Matrix represents a 2D affine transformation matrix
+// Matrix represents a 2D affine transformation matrix [a, b, c, d, e, f].
+// This is stored in row-major order as used by PDF: [a b c d e f].
 type Matrix [6]float64
 
-// Identity returns an identity matrix
+// Identity returns the identity transformation matrix.
 func Identity() Matrix {
 	return Matrix{1, 0, 0, 1, 0, 0}
 }
 
-// Transform applies the matrix transformation to a point
+// Transform applies the affine transformation to a point and returns the result.
 func (m Matrix) Transform(p Point) Point {
 	return Point{
 		X: m[0]*p.X + m[2]*p.Y + m[4],
@@ -170,7 +173,7 @@ func (m Matrix) Transform(p Point) Point {
 	}
 }
 
-// Multiply multiplies two matrices
+// Multiply returns the product of m and other (m * other).
 func (m Matrix) Multiply(other Matrix) Matrix {
 	return Matrix{
 		m[0]*other[0] + m[1]*other[2],
@@ -182,24 +185,24 @@ func (m Matrix) Multiply(other Matrix) Matrix {
 	}
 }
 
-// Translate creates a translation matrix
+// Translate returns a translation matrix that moves by (tx, ty).
 func Translate(tx, ty float64) Matrix {
 	return Matrix{1, 0, 0, 1, tx, ty}
 }
 
-// Scale creates a scaling matrix
+// Scale returns a scaling matrix with scale factors (sx, sy).
 func Scale(sx, sy float64) Matrix {
 	return Matrix{sx, 0, 0, sy, 0, 0}
 }
 
-// Rotate creates a rotation matrix (angle in radians)
+// Rotate returns a rotation matrix for the given angle in radians.
 func Rotate(angle float64) Matrix {
 	cos := math.Cos(angle)
 	sin := math.Sin(angle)
 	return Matrix{cos, sin, -sin, cos, 0, 0}
 }
 
-// IsIdentity returns true if the matrix is an identity matrix
+// IsIdentity reports whether m is the identity matrix.
 func (m Matrix) IsIdentity() bool {
 	return m[0] == 1 && m[1] == 0 && m[2] == 0 && m[3] == 1 && m[4] == 0 && m[5] == 0
 }
