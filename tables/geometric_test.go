@@ -412,7 +412,7 @@ func TestFindCell(t *testing.T) {
 	d := NewGeometricDetector()
 
 	grid := &model.TableGrid{
-		Rows: []float64{100, 80, 60}, // 2 rows
+		Rows: []float64{100, 80, 60},   // 2 rows
 		Cols: []float64{100, 150, 200}, // 2 cols
 	}
 
@@ -505,7 +505,7 @@ func TestCalculateCellOccupancy(t *testing.T) {
 	d := NewGeometricDetector()
 
 	grid := &model.TableGrid{
-		Rows: []float64{100, 80, 60}, // 2 rows
+		Rows: []float64{100, 80, 60},   // 2 rows
 		Cols: []float64{100, 150, 200}, // 2 cols
 	}
 

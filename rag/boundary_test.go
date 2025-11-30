@@ -794,9 +794,9 @@ func TestIsSentenceEnd_EdgeCases(t *testing.T) {
 		position int
 		want     bool
 	}{
-		{"", 0, false},           // Empty string
-		{"A", 0, false},          // Single char, no punctuation
-		{".", 0, true},           // Just a period
+		{"", 0, false},                // Empty string
+		{"A", 0, false},               // Single char, no punctuation
+		{".", 0, true},                // Just a period
 		{"U.S.A. is great", 5, false}, // Abbreviation
 		{"vs. the team", 2, false},    // Common abbreviation
 		{"i.e. example", 3, false},    // Latin abbreviation
