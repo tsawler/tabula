@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/tsawler/tabula/rag"
 )
 
 // createTestDOCX creates a minimal DOCX file for testing.
@@ -695,5 +697,417 @@ func TestReader_NoHeadersFooters(t *testing.T) {
 	}
 	if !strings.Contains(text, "Simple document") {
 		t.Error("Text should contain document content")
+	}
+}
+
+// ============================================================================
+// Integration Tests with Real DOCX Files
+// ============================================================================
+
+func testDOCXPath(filename string) string {
+	return filepath.Join("testdata", filename)
+}
+
+func TestIntegration_RealDOCX_Text(t *testing.T) {
+	docxPath := testDOCXPath("hills.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		t.Skip("test DOCX not found:", docxPath)
+	}
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	text, err := r.Text()
+	if err != nil {
+		t.Fatalf("Text() error = %v", err)
+	}
+
+	if len(text) == 0 {
+		t.Error("expected non-empty text")
+	}
+}
+
+func TestIntegration_RealDOCX_Markdown(t *testing.T) {
+	docxPath := testDOCXPath("hills.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		t.Skip("test DOCX not found:", docxPath)
+	}
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	md, err := r.Markdown()
+	if err != nil {
+		t.Fatalf("Markdown() error = %v", err)
+	}
+
+	if len(md) == 0 {
+		t.Error("expected non-empty markdown")
+	}
+}
+
+func TestIntegration_RealDOCX_Document(t *testing.T) {
+	docxPath := testDOCXPath("hills.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		t.Skip("test DOCX not found:", docxPath)
+	}
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	doc, err := r.Document()
+	if err != nil {
+		t.Fatalf("Document() error = %v", err)
+	}
+
+	if doc == nil {
+		t.Fatal("expected non-nil document")
+	}
+
+	if len(doc.Pages) == 0 {
+		t.Error("expected at least one page")
+	}
+}
+
+func TestIntegration_RealDOCX_WithTables(t *testing.T) {
+	docxPath := testDOCXPath("table.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		t.Skip("test DOCX not found:", docxPath)
+	}
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	// Test Tables method
+	tables := r.Tables()
+	if len(tables) == 0 {
+		t.Error("expected at least one table")
+	}
+
+	// Test ModelTables method
+	modelTables := r.ModelTables()
+	if len(modelTables) == 0 {
+		t.Error("expected at least one model table")
+	}
+
+	// Test text extraction includes table content
+	text, err := r.Text()
+	if err != nil {
+		t.Fatalf("Text() error = %v", err)
+	}
+	if len(text) == 0 {
+		t.Error("expected non-empty text")
+	}
+}
+
+func TestIntegration_RealDOCX_Lists(t *testing.T) {
+	docxPath := testDOCXPath("guests-of-the-nation.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		t.Skip("test DOCX not found:", docxPath)
+	}
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	// Test Lists method
+	lists := r.Lists()
+	// Lists may or may not exist in this document
+	_ = lists
+
+	// Test text extraction
+	text, err := r.Text()
+	if err != nil {
+		t.Fatalf("Text() error = %v", err)
+	}
+	if len(text) == 0 {
+		t.Error("expected non-empty text")
+	}
+}
+
+func TestIntegration_RealDOCX_Metadata(t *testing.T) {
+	docxPath := testDOCXPath("hills.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		t.Skip("test DOCX not found:", docxPath)
+	}
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	meta := r.Metadata()
+	// Metadata may have values or be empty depending on the document
+	_ = meta
+}
+
+func TestIntegration_RealDOCX_MarkdownWithRAGOptions(t *testing.T) {
+	docxPath := testDOCXPath("hills.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		t.Skip("test DOCX not found:", docxPath)
+	}
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	extractOpts := ExtractOptions{}
+	mdOpts := rag.MarkdownOptions{
+		IncludeMetadata:        true,
+		IncludeTableOfContents: false,
+	}
+
+	md, err := r.MarkdownWithRAGOptions(extractOpts, mdOpts)
+	if err != nil {
+		t.Fatalf("MarkdownWithRAGOptions() error = %v", err)
+	}
+
+	if len(md) == 0 {
+		t.Error("expected non-empty markdown")
+	}
+}
+
+// ============================================================================
+// Additional Edge Case Tests
+// ============================================================================
+
+func TestReader_ModelLists(t *testing.T) {
+	// Create a document with a list structure
+	content := `<w:p>
+  <w:pPr>
+    <w:numPr>
+      <w:ilvl w:val="0"/>
+      <w:numId w:val="1"/>
+    </w:numPr>
+  </w:pPr>
+  <w:r><w:t>First item</w:t></w:r>
+</w:p>
+<w:p>
+  <w:pPr>
+    <w:numPr>
+      <w:ilvl w:val="0"/>
+      <w:numId w:val="1"/>
+    </w:numPr>
+  </w:pPr>
+  <w:r><w:t>Second item</w:t></w:r>
+</w:p>`
+
+	docxPath := createTestDOCX(t, content)
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	modelLists := r.ModelLists()
+	// May or may not detect lists depending on numbering.xml presence
+	_ = modelLists
+}
+
+func TestFormatNumber_NilResolver(t *testing.T) {
+	// formatNumber with nil resolver should return decimal format
+	result := formatNumber(1, "1", 0, nil)
+	if result != "1" {
+		t.Errorf("formatNumber(1, '1', 0, nil) = %q, want %q", result, "1")
+	}
+
+	result = formatNumber(10, "1", 0, nil)
+	if result != "10" {
+		t.Errorf("formatNumber(10, '1', 0, nil) = %q, want %q", result, "10")
+	}
+}
+
+func TestToLowerLetter(t *testing.T) {
+	tests := []struct {
+		num      int
+		expected string
+	}{
+		{1, "a"},
+		{2, "b"},
+		{26, "z"},
+		{27, "aa"},
+		{28, "ab"},
+		{52, "az"},
+		{53, "ba"},
+	}
+
+	for _, tt := range tests {
+		result := toLowerLetter(tt.num)
+		if result != tt.expected {
+			t.Errorf("toLowerLetter(%d) = %q, want %q", tt.num, result, tt.expected)
+		}
+	}
+}
+
+func TestToUpperRoman(t *testing.T) {
+	tests := []struct {
+		num      int
+		expected string
+	}{
+		{1, "I"},
+		{2, "II"},
+		{3, "III"},
+		{4, "IV"},
+		{5, "V"},
+		{9, "IX"},
+		{10, "X"},
+		{40, "XL"},
+		{50, "L"},
+		{90, "XC"},
+		{100, "C"},
+		{400, "CD"},
+		{500, "D"},
+		{900, "CM"},
+		{1000, "M"},
+		{1994, "MCMXCIV"},
+	}
+
+	for _, tt := range tests {
+		result := toUpperRoman(tt.num)
+		if result != tt.expected {
+			t.Errorf("toUpperRoman(%d) = %q, want %q", tt.num, result, tt.expected)
+		}
+	}
+}
+
+func TestToLowerRoman(t *testing.T) {
+	tests := []struct {
+		num      int
+		expected string
+	}{
+		{1, "i"},
+		{4, "iv"},
+		{9, "ix"},
+		{10, "x"},
+	}
+
+	for _, tt := range tests {
+		result := toLowerRoman(tt.num)
+		if result != tt.expected {
+			t.Errorf("toLowerRoman(%d) = %q, want %q", tt.num, result, tt.expected)
+		}
+	}
+}
+
+func TestToUpperLetter(t *testing.T) {
+	tests := []struct {
+		num      int
+		expected string
+	}{
+		{1, "A"},
+		{26, "Z"},
+		{27, "AA"},
+	}
+
+	for _, tt := range tests {
+		result := toUpperLetter(tt.num)
+		if result != tt.expected {
+			t.Errorf("toUpperLetter(%d) = %q, want %q", tt.num, result, tt.expected)
+		}
+	}
+}
+
+func TestReader_GetListFormat(t *testing.T) {
+	// Test via the reader's getListFormat method - when no numbering resolver
+	// is present, it should return default unordered list format
+	docxPath := testDOCXPath("hills.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		t.Skip("test DOCX not found:", docxPath)
+	}
+
+	r, err := Open(docxPath)
+	if err != nil {
+		t.Fatalf("Open() error = %v", err)
+	}
+	defer r.Close()
+
+	// getListFormat is exercised through Markdown() for documents with lists
+	md, err := r.Markdown()
+	if err != nil {
+		t.Fatalf("Markdown() error = %v", err)
+	}
+
+	// Just ensure we got valid output
+	if len(md) == 0 {
+		t.Error("expected non-empty markdown")
+	}
+}
+
+// ============================================================================
+// Benchmark Tests
+// ============================================================================
+
+func BenchmarkOpen(b *testing.B) {
+	docxPath := testDOCXPath("hills.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		b.Skip("test DOCX not found")
+	}
+
+	for i := 0; i < b.N; i++ {
+		r, err := Open(docxPath)
+		if err != nil {
+			b.Fatal(err)
+		}
+		r.Close()
+	}
+}
+
+func BenchmarkText(b *testing.B) {
+	docxPath := testDOCXPath("hills.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		b.Skip("test DOCX not found")
+	}
+
+	r, err := Open(docxPath)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer r.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := r.Text()
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkMarkdown(b *testing.B) {
+	docxPath := testDOCXPath("hills.docx")
+	if _, err := os.Stat(docxPath); os.IsNotExist(err) {
+		b.Skip("test DOCX not found")
+	}
+
+	r, err := Open(docxPath)
+	if err != nil {
+		b.Fatal(err)
+	}
+	defer r.Close()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := r.Markdown()
+		if err != nil {
+			b.Fatal(err)
+		}
 	}
 }

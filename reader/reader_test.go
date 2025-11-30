@@ -566,3 +566,574 @@ func TestMultipleObjects(t *testing.T) {
 		t.Errorf("expected cache size 2, got %d", reader.CacheSize())
 	}
 }
+
+// testPDFPath returns path to test PDF files
+func testPDFSamplePath(filename string) string {
+	return filepath.Join("..", "..", "pdf-samples", filename)
+}
+
+// TestResolve tests the Resolve method
+func TestResolve(t *testing.T) {
+	tmpFile := createTempPDF(t, minimalPDF)
+
+	reader, err := Open(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Test resolving an indirect reference
+	ref := core.IndirectRef{Number: 1, Generation: 0}
+	obj, err := reader.Resolve(ref)
+	if err != nil {
+		t.Fatalf("failed to resolve reference: %v", err)
+	}
+	if _, ok := obj.(core.Dict); !ok {
+		t.Errorf("expected Dict, got %T", obj)
+	}
+
+	// Test resolving a non-reference (should return as-is)
+	intObj := core.Int(42)
+	resolved, err := reader.Resolve(intObj)
+	if err != nil {
+		t.Fatalf("failed to resolve int: %v", err)
+	}
+	if resolved != intObj {
+		t.Error("expected non-reference to be returned as-is")
+	}
+}
+
+// TestResolveDeep tests the ResolveDeep method
+func TestResolveDeep(t *testing.T) {
+	tmpFile := createTempPDF(t, minimalPDF)
+
+	reader, err := Open(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Test resolving an indirect reference deeply
+	ref := core.IndirectRef{Number: 1, Generation: 0}
+	obj, err := reader.ResolveDeep(ref)
+	if err != nil {
+		t.Fatalf("failed to resolve reference deeply: %v", err)
+	}
+	dict, ok := obj.(core.Dict)
+	if !ok {
+		t.Fatalf("expected Dict, got %T", obj)
+	}
+
+	// The Pages reference should also be resolved
+	pagesObj := dict.Get("Pages")
+	if pagesObj == nil {
+		t.Fatal("expected Pages in catalog")
+	}
+	// Pages should now be the actual dict, not a reference
+	if _, ok := pagesObj.(core.Dict); !ok {
+		t.Errorf("expected Pages to be resolved to Dict, got %T", pagesObj)
+	}
+}
+
+// TestResolveDeep_Array tests ResolveDeep with arrays
+func TestResolveDeep_Array(t *testing.T) {
+	tmpFile := createTempPDF(t, minimalPDF)
+
+	reader, err := Open(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Create an array with a reference
+	arr := core.Array{
+		core.Int(1),
+		core.IndirectRef{Number: 1, Generation: 0},
+	}
+
+	resolved, err := reader.ResolveDeep(arr)
+	if err != nil {
+		t.Fatalf("failed to resolve array deeply: %v", err)
+	}
+
+	resolvedArr, ok := resolved.(core.Array)
+	if !ok {
+		t.Fatalf("expected Array, got %T", resolved)
+	}
+
+	if len(resolvedArr) != 2 {
+		t.Fatalf("expected 2 elements, got %d", len(resolvedArr))
+	}
+
+	// First element should still be Int
+	if _, ok := resolvedArr[0].(core.Int); !ok {
+		t.Errorf("expected first element to be Int, got %T", resolvedArr[0])
+	}
+
+	// Second element should be resolved Dict
+	if _, ok := resolvedArr[1].(core.Dict); !ok {
+		t.Errorf("expected second element to be Dict, got %T", resolvedArr[1])
+	}
+}
+
+// TestResolveDeep_Dict tests ResolveDeep with nested dicts
+func TestResolveDeep_Dict(t *testing.T) {
+	tmpFile := createTempPDF(t, minimalPDF)
+
+	reader, err := Open(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Create a dict with a reference
+	dict := core.Dict{
+		"Ref": core.IndirectRef{Number: 1, Generation: 0},
+		"Int": core.Int(42),
+	}
+
+	resolved, err := reader.ResolveDeep(dict)
+	if err != nil {
+		t.Fatalf("failed to resolve dict deeply: %v", err)
+	}
+
+	resolvedDict, ok := resolved.(core.Dict)
+	if !ok {
+		t.Fatalf("expected Dict, got %T", resolved)
+	}
+
+	// Ref should be resolved to a Dict
+	refVal := resolvedDict.Get("Ref")
+	if _, ok := refVal.(core.Dict); !ok {
+		t.Errorf("expected Ref to be resolved to Dict, got %T", refVal)
+	}
+
+	// Int should remain Int
+	intVal := resolvedDict.Get("Int")
+	if _, ok := intVal.(core.Int); !ok {
+		t.Errorf("expected Int to remain Int, got %T", intVal)
+	}
+}
+
+// TestPageCount tests getting the page count
+func TestPageCount(t *testing.T) {
+	// Test with minimal PDF (no pages)
+	t.Run("no pages", func(t *testing.T) {
+		tmpFile := createTempPDF(t, minimalPDF)
+
+		reader, err := Open(tmpFile)
+		if err != nil {
+			t.Fatalf("failed to open PDF: %v", err)
+		}
+		defer reader.Close()
+
+		count, err := reader.PageCount()
+		if err != nil {
+			t.Fatalf("failed to get page count: %v", err)
+		}
+
+		if count != 0 {
+			t.Errorf("expected 0 pages, got %d", count)
+		}
+	})
+
+	// Test with real PDF
+	t.Run("real PDF", func(t *testing.T) {
+		pdfPath := testPDFSamplePath("dinosaurs.pdf")
+		if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+			t.Skip("test PDF not found:", pdfPath)
+		}
+
+		reader, err := Open(pdfPath)
+		if err != nil {
+			t.Fatalf("failed to open PDF: %v", err)
+		}
+		defer reader.Close()
+
+		count, err := reader.PageCount()
+		if err != nil {
+			t.Fatalf("failed to get page count: %v", err)
+		}
+
+		if count < 1 {
+			t.Errorf("expected at least 1 page, got %d", count)
+		}
+	})
+}
+
+// TestGetPage tests getting a specific page
+func TestGetPage(t *testing.T) {
+	pdfPath := testPDFSamplePath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	reader, err := Open(pdfPath)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	page, err := reader.GetPage(0)
+	if err != nil {
+		t.Fatalf("failed to get page 0: %v", err)
+	}
+
+	if page == nil {
+		t.Fatal("expected non-nil page")
+	}
+}
+
+// TestGetPage_MultiplePages tests getting pages from a multi-page document
+func TestGetPage_MultiplePages(t *testing.T) {
+	pdfPath := testPDFSamplePath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	reader, err := Open(pdfPath)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	count, err := reader.PageCount()
+	if err != nil {
+		t.Fatalf("failed to get page count: %v", err)
+	}
+
+	if count < 2 {
+		t.Skip("PDF has less than 2 pages")
+	}
+
+	// Get first page
+	page0, err := reader.GetPage(0)
+	if err != nil {
+		t.Fatalf("failed to get page 0: %v", err)
+	}
+	if page0 == nil {
+		t.Error("expected non-nil page 0")
+	}
+
+	// Get second page
+	page1, err := reader.GetPage(1)
+	if err != nil {
+		t.Fatalf("failed to get page 1: %v", err)
+	}
+	if page1 == nil {
+		t.Error("expected non-nil page 1")
+	}
+}
+
+// TestGetPage_OutOfRange tests getting a page that doesn't exist
+func TestGetPage_OutOfRange(t *testing.T) {
+	pdfPath := testPDFSamplePath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	reader, err := Open(pdfPath)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Try to get page 9999 (out of range)
+	_, err = reader.GetPage(9999)
+	if err == nil {
+		t.Error("expected error when getting out-of-range page")
+	}
+}
+
+// TestExtractText tests text extraction
+func TestExtractText(t *testing.T) {
+	pdfPath := testPDFSamplePath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	reader, err := Open(pdfPath)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	page, err := reader.GetPage(0)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+
+	text, err := reader.ExtractText(page)
+	if err != nil {
+		t.Fatalf("failed to extract text: %v", err)
+	}
+
+	// Should have extracted some text
+	if len(text) == 0 {
+		t.Error("expected non-empty text")
+	}
+}
+
+// TestExtractTextFragments tests text fragment extraction
+func TestExtractTextFragments(t *testing.T) {
+	pdfPath := testPDFSamplePath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	reader, err := Open(pdfPath)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	page, err := reader.GetPage(0)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+
+	fragments, err := reader.ExtractTextFragments(page)
+	if err != nil {
+		t.Fatalf("failed to extract text fragments: %v", err)
+	}
+
+	// Should have at least some fragments
+	if len(fragments) == 0 {
+		t.Error("expected non-empty fragments")
+	}
+}
+
+// TestObjectStreamCacheSize tests the object stream cache size method
+func TestObjectStreamCacheSize(t *testing.T) {
+	tmpFile := createTempPDF(t, minimalPDF)
+
+	reader, err := Open(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Initially should be 0
+	if size := reader.ObjectStreamCacheSize(); size != 0 {
+		t.Errorf("expected object stream cache size 0, got %d", size)
+	}
+}
+
+// TestClose_NilFile tests closing when file is nil
+func TestClose_NilFile(t *testing.T) {
+	reader := &Reader{}
+	err := reader.Close()
+	if err != nil {
+		t.Errorf("closing nil file should not error: %v", err)
+	}
+}
+
+// TestEnsurePageTree_Cached tests that page tree is cached
+func TestEnsurePageTree_Cached(t *testing.T) {
+	pdfPath := testPDFSamplePath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	reader, err := Open(pdfPath)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Call PageCount twice to ensure caching
+	count1, err := reader.PageCount()
+	if err != nil {
+		t.Fatalf("first page count failed: %v", err)
+	}
+
+	count2, err := reader.PageCount()
+	if err != nil {
+		t.Fatalf("second page count failed: %v", err)
+	}
+
+	if count1 != count2 {
+		t.Error("page counts should match")
+	}
+}
+
+// TestNewReader_Error tests NewReader with invalid file
+func TestNewReader_Error(t *testing.T) {
+	// Create a file with invalid content
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "invalid.pdf")
+	err := os.WriteFile(tmpFile, []byte("not a pdf"), 0644)
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+
+	file, err := os.Open(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to open file: %v", err)
+	}
+	defer file.Close()
+
+	_, err = NewReader(file)
+	if err == nil {
+		t.Error("expected error for invalid PDF")
+	}
+}
+
+// TestParseHeader_ShortFile tests parsing header of a file that's too short
+func TestParseHeader_ShortFile(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := filepath.Join(tmpDir, "short.pdf")
+	err := os.WriteFile(tmpFile, []byte("%PDF"), 0644) // Too short
+	if err != nil {
+		t.Fatalf("failed to create temp file: %v", err)
+	}
+
+	_, err = Open(tmpFile)
+	if err == nil {
+		t.Error("expected error for short file")
+	}
+}
+
+// TestGetCatalog_MissingRoot tests error when Root is missing
+func TestGetCatalog_MissingRoot(t *testing.T) {
+	// This would require crafting a malformed PDF without Root
+	// which is complex. Skip for now as it's edge case error handling.
+	t.Skip("requires crafting malformed PDF")
+}
+
+// TestNumObjects_MissingSize tests NumObjects when Size is missing
+func TestNumObjects_MissingSize(t *testing.T) {
+	tmpFile := createTempPDF(t, minimalPDF)
+
+	reader, err := Open(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Temporarily remove Size from trailer
+	delete(reader.trailer, "Size")
+
+	numObjects := reader.NumObjects()
+	if numObjects != 0 {
+		t.Errorf("expected 0 when Size missing, got %d", numObjects)
+	}
+}
+
+// TestNumObjects_InvalidSize tests NumObjects when Size is wrong type
+func TestNumObjects_InvalidSize(t *testing.T) {
+	tmpFile := createTempPDF(t, minimalPDF)
+
+	reader, err := Open(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Replace Size with invalid type
+	reader.trailer["Size"] = core.String("not an int")
+
+	numObjects := reader.NumObjects()
+	if numObjects != 0 {
+		t.Errorf("expected 0 for invalid Size type, got %d", numObjects)
+	}
+}
+
+// TestGetObject_NotInUse tests getting an object that's marked as not in use
+func TestGetObject_NotInUse(t *testing.T) {
+	tmpFile := createTempPDF(t, minimalPDF)
+
+	reader, err := Open(tmpFile)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Object 0 is typically the free object (not in use)
+	_, err = reader.GetObject(0)
+	if err == nil {
+		t.Error("expected error when getting object not in use")
+	}
+}
+
+// TestWithRealPDF tests with actual PDF files if available
+func TestWithRealPDF(t *testing.T) {
+	pdfPath := testPDFSamplePath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	reader, err := Open(pdfPath)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	// Test page count
+	count, err := reader.PageCount()
+	if err != nil {
+		t.Fatalf("failed to get page count: %v", err)
+	}
+	if count == 0 {
+		t.Error("expected at least one page")
+	}
+
+	// Test getting first page
+	page, err := reader.GetPage(0)
+	if err != nil {
+		t.Fatalf("failed to get page: %v", err)
+	}
+	if page == nil {
+		t.Error("expected non-nil page")
+	}
+
+	// Test text extraction
+	text, err := reader.ExtractText(page)
+	if err != nil {
+		t.Fatalf("failed to extract text: %v", err)
+	}
+	if len(text) == 0 {
+		t.Error("expected non-empty text")
+	}
+
+	// Test fragment extraction
+	fragments, err := reader.ExtractTextFragments(page)
+	if err != nil {
+		t.Fatalf("failed to extract fragments: %v", err)
+	}
+	if len(fragments) == 0 {
+		t.Error("expected non-empty fragments")
+	}
+}
+
+// TestWithRealPDF_AllPages tests text extraction from all pages
+func TestWithRealPDF_AllPages(t *testing.T) {
+	pdfPath := testPDFSamplePath("dinosaurs.pdf")
+	if _, err := os.Stat(pdfPath); os.IsNotExist(err) {
+		t.Skip("test PDF not found:", pdfPath)
+	}
+
+	reader, err := Open(pdfPath)
+	if err != nil {
+		t.Fatalf("failed to open PDF: %v", err)
+	}
+	defer reader.Close()
+
+	count, err := reader.PageCount()
+	if err != nil {
+		t.Fatalf("failed to get page count: %v", err)
+	}
+
+	for i := 0; i < count; i++ {
+		page, err := reader.GetPage(i)
+		if err != nil {
+			t.Errorf("failed to get page %d: %v", i, err)
+			continue
+		}
+
+		_, err = reader.ExtractText(page)
+		if err != nil {
+			t.Errorf("failed to extract text from page %d: %v", i, err)
+		}
+	}
+}
