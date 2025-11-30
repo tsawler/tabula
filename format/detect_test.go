@@ -2,6 +2,7 @@ package format
 
 import (
 	"bytes"
+	"os"
 	"testing"
 )
 
@@ -196,5 +197,118 @@ func TestDetectFromReader_Unknown(t *testing.T) {
 	}
 	if format != Unknown {
 		t.Errorf("DetectFromReader() = %v, want Unknown", format)
+	}
+}
+
+func TestMin(t *testing.T) {
+	tests := []struct {
+		a, b, want int
+	}{
+		{1, 2, 1},
+		{2, 1, 1},
+		{5, 5, 5},
+		{-1, 1, -1},
+		{0, 0, 0},
+	}
+
+	for _, tt := range tests {
+		if got := min(tt.a, tt.b); got != tt.want {
+			t.Errorf("min(%d, %d) = %d, want %d", tt.a, tt.b, got, tt.want)
+		}
+	}
+}
+
+func TestDetectFromReader_ZIP_DOCX(t *testing.T) {
+	// Test with actual DOCX file if available
+	docxPath := "../docx/testdata/hills.docx"
+	f, err := os.Open(docxPath)
+	if err != nil {
+		t.Skip("DOCX test file not available:", docxPath)
+	}
+	defer f.Close()
+
+	stat, _ := f.Stat()
+	format, err := DetectFromReader(f, stat.Size())
+	if err != nil {
+		t.Fatalf("DetectFromReader() error = %v", err)
+	}
+	if format != DOCX {
+		t.Errorf("DetectFromReader() = %v, want DOCX", format)
+	}
+}
+
+func TestDetectFromReader_ZIP_XLSX(t *testing.T) {
+	// Test with actual XLSX file if available
+	xlsxPath := "../xlsx/testdata/basic.xlsx"
+	f, err := os.Open(xlsxPath)
+	if err != nil {
+		t.Skip("XLSX test file not available:", xlsxPath)
+	}
+	defer f.Close()
+
+	stat, _ := f.Stat()
+	format, err := DetectFromReader(f, stat.Size())
+	if err != nil {
+		t.Fatalf("DetectFromReader() error = %v", err)
+	}
+	if format != XLSX {
+		t.Errorf("DetectFromReader() = %v, want XLSX", format)
+	}
+}
+
+func TestDetectFromReader_ZIP_PPTX(t *testing.T) {
+	// Test with actual PPTX file if available
+	pptxPath := "../pptx/testdata/basic.pptx"
+	f, err := os.Open(pptxPath)
+	if err != nil {
+		t.Skip("PPTX test file not available:", pptxPath)
+	}
+	defer f.Close()
+
+	stat, _ := f.Stat()
+	format, err := DetectFromReader(f, stat.Size())
+	if err != nil {
+		t.Fatalf("DetectFromReader() error = %v", err)
+	}
+	if format != PPTX {
+		t.Errorf("DetectFromReader() = %v, want PPTX", format)
+	}
+}
+
+func TestDetectFromReader_ZIP_ODT(t *testing.T) {
+	// Test with actual ODT file if available
+	odtPath := "../odt/testdata/sample.odt"
+	f, err := os.Open(odtPath)
+	if err != nil {
+		t.Skip("ODT test file not available:", odtPath)
+	}
+	defer f.Close()
+
+	stat, _ := f.Stat()
+	format, err := DetectFromReader(f, stat.Size())
+	if err != nil {
+		t.Fatalf("DetectFromReader() error = %v", err)
+	}
+	if format != ODT {
+		t.Errorf("DetectFromReader() = %v, want ODT", format)
+	}
+}
+
+func TestDetectFromReader_ZIP_EPUB(t *testing.T) {
+	// Test with actual EPUB file if available
+	epubPath := "../epubdoc/testdata/Frankenstein.epub"
+	f, err := os.Open(epubPath)
+	if err != nil {
+		t.Skip("EPUB test file not available:", epubPath)
+	}
+	defer f.Close()
+
+	stat, _ := f.Stat()
+	format, err := DetectFromReader(f, stat.Size())
+	if err != nil {
+		t.Fatalf("DetectFromReader() error = %v", err)
+	}
+	if format != EPUB {
+		t.Errorf("DetectFromReader() = %v, want EPUB", format)
 	}
 }
