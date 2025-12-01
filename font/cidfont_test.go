@@ -771,3 +771,149 @@ func TestCIDFont_CommonCollections(t *testing.T) {
 		})
 	}
 }
+
+func TestCIDFont_W2ArrayFormat_Range(t *testing.T) {
+	// W2 array format: cfirst clast w1y w1
+	cidFontDict := core.Dict{
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
+		"BaseFont": core.Name("TestFont"),
+		"CIDSystemInfo": core.Dict{
+			"Registry":   core.String("Adobe"),
+			"Ordering":   core.String("Japan1"),
+			"Supplement": core.Int(2),
+		},
+		"W2": core.Array{
+			core.Int(1),    // Start CID
+			core.Int(10),   // End CID
+			core.Int(880),  // w1y
+			core.Int(-500), // w1
+		},
+	}
+
+	cidFont, err := NewCIDFont(cidFontDict, mockResolver)
+	if err != nil {
+		t.Fatalf("NewCIDFont failed: %v", err)
+	}
+
+	if len(cidFont.W2) == 0 {
+		t.Fatal("W2 array should be populated")
+	}
+
+	vm := cidFont.W2[0]
+	if vm.StartCID != 1 {
+		t.Errorf("Expected StartCID 1, got %d", vm.StartCID)
+	}
+	if vm.EndCID != 10 {
+		t.Errorf("Expected EndCID 10, got %d", vm.EndCID)
+	}
+	if vm.W1Y != 880.0 {
+		t.Errorf("Expected W1Y 880.0, got %f", vm.W1Y)
+	}
+	if vm.W1 != -500.0 {
+		t.Errorf("Expected W1 -500.0, got %f", vm.W1)
+	}
+}
+
+func TestCIDFont_W2ArrayFormat_Array(t *testing.T) {
+	// W2 array format: c [[w1y w1] [w1y w1] ...]
+	cidFontDict := core.Dict{
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
+		"BaseFont": core.Name("TestFont"),
+		"CIDSystemInfo": core.Dict{
+			"Registry":   core.String("Adobe"),
+			"Ordering":   core.String("Japan1"),
+			"Supplement": core.Int(2),
+		},
+		"W2": core.Array{
+			core.Int(100), // Start CID
+			core.Array{
+				core.Int(880),  // w1y for CID 100
+				core.Int(-500), // w1 for CID 100
+				core.Int(890),  // w1y for CID 101
+				core.Int(-600), // w1 for CID 101
+			},
+		},
+	}
+
+	cidFont, err := NewCIDFont(cidFontDict, mockResolver)
+	if err != nil {
+		t.Fatalf("NewCIDFont failed: %v", err)
+	}
+
+	if len(cidFont.W2) == 0 {
+		t.Fatal("W2 array should be populated")
+	}
+
+	vm := cidFont.W2[0]
+	if vm.StartCID != 100 {
+		t.Errorf("Expected StartCID 100, got %d", vm.StartCID)
+	}
+	if len(vm.Metrics) != 2 {
+		t.Fatalf("Expected 2 metrics, got %d", len(vm.Metrics))
+	}
+
+	// Check first metric
+	if vm.Metrics[0].W1Y != 880.0 {
+		t.Errorf("Expected Metrics[0].W1Y 880.0, got %f", vm.Metrics[0].W1Y)
+	}
+	if vm.Metrics[0].W1 != -500.0 {
+		t.Errorf("Expected Metrics[0].W1 -500.0, got %f", vm.Metrics[0].W1)
+	}
+
+	// Check second metric
+	if vm.Metrics[1].W1Y != 890.0 {
+		t.Errorf("Expected Metrics[1].W1Y 890.0, got %f", vm.Metrics[1].W1Y)
+	}
+	if vm.Metrics[1].W1 != -600.0 {
+		t.Errorf("Expected Metrics[1].W1 -600.0, got %f", vm.Metrics[1].W1)
+	}
+}
+
+func TestCIDFont_W2ArrayOptional(t *testing.T) {
+	// W2 is optional - test without it
+	cidFontDict := core.Dict{
+		"Type":     core.Name("Font"),
+		"Subtype":  core.Name("CIDFontType0"),
+		"BaseFont": core.Name("TestFont"),
+		"CIDSystemInfo": core.Dict{
+			"Registry":   core.String("Adobe"),
+			"Ordering":   core.String("Japan1"),
+			"Supplement": core.Int(2),
+		},
+		// No W2 specified
+	}
+
+	cidFont, err := NewCIDFont(cidFontDict, mockResolver)
+	if err != nil {
+		t.Fatalf("NewCIDFont failed: %v", err)
+	}
+
+	if len(cidFont.W2) != 0 {
+		t.Errorf("Expected empty W2 array, got %d entries", len(cidFont.W2))
+	}
+}
+
+func TestCIDFont_NilCIDSystemInfo(t *testing.T) {
+	// Test IsJapanese/IsChinese/IsKorean when CIDSystemInfo is nil
+	cidFont := &CIDFont{
+		BaseFont:      "TestFont",
+		CIDSystemInfo: nil,
+	}
+
+	if cidFont.IsJapanese() {
+		t.Error("Expected IsJapanese() = false when CIDSystemInfo is nil")
+	}
+	if cidFont.IsChinese() {
+		t.Error("Expected IsChinese() = false when CIDSystemInfo is nil")
+	}
+	if cidFont.IsKorean() {
+		t.Error("Expected IsKorean() = false when CIDSystemInfo is nil")
+	}
+
+	collection := cidFont.GetCharacterCollection()
+	if collection != "Unknown" {
+		t.Errorf("Expected 'Unknown', got '%s'", collection)
+	}
+}

@@ -386,3 +386,132 @@ func TestPatternMatchingWordBoundaries(t *testing.T) {
 		})
 	}
 }
+
+func TestNormalizeClassName(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "lowercase stays lowercase",
+			input:    "footer",
+			expected: "footer",
+		},
+		{
+			name:     "single camelCase",
+			input:    "navBar",
+			expected: "nav-bar",
+		},
+		{
+			name:     "multiple camelCase",
+			input:    "mainNavigationBar",
+			expected: "main-navigation-bar",
+		},
+		{
+			name:     "PascalCase",
+			input:    "SiteHeader",
+			expected: "site-header",
+		},
+		{
+			name:     "already hyphenated",
+			input:    "site-footer",
+			expected: "site-footer",
+		},
+		{
+			name:     "empty string",
+			input:    "",
+			expected: "",
+		},
+		{
+			name:     "all uppercase",
+			input:    "ABC",
+			expected: "a-b-c",
+		},
+		{
+			name:     "single char",
+			input:    "A",
+			expected: "a",
+		},
+		{
+			name:     "numbers",
+			input:    "nav2",
+			expected: "nav2",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := normalizeClassName(tt.input)
+			if result != tt.expected {
+				t.Errorf("normalizeClassName(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestLinkDensityCalculation(t *testing.T) {
+	tests := []struct {
+		name         string
+		html         string
+		expectExcluded bool
+	}{
+		{
+			name: "high link density section",
+			html: `<html><body>
+				<div id="links">
+					<a href="/1">L1</a><a href="/2">L2</a><a href="/3">L3</a>
+					<a href="/4">L4</a><a href="/5">L5</a>
+				</div>
+				<main><p>Main content here</p></main>
+			</body></html>`,
+			expectExcluded: true,
+		},
+		{
+			name: "low link density section",
+			html: `<html><body>
+				<div id="content">
+					<p>This is a paragraph with some text and <a href="/link">one link</a> in it.</p>
+					<p>More text without links.</p>
+				</div>
+			</body></html>`,
+			expectExcluded: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reader, err := OpenReader(strings.NewReader(tt.html))
+			if err != nil {
+				t.Fatalf("OpenReader failed: %v", err)
+			}
+
+			// Use aggressive mode which checks link density
+			opts := ExtractOptions{NavigationExclusion: NavigationExclusionAggressive}
+			text, _ := reader.TextWithOptions(opts)
+
+			hasLinks := strings.Contains(text, "L1") || strings.Contains(text, "one link")
+			if tt.expectExcluded && hasLinks {
+				t.Errorf("expected high link density section to be excluded")
+			}
+			if !tt.expectExcluded && !hasLinks {
+				t.Errorf("expected low link density section to be included")
+			}
+		})
+	}
+}
+
+func TestExclusionCheckerWithNilBody(t *testing.T) {
+	// Test with minimal HTML that might not have body
+	html := `<html><head><title>Test</title></head></html>`
+	reader, err := OpenReader(strings.NewReader(html))
+	if err != nil {
+		t.Fatalf("OpenReader failed: %v", err)
+	}
+
+	// Should not panic
+	_, err = reader.TextWithOptions(ExtractOptions{NavigationExclusion: NavigationExclusionStandard})
+	if err != nil {
+		t.Errorf("TextWithOptions failed: %v", err)
+	}
+}
