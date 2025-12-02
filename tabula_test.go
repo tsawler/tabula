@@ -625,6 +625,53 @@ func TestDOCXUnsupportedFormat(t *testing.T) {
 	}
 }
 
+func TestFormatMismatchError(t *testing.T) {
+	// Create a temp file with PDF content but .docx extension
+	tmpDir := t.TempDir()
+	mismatchedFile := filepath.Join(tmpDir, "actually-pdf.docx")
+
+	// Write PDF magic bytes and minimal content
+	pdfContent := []byte("%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF")
+	if err := os.WriteFile(mismatchedFile, pdfContent, 0644); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	// Try to open as DOCX (based on extension) - should fail with format mismatch
+	_, _, err := Open(mismatchedFile).Text()
+	if err == nil {
+		t.Error("expected error for format mismatch")
+	}
+
+	if !strings.Contains(err.Error(), "format mismatch") {
+		t.Errorf("expected format mismatch error, got: %v", err)
+	}
+
+	if !strings.Contains(err.Error(), "DOCX") || !strings.Contains(err.Error(), "PDF") {
+		t.Errorf("error should mention both DOCX and PDF, got: %v", err)
+	}
+}
+
+func TestFormatMismatchDOCXAsPDF(t *testing.T) {
+	// Create a minimal DOCX file with .pdf extension
+	tmpDir := t.TempDir()
+	mismatchedFile := filepath.Join(tmpDir, "actually-docx.pdf")
+
+	// Create a minimal DOCX (which is a ZIP file)
+	if err := createMinimalDOCX(mismatchedFile, "test content"); err != nil {
+		t.Fatalf("failed to create test file: %v", err)
+	}
+
+	// Try to open as PDF (based on extension) - should fail with format mismatch
+	_, _, err := Open(mismatchedFile).Text()
+	if err == nil {
+		t.Error("expected error for format mismatch")
+	}
+
+	if !strings.Contains(err.Error(), "format mismatch") {
+		t.Errorf("expected format mismatch error, got: %v", err)
+	}
+}
+
 // createMinimalDOCX creates a minimal valid DOCX file with simple text content.
 func createMinimalDOCX(path, text string) error {
 	content := `<w:p><w:r><w:t>` + text + `</w:t></w:r></w:p>`
