@@ -2,6 +2,7 @@ package tabula
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -88,6 +89,11 @@ func (e *Extractor) ensureReader() error {
 	}
 	if e.filename == "" {
 		return fmt.Errorf("no filename specified")
+	}
+
+	// Validate that file content matches the expected format from extension
+	if err := e.validateFormat(); err != nil {
+		return err
 	}
 
 	switch e.format {
@@ -1747,6 +1753,42 @@ func (e *Extractor) ChunksWithConfig(config rag.ChunkerConfig, sizeConfig rag.Si
 // ============================================================================
 // Internal helpers
 // ============================================================================
+
+// validateFormat checks that the file's actual content matches the format
+// determined from the file extension. Returns an error if they don't match.
+func (e *Extractor) validateFormat() error {
+	// Open the file to check its content
+	f, err := os.Open(e.filename)
+	if err != nil {
+		return fmt.Errorf("failed to open file: %w", err)
+	}
+	defer f.Close()
+
+	// Get file size for DetectFromReader
+	info, err := f.Stat()
+	if err != nil {
+		return fmt.Errorf("failed to stat file: %w", err)
+	}
+
+	// Detect format from file content
+	detected, err := format.DetectFromReader(f, info.Size())
+	if err != nil {
+		return fmt.Errorf("failed to detect file format: %w", err)
+	}
+
+	// If we couldn't detect the format from content, allow the extension-based format
+	// This handles cases where magic byte detection isn't definitive
+	if detected == format.Unknown {
+		return nil
+	}
+
+	// Check if detected format matches expected format
+	if detected != e.format {
+		return fmt.Errorf("file format mismatch: extension indicates %s but content is %s", e.format, detected)
+	}
+
+	return nil
+}
 
 // resolvePages converts 1-indexed page numbers to 0-indexed and validates them.
 // If no pages specified, returns all pages.
