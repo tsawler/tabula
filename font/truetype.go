@@ -572,8 +572,10 @@ func (tt *TrueTypeFont) parseCmapFormat4(r *bytes.Reader) error {
 	// For simplicity, we'll just store a basic mapping
 	// Full implementation would handle idDelta and idRangeOffset
 	for i := range startCode {
-		for c := startCode[i]; c <= endCode[i]; c++ {
-			tt.cmapTable.encoding[rune(c)] = c // Simplified mapping
+		// Use uint32 for the loop counter to avoid infinite loop when endCode is 0xFFFF
+		// (uint16 would wrap from 0xFFFF to 0 on increment)
+		for c := uint32(startCode[i]); c <= uint32(endCode[i]); c++ {
+			tt.cmapTable.encoding[rune(c)] = uint16(c)
 		}
 	}
 
