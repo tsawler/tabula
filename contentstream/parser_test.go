@@ -620,23 +620,60 @@ func TestParseHexStringLowercase(t *testing.T) {
 
 // TestParseStringWithOctalEscape tests string with octal escape sequences
 func TestParseStringWithOctalEscape(t *testing.T) {
-	// This parser treats backslash-digits literally, not as octal
-	// Test a simple string instead
-	input := []byte(`(ABC) Tj`)
-	parser := NewParser(input)
-
-	ops, err := parser.Parse()
-	if err != nil {
-		t.Fatalf("Parse failed: %v", err)
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "simple string",
+			input:    "(ABC) Tj",
+			expected: "ABC",
+		},
+		{
+			name:     "single digit octal",
+			input:    "(\\0) Tj",
+			expected: "\x00",
+		},
+		{
+			name:     "two digit octal",
+			input:    "(\\77) Tj",
+			expected: "?", // 077 octal = 63 = '?'
+		},
+		{
+			name:     "three digit octal for accented e",
+			input:    "(R\\351gulier) Tj",
+			expected: "R\xe9gulier", // 351 octal = 233 = 0xE9 (Latin-1 'é')
+		},
+		{
+			name:     "three digit octal for registered trademark",
+			input:    "(TYLENOL\\256) Tj",
+			expected: "TYLENOL\xae", // 256 octal = 174 = 0xAE (Latin-1 '®')
+		},
+		{
+			name:     "multiple octal escapes",
+			input:    "(ac\\351taminoph\\350ne) Tj",
+			expected: "ac\xe9taminoph\xe8ne", // 351=é, 350=è (Latin-1)
+		},
 	}
 
-	str, ok := ops[0].Operands[0].(core.String)
-	if !ok {
-		t.Fatalf("expected String, got %T", ops[0].Operands[0])
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parser := NewParser([]byte(tt.input))
+			ops, err := parser.Parse()
+			if err != nil {
+				t.Fatalf("Parse failed: %v", err)
+			}
 
-	if string(str) != "ABC" {
-		t.Errorf("expected 'ABC', got %q", str)
+			str, ok := ops[0].Operands[0].(core.String)
+			if !ok {
+				t.Fatalf("expected String, got %T", ops[0].Operands[0])
+			}
+
+			if string(str) != tt.expected {
+				t.Errorf("expected %q, got %q", tt.expected, str)
+			}
+		})
 	}
 }
 
@@ -681,7 +718,8 @@ func TestParseStringWithBackslashEscapes(t *testing.T) {
 
 // TestParseStringWithLineBreakContinuation tests line continuation in strings
 func TestParseStringWithLineBreakContinuation(t *testing.T) {
-	// Backslash followed by newline - in this parser, it becomes a literal newline
+	// Backslash followed by newline is a line continuation (PDF spec 7.3.4.2)
+	// The newline should be ignored, resulting in concatenated text
 	input := []byte("(Hello\\\nWorld) Tj")
 	parser := NewParser(input)
 
@@ -695,9 +733,9 @@ func TestParseStringWithLineBreakContinuation(t *testing.T) {
 		t.Fatalf("expected String, got %T", ops[0].Operands[0])
 	}
 
-	// Parser treats backslash-newline as literal newline
-	if string(str) != "Hello\nWorld" {
-		t.Errorf("expected 'Hello\\nWorld', got %q", str)
+	// Per PDF spec, backslash-newline is line continuation (no character output)
+	if string(str) != "HelloWorld" {
+		t.Errorf("expected 'HelloWorld', got %q", str)
 	}
 }
 

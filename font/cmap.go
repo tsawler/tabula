@@ -22,6 +22,10 @@ type CMap struct {
 	// Determined from begincodespacerange/endcodespacerange
 	// 0 means not specified (will try multiple widths)
 	byteWidth int
+
+	// Actual byte width observed in bfchar/bfrange source codes
+	// This may differ from byteWidth when CMaps use shorter codes than codespacerange allows
+	actualByteWidth int
 }
 
 // CMapRange represents a range of character code to Unicode mappings
@@ -223,6 +227,17 @@ func (cm *CMap) parseBfCharSection(section string) error {
 			continue
 		}
 
+		// Track actual byte width from source code hex length
+		// This helps detect when CMaps use shorter codes than codespacerange suggests
+		srcHexLen := len(srcHex)
+		if srcHexLen%2 != 0 {
+			srcHexLen++ // Account for odd-length padding
+		}
+		srcByteWidth := srcHexLen / 2
+		if srcByteWidth > cm.actualByteWidth {
+			cm.actualByteWidth = srcByteWidth
+		}
+
 		// Convert source code to uint32
 		srcCode, err := parseHexToUint32(srcHex)
 		if err != nil {
@@ -336,6 +351,16 @@ func (cm *CMap) parseBfRangeSection(section string) error {
 		if startHex == "" || endHex == "" || dstHex == "" {
 			i++
 			continue
+		}
+
+		// Track actual byte width from source code hex length
+		srcHexLen := len(startHex)
+		if srcHexLen%2 != 0 {
+			srcHexLen++
+		}
+		srcByteWidth := srcHexLen / 2
+		if srcByteWidth > cm.actualByteWidth {
+			cm.actualByteWidth = srcByteWidth
 		}
 
 		startCode, err1 := parseHexToUint32(startHex)
@@ -478,14 +503,23 @@ func (cm *CMap) LookupString(data []byte) string {
 		return string(data)
 	}
 
-	var result strings.Builder
+	// Determine the effective byte width to use
+	// Some CMaps declare a wide codespacerange (e.g., <0000><FFFF> = 2 bytes)
+	// but only have bfchar entries with shorter codes (e.g., <20> = 1 byte)
+	// In such cases, prefer the actual byte width from bfchar entries
+	effectiveWidth := cm.byteWidth
+	if cm.actualByteWidth > 0 && cm.actualByteWidth < cm.byteWidth {
+		// The actual bfchar entries use shorter codes than codespacerange suggests
+		effectiveWidth = cm.actualByteWidth
+	}
 
-	// If byteWidth is specified from codespacerange, use it
-	if cm.byteWidth > 0 {
-		return cm.lookupStringWithWidth(data, cm.byteWidth)
+	// If we have a known byte width, use it
+	if effectiveWidth > 0 {
+		return cm.lookupStringWithWidth(data, effectiveWidth)
 	}
 
 	// Otherwise, try different widths (fallback for CMaps without codespacerange)
+	var result strings.Builder
 	i := 0
 	for i < len(data) {
 		// Try 1-byte code first (most common for Latin and subset fonts)

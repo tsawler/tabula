@@ -246,25 +246,57 @@ func (p *Parser) parseString() (core.Object, error) {
 			switch next {
 			case 'n':
 				result.WriteByte('\n')
+				p.pos++
 			case 'r':
 				result.WriteByte('\r')
+				p.pos++
 			case 't':
 				result.WriteByte('\t')
+				p.pos++
 			case 'b':
 				result.WriteByte('\b')
+				p.pos++
 			case 'f':
 				result.WriteByte('\f')
+				p.pos++
 			case '(':
 				result.WriteByte('(')
+				p.pos++
 			case ')':
 				result.WriteByte(')')
+				p.pos++
 			case '\\':
 				result.WriteByte('\\')
+				p.pos++
+			case '\r':
+				// Line continuation - skip the newline
+				p.pos++
+				if p.pos < len(p.data) && p.data[p.pos] == '\n' {
+					p.pos++
+				}
+			case '\n':
+				// Line continuation - skip the newline
+				p.pos++
+			case '0', '1', '2', '3', '4', '5', '6', '7':
+				// Octal escape sequence: \ddd (1-3 octal digits)
+				octalVal := int(next - '0')
+				p.pos++
+				// Read up to 2 more octal digits
+				for i := 0; i < 2 && p.pos < len(p.data); i++ {
+					digit := p.data[p.pos]
+					if digit < '0' || digit > '7' {
+						break
+					}
+					octalVal = octalVal*8 + int(digit-'0')
+					p.pos++
+				}
+				// Octal value is mod 256 (single byte)
+				result.WriteByte(byte(octalVal & 0xFF))
 			default:
-				// Unknown escape - keep as-is
+				// Unknown escape - keep as-is (PDF spec says ignore the backslash)
 				result.WriteByte(next)
+				p.pos++
 			}
-			p.pos++
 		} else if c == '(' {
 			depth++
 			result.WriteByte(c)
