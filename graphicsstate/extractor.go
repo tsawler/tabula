@@ -315,12 +315,14 @@ func operandsToMatrix(operands []core.Object) model.Matrix {
 		return model.Identity()
 	}
 
-	vals := make([]float64, 6)
+	var m model.Matrix
 	for i, op := range operands {
-		vals[i], _ = toFloat(op)
+		if i < 6 {
+			m[i], _ = toFloat(op)
+		}
 	}
 
-	return model.Matrix(vals)
+	return m
 }
 
 // cmykToRGB converts CMYK to RGB (approximate conversion)
