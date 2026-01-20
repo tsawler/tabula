@@ -218,33 +218,48 @@ func (d *ReadingOrderDetector) detectInvertedY(fragments []text.TextFragment, pa
 		}
 	}
 
-	// Check if first fragments in document order are at the top or bottom of the Y range.
-	// In most PDFs, content is written top-to-bottom, so the first fragments
-	// should be near the top of the page.
-	// - If first fragments have LOW Y values, then low Y = top (inverted)
-	// - If first fragments have HIGH Y values, then high Y = top (standard)
+	// Use the relationship between Y coordinates and page height to determine
+	// the coordinate system. This is more reliable than looking at stream order
+	// since PDFs often have content rendered in arbitrary order (e.g., footers first).
+	//
+	// In standard PDF coordinates (Y=0 at bottom):
+	//   - Content near the top of the page has Y values close to pageHeight
+	//   - maxY should be a significant fraction of pageHeight (typically 70-95%)
+	//
+	// In inverted coordinates (Y=0 at top):
+	//   - Content near the top of the page has Y values close to 0
+	//   - maxY would be much smaller relative to typical page heights
+	//
+	// The key insight: in standard coordinates, maxY approaches pageHeight,
+	// while in inverted coordinates, maxY is bounded by content position.
 
-	// Sample the first few fragments (they're typically the title or first line)
-	sampleSize := 20
-	if sampleSize > len(fragments) {
-		sampleSize = len(fragments)
-	}
+	if pageHeight > 0 {
+		// If maxY is more than half of pageHeight, assume standard coordinates.
+		// This works because page content typically spans most of the page height,
+		// so in standard coords (Y=0 at bottom), maxY will be close to pageHeight.
+		if maxY > pageHeight*0.5 {
+			return false // Standard coordinates
+		}
 
-	midY := (minY + maxY) / 2
-	firstFragsAboveMid := 0
-	firstFragsBelowMid := 0
-
-	for i := 0; i < sampleSize; i++ {
-		if fragments[i].Y > midY {
-			firstFragsAboveMid++
-		} else {
-			firstFragsBelowMid++
+		// If maxY is less than 30% of pageHeight and minY is close to 0,
+		// this strongly suggests inverted coordinates where content starts
+		// at Y=0 (top) and increases downward.
+		if maxY < pageHeight*0.3 && minY < pageHeight*0.1 {
+			return true // Inverted coordinates
 		}
 	}
 
-	// If first fragments are mostly in the lower half of Y range, coords are inverted
-	// (because first content = top of page = low Y values in inverted coords)
-	return firstFragsBelowMid > firstFragsAboveMid
+	// Fallback: use content range heuristic
+	// If Y values span a range starting near 0, it's likely inverted
+	yRange := maxY - minY
+	if yRange > 0 && minY < yRange*0.1 {
+		// Content starts very close to Y=0, suggesting inverted coords
+		// where the top of the page is at Y=0
+		return maxY < pageHeight*0.5
+	}
+
+	// Default to standard PDF coordinates per PDF specification
+	return false
 }
 
 // detectReadingDirection analyzes fragments to detect the primary reading direction
