@@ -165,7 +165,8 @@ func (e *Extractor) Extract(operations []contentstream.Operation) ([]TextFragmen
 		}
 	}
 
-	return e.fragments, nil
+	// Return deduplicated fragments to handle PDFs with multiple content layers
+	return e.deduplicateFragments(), nil
 }
 
 // ExtractFromBytes parses raw content stream data and extracts text fragments.
@@ -442,14 +443,18 @@ func (e *Extractor) showTextArray(arr core.Array) {
 
 // GetText returns all extracted text as a string with smart spacing.
 // Handles both LTR and RTL text, grouping fragments into lines and adding
-// appropriate word and line breaks.
+// appropriate word and line breaks. Duplicate fragments at the same position
+// are automatically removed.
 func (e *Extractor) GetText() string {
 	if len(e.fragments) == 0 {
 		return ""
 	}
 
+	// Deduplicate fragments first to handle PDFs with multiple content layers
+	fragments := e.deduplicateFragments()
+
 	// Group fragments by lines (same Y coordinate within tolerance)
-	lines := e.groupFragmentsByLine()
+	lines := groupFragments(fragments)
 
 	var sb strings.Builder
 
@@ -655,26 +660,73 @@ func isWhitespace(b byte) bool {
 
 // groupFragmentsByLine groups fragments into lines based on Y coordinate proximity.
 func (e *Extractor) groupFragmentsByLine() [][]TextFragment {
-	if len(e.fragments) == 0 {
+	return groupFragments(e.fragments)
+}
+
+// groupFragments groups text fragments into lines based on Y position and X continuity.
+// Handles cases where wrapped text has similar Y coordinates but X jumps backwards,
+// and detects multi-column layouts where content from different columns has similar Y.
+func groupFragments(fragments []TextFragment) [][]TextFragment {
+	if len(fragments) == 0 {
 		return nil
 	}
 
 	lines := make([][]TextFragment, 0)
-	currentLine := []TextFragment{e.fragments[0]}
+	currentLine := []TextFragment{fragments[0]}
 
-	for i := 1; i < len(e.fragments); i++ {
-		frag := e.fragments[i]
-		prevFrag := e.fragments[i-1]
+	// Track the X extent of the current line to detect overlapping content
+	lineMinX := fragments[0].X
+	lineMaxX := fragments[0].X + fragments[0].Width
 
-		// Check if this fragment is on the same line (Y within tolerance)
+	for i := 1; i < len(fragments); i++ {
+		frag := fragments[i]
+		prevFrag := fragments[i-1]
+
+		// Check vertical distance
 		verticalDist := abs(frag.Y - prevFrag.Y)
-		if verticalDist <= prevFrag.Height*0.5 {
-			// Same line
+		sameLineByY := verticalDist <= prevFrag.Height*0.5
+
+		// Check for X position jump backwards from previous fragment
+		prevEndX := prevFrag.X + prevFrag.Width
+		xJumpBack := prevEndX - frag.X
+
+		// Consider it a line wrap if X jumped backwards significantly
+		isLineWrap := sameLineByY && xJumpBack > prevFrag.Height*1.5
+
+		// Detect multi-column layouts where text from different columns
+		// has similar Y positions but overlapping X ranges.
+		// Key insight: text from a different column will have:
+		// 1. Slightly different Y (even if within tolerance)
+		// 2. X position that overlaps with existing line content
+		fragEndX := frag.X + frag.Width
+
+		// Check if Y actually differs (even slightly) - this distinguishes
+		// column changes from normal text flow
+		yDiffers := verticalDist > 0.5
+
+		// Check if X is within the line's existing range (would overlap)
+		xWithinLineRange := frag.X >= lineMinX && frag.X <= lineMaxX
+
+		// If Y differs slightly AND X overlaps with line content, it's likely
+		// a different column/stream of text
+		isOverlappingColumn := sameLineByY && yDiffers && xWithinLineRange
+
+		if sameLineByY && !isLineWrap && !isOverlappingColumn {
+			// Same line - Y is close, X didn't jump back, and no significant overlap
 			currentLine = append(currentLine, frag)
+			// Update line extent
+			if frag.X < lineMinX {
+				lineMinX = frag.X
+			}
+			if fragEndX > lineMaxX {
+				lineMaxX = fragEndX
+			}
 		} else {
-			// New line - save current line and start new one
+			// New line - either Y changed, X jumped backwards, or overlapping column
 			lines = append(lines, currentLine)
 			currentLine = []TextFragment{frag}
+			lineMinX = frag.X
+			lineMaxX = fragEndX
 		}
 	}
 
@@ -807,9 +859,54 @@ func abs(x float64) float64 {
 	return x
 }
 
-// GetFragments returns all extracted text fragments.
+// GetFragments returns all extracted text fragments with duplicates removed.
+// Duplicate fragments are those at the same position with the same text,
+// which can occur in PDFs with multiple content layers or tagged structure.
 func (e *Extractor) GetFragments() []TextFragment {
+	return e.deduplicateFragments()
+}
+
+// GetFragmentsRaw returns all extracted text fragments without deduplication.
+// Use this when you need to see all fragments including duplicates.
+func (e *Extractor) GetFragmentsRaw() []TextFragment {
 	return e.fragments
+}
+
+// deduplicateFragments removes duplicate text fragments at the same position.
+// Some PDFs render the same text multiple times at identical positions due to:
+// - Multiple optional content layers (OCG)
+// - Tagged PDF structure with repeated content
+// - PDF generators creating redundant rendering passes
+func (e *Extractor) deduplicateFragments() []TextFragment {
+	if len(e.fragments) == 0 {
+		return e.fragments
+	}
+
+	// Use a map to track unique fragments by position and text
+	// Key: rounded position + text content
+	type fragKey struct {
+		x, y int    // Position rounded to integer (sub-pixel precision not needed)
+		text string // Text content
+	}
+
+	seen := make(map[fragKey]bool)
+	result := make([]TextFragment, 0, len(e.fragments))
+
+	for _, frag := range e.fragments {
+		// Round position to handle minor floating point differences
+		key := fragKey{
+			x:    int(frag.X + 0.5), // Round to nearest integer
+			y:    int(frag.Y + 0.5),
+			text: frag.Text,
+		}
+
+		if !seen[key] {
+			seen[key] = true
+			result = append(result, frag)
+		}
+	}
+
+	return result
 }
 
 // toFloat converts a PDF numeric object to float64.
