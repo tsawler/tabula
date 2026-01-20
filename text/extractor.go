@@ -663,7 +663,9 @@ func (e *Extractor) groupFragmentsByLine() [][]TextFragment {
 	return groupFragments(e.fragments)
 }
 
-// groupFragments groups text fragments into lines based on Y position.
+// groupFragments groups text fragments into lines based on Y position and X continuity.
+// Handles cases where wrapped text has similar Y coordinates but X jumps backwards,
+// and detects multi-column layouts where content from different columns has similar Y.
 func groupFragments(fragments []TextFragment) [][]TextFragment {
 	if len(fragments) == 0 {
 		return nil
@@ -672,19 +674,59 @@ func groupFragments(fragments []TextFragment) [][]TextFragment {
 	lines := make([][]TextFragment, 0)
 	currentLine := []TextFragment{fragments[0]}
 
+	// Track the X extent of the current line to detect overlapping content
+	lineMinX := fragments[0].X
+	lineMaxX := fragments[0].X + fragments[0].Width
+
 	for i := 1; i < len(fragments); i++ {
 		frag := fragments[i]
 		prevFrag := fragments[i-1]
 
-		// Check if this fragment is on the same line (Y within tolerance)
+		// Check vertical distance
 		verticalDist := abs(frag.Y - prevFrag.Y)
-		if verticalDist <= prevFrag.Height*0.5 {
-			// Same line
+		sameLineByY := verticalDist <= prevFrag.Height*0.5
+
+		// Check for X position jump backwards from previous fragment
+		prevEndX := prevFrag.X + prevFrag.Width
+		xJumpBack := prevEndX - frag.X
+
+		// Consider it a line wrap if X jumped backwards significantly
+		isLineWrap := sameLineByY && xJumpBack > prevFrag.Height*1.5
+
+		// Detect multi-column layouts where text from different columns
+		// has similar Y positions but overlapping X ranges.
+		// Key insight: text from a different column will have:
+		// 1. Slightly different Y (even if within tolerance)
+		// 2. X position that overlaps with existing line content
+		fragEndX := frag.X + frag.Width
+
+		// Check if Y actually differs (even slightly) - this distinguishes
+		// column changes from normal text flow
+		yDiffers := verticalDist > 0.5
+
+		// Check if X is within the line's existing range (would overlap)
+		xWithinLineRange := frag.X >= lineMinX && frag.X <= lineMaxX
+
+		// If Y differs slightly AND X overlaps with line content, it's likely
+		// a different column/stream of text
+		isOverlappingColumn := sameLineByY && yDiffers && xWithinLineRange
+
+		if sameLineByY && !isLineWrap && !isOverlappingColumn {
+			// Same line - Y is close, X didn't jump back, and no significant overlap
 			currentLine = append(currentLine, frag)
+			// Update line extent
+			if frag.X < lineMinX {
+				lineMinX = frag.X
+			}
+			if fragEndX > lineMaxX {
+				lineMaxX = fragEndX
+			}
 		} else {
-			// New line - save current line and start new one
+			// New line - either Y changed, X jumped backwards, or overlapping column
 			lines = append(lines, currentLine)
 			currentLine = []TextFragment{frag}
+			lineMinX = frag.X
+			lineMaxX = fragEndX
 		}
 	}
 
