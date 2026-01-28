@@ -30,9 +30,10 @@ const (
 
 // Token represents a lexical token from PDF input.
 type Token struct {
-	Type  TokenType // Token type
-	Value []byte    // Raw token value (without delimiters for strings/names)
-	Pos   int64     // Byte position in the input stream
+	Type         TokenType // Token type
+	Value        []byte    // Raw token value (without delimiters for strings/names)
+	Pos          int64     // Byte position in the input stream
+	SkippedBytes []byte    // Bytes skipped as whitespace before this token (for stream data recovery)
 }
 
 // Lexer performs lexical analysis of PDF content, breaking the input into tokens.
@@ -59,12 +60,13 @@ func NewLexer(r io.Reader) *Lexer {
 // It skips whitespace and returns TokenEOF when the input is exhausted.
 func (l *Lexer) NextToken() (*Token, error) {
 	// Skip whitespace but don't return it as a token
-	l.skipWhitespace()
+	// Track skipped bytes for stream data recovery
+	skippedBytes, _ := l.skipWhitespace()
 
 	// Check for EOF
 	b, err := l.peek()
 	if err == io.EOF {
-		return &Token{Type: TokenEOF, Pos: l.pos}, nil
+		return &Token{Type: TokenEOF, Pos: l.pos, SkippedBytes: skippedBytes}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -72,49 +74,73 @@ func (l *Lexer) NextToken() (*Token, error) {
 
 	// Handle comments
 	if b == '%' {
-		return l.readComment()
+		token, err := l.readComment()
+		if token != nil {
+			token.SkippedBytes = skippedBytes
+		}
+		return token, err
 	}
 
 	// Handle delimiters
 	switch b {
 	case '[':
 		l.readByte()
-		return &Token{Type: TokenArrayStart, Value: []byte{'['}, Pos: l.pos - 1}, nil
+		return &Token{Type: TokenArrayStart, Value: []byte{'['}, Pos: l.pos - 1, SkippedBytes: skippedBytes}, nil
 	case ']':
 		l.readByte()
-		return &Token{Type: TokenArrayEnd, Value: []byte{']'}, Pos: l.pos - 1}, nil
+		return &Token{Type: TokenArrayEnd, Value: []byte{']'}, Pos: l.pos - 1, SkippedBytes: skippedBytes}, nil
 	case '(':
-		return l.readString()
+		token, err := l.readString()
+		if token != nil {
+			token.SkippedBytes = skippedBytes
+		}
+		return token, err
 	case '<':
 		// Could be << (dict start) or <hex string>
 		next, err := l.peekN(2)
 		if err == nil && len(next) == 2 && next[1] == '<' {
 			l.readByte()
 			l.readByte()
-			return &Token{Type: TokenDictStart, Value: []byte{'<', '<'}, Pos: l.pos - 2}, nil
+			return &Token{Type: TokenDictStart, Value: []byte{'<', '<'}, Pos: l.pos - 2, SkippedBytes: skippedBytes}, nil
 		}
-		return l.readHexString()
+		token, err := l.readHexString()
+		if token != nil {
+			token.SkippedBytes = skippedBytes
+		}
+		return token, err
 	case '>':
 		// Must be >> (dict end)
 		next, err := l.peekN(2)
 		if err == nil && len(next) == 2 && next[1] == '>' {
 			l.readByte()
 			l.readByte()
-			return &Token{Type: TokenDictEnd, Value: []byte{'>', '>'}, Pos: l.pos - 2}, nil
+			return &Token{Type: TokenDictEnd, Value: []byte{'>', '>'}, Pos: l.pos - 2, SkippedBytes: skippedBytes}, nil
 		}
 		return nil, fmt.Errorf("unexpected '>' at position %d", l.pos)
 	case '/':
-		return l.readName()
+		token, err := l.readName()
+		if token != nil {
+			token.SkippedBytes = skippedBytes
+		}
+		return token, err
 	}
 
 	// Handle numbers and keywords
 	if isDigit(b) || b == '-' || b == '+' || b == '.' {
-		return l.readNumber()
+		token, err := l.readNumber()
+		if token != nil {
+			token.SkippedBytes = skippedBytes
+		}
+		return token, err
 	}
 
 	// Handle keywords (true, false, null, R, obj, endobj, stream, endstream, etc.)
 	if isAlpha(b) {
-		return l.readKeyword()
+		token, err := l.readKeyword()
+		if token != nil {
+			token.SkippedBytes = skippedBytes
+		}
+		return token, err
 	}
 
 	return nil, fmt.Errorf("unexpected character '%c' at position %d", b, l.pos)
@@ -160,18 +186,20 @@ func (l *Lexer) unreadByte() error {
 	return nil
 }
 
-// skipWhitespace skips all PDF whitespace characters.
+// skipWhitespace skips all PDF whitespace characters and returns the skipped bytes.
 // PDF whitespace includes: space (0x20), tab (0x09), LF (0x0A), CR (0x0D), FF (0x0C), null (0x00).
-func (l *Lexer) skipWhitespace() error {
+func (l *Lexer) skipWhitespace() ([]byte, error) {
+	var skipped []byte
 	for {
 		b, err := l.peek()
 		if err != nil {
-			return err
+			return skipped, err
 		}
 		if !isWhitespace(b) {
-			return nil
+			return skipped, nil
 		}
-		l.readByte()
+		b, _ = l.readByte()
+		skipped = append(skipped, b)
 	}
 }
 
@@ -526,6 +554,27 @@ func hexValue(b byte) byte {
 		return b - 'A' + 10
 	}
 	return 0
+}
+
+// SkipStreamEOL skips the mandatory end-of-line marker after the 'stream' keyword.
+// Per PDF spec, this is either a single LF (0x0A) or CR+LF (0x0D 0x0A).
+func (l *Lexer) SkipStreamEOL() error {
+	b, err := l.readByte()
+	if err != nil {
+		return fmt.Errorf("failed to read EOL after stream: %w", err)
+	}
+
+	if b == '\r' {
+		// CR - check for following LF
+		next, err := l.peek()
+		if err == nil && next == '\n' {
+			l.readByte() // consume the LF
+		}
+	} else if b != '\n' {
+		return fmt.Errorf("expected EOL after stream keyword, got 0x%02X", b)
+	}
+
+	return nil
 }
 
 // ReadBytes reads exactly n bytes from the underlying reader.

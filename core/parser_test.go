@@ -732,6 +732,38 @@ func TestParseStreamWithIndirectLength(t *testing.T) {
 	}
 }
 
+func TestParseStreamWithBinaryData(t *testing.T) {
+	// Stream with binary data starting with NULL bytes (whitespace-like characters)
+	// This tests that the parser correctly handles binary streams without corrupting
+	// data that looks like PDF whitespace (NULL, CR, LF, etc.)
+	binaryData := []byte{0x00, 0x16, 0x0a, 0x40, 0x05, 0x82} // starts with NULL, contains LF
+	input := fmt.Sprintf("1 0 obj\n<< /Length %d >>\nstream\n%sendstream\nendobj", len(binaryData), string(binaryData))
+	parser := NewParser(strings.NewReader(input))
+
+	indObj, err := parser.ParseIndirectObject()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	stream, ok := indObj.Object.(*Stream)
+	if !ok {
+		t.Fatalf("expected *Stream, got %T", indObj.Object)
+	}
+
+	if len(stream.Data) != len(binaryData) {
+		t.Errorf("expected stream data length %d, got %d", len(binaryData), len(stream.Data))
+	}
+
+	for i, b := range binaryData {
+		if i >= len(stream.Data) {
+			break
+		}
+		if stream.Data[i] != b {
+			t.Errorf("byte %d: expected 0x%02x, got 0x%02x", i, b, stream.Data[i])
+		}
+	}
+}
+
 func TestParseStreamWithIndirectLengthNoResolver(t *testing.T) {
 	// Stream with indirect length reference but no resolver set
 	input := "1 0 obj\n<< /Length 5 0 R >>\nstream\nHello\nendstream\nendobj"

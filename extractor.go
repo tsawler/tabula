@@ -13,6 +13,7 @@ import (
 	"github.com/tsawler/tabula/htmldoc"
 	"github.com/tsawler/tabula/layout"
 	"github.com/tsawler/tabula/model"
+	"github.com/tsawler/tabula/ocr"
 	"github.com/tsawler/tabula/odt"
 	"github.com/tsawler/tabula/pages"
 	"github.com/tsawler/tabula/pptx"
@@ -58,6 +59,9 @@ type Extractor struct {
 
 	// Warnings accumulated during processing
 	warnings []Warning
+
+	// OCR client for scanned PDF fallback (lazy initialized)
+	ocrClient *ocr.Client
 }
 
 // clone creates a shallow copy of the Extractor with a deep copy of options.
@@ -78,6 +82,7 @@ func (e *Extractor) clone() *Extractor {
 		options:      e.options.clone(),
 		err:          e.err,
 		warnings:     append([]Warning(nil), e.warnings...),
+		ocrClient:    e.ocrClient,
 	}
 	return newExt
 }
@@ -175,6 +180,12 @@ func (e *Extractor) ensureReader() error {
 // Close releases resources associated with the Extractor.
 // It is safe to call Close multiple times.
 func (e *Extractor) Close() error {
+	// Close OCR client if it was initialized
+	if e.ocrClient != nil {
+		e.ocrClient.Close()
+		e.ocrClient = nil
+	}
+
 	if e.ownsReader {
 		if e.reader != nil {
 			err := e.reader.Close()
@@ -546,6 +557,18 @@ func (e *Extractor) Text() (string, []Warning, error) {
 		if headerFooterResult != nil {
 			height, _ := pd.page.Height()
 			fragments = headerFooterResult.FilterFragments(pd.index, fragments, height)
+		}
+
+		// If no text fragments, attempt OCR fallback
+		if len(fragments) == 0 {
+			ocrText, ocrErr := e.extractTextViaOCR(pd.page, pd.index+1)
+			if ocrErr == nil && ocrText != "" {
+				if i > 0 && result.Len() > 0 {
+					result.WriteString("\n\n")
+				}
+				result.WriteString(ocrText)
+				continue
+			}
 		}
 
 		// Extract text
@@ -2215,4 +2238,51 @@ func convertListType(lt layout.ListType) model.ListType {
 	default:
 		return model.ListTypeUnknown
 	}
+}
+
+// extractTextViaOCR attempts to extract text from a page using OCR.
+// It extracts images from the page, converts them to PNG, and runs OCR.
+// Returns the extracted text or an error if OCR fails or no images are found.
+func (e *Extractor) extractTextViaOCR(page *pages.Page, pageNum int) (string, error) {
+	// Extract images from the page
+	images, err := e.reader.ExtractPageImages(page)
+	if err != nil || len(images) == 0 {
+		return "", err
+	}
+
+	// Lazily initialize OCR client
+	if e.ocrClient == nil {
+		client, err := ocr.New()
+		if err != nil {
+			return "", fmt.Errorf("failed to initialize OCR: %w", err)
+		}
+		e.ocrClient = client
+	}
+
+	var texts []string
+	for _, img := range images {
+		// Convert image to PNG
+		pngData, err := img.ToPNG()
+		if err != nil {
+			continue
+		}
+
+		// Run OCR on the image
+		text, err := e.ocrClient.RecognizeImage(pngData)
+		if err == nil && text != "" {
+			texts = append(texts, text)
+		}
+	}
+
+	if len(texts) == 0 {
+		return "", nil
+	}
+
+	// Add warning about OCR fallback
+	e.warnings = append(e.warnings, Warning{
+		Code:    WarningOCRFallback,
+		Message: fmt.Sprintf("Page %d: Used OCR fallback (scanned content)", pageNum),
+	})
+
+	return strings.Join(texts, "\n"), nil
 }
