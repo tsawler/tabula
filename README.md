@@ -6,7 +6,7 @@
 
 # Tabula
 
-A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval-Augmented Generation) workflows. Supports PDF, DOCX, ODT, XLSX, PPTX, HTML, and EPUB files.
+A Go text extraction library with a fluent API, designed for RAG (Retrieval-Augmented Generation) workflows. Supports PDF, DOCX, ODT, XLSX, PPTX, HTML, and EPUB files with automatic OCR for scanned documents.
 
 ## Features
 
@@ -18,9 +18,46 @@ A pure-Go text extraction library with a fluent API, designed for RAG (Retrieval
 - **RAG-Ready Chunking** - Semantic document chunking with metadata
 - **Markdown Export** - Convert extracted content to markdown
 - **PDF 1.0-1.7 Support** - Including modern XRef streams (PDF 1.5+)
-- **Pure Go** - No CGO dependencies
+- **OCR Fallback** - Automatic text extraction from scanned PDFs via Tesseract
 
 ## Installation
+
+### Prerequisites
+
+Tabula requires [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for scanned PDF support.
+
+**macOS (Homebrew):**
+```bash
+brew install tesseract
+# Optional: additional language packs
+brew install tesseract-lang
+```
+
+**Ubuntu/Debian:**
+```bash
+apt-get install tesseract-ocr libtesseract-dev libleptonica-dev
+# Optional: additional language packs
+apt-get install tesseract-ocr-fra tesseract-ocr-deu  # French, German, etc.
+```
+
+### CGO Flags (macOS Apple Silicon only)
+
+On Apple Silicon Macs (M1/M2/M3/M4), Homebrew installs to `/opt/homebrew` instead of `/usr/local`. You must set CGO flags for the compiler to find Tesseract:
+
+```bash
+export CGO_CPPFLAGS="-I/opt/homebrew/include"
+export CGO_LDFLAGS="-L/opt/homebrew/lib"
+```
+
+Add these to your `~/.zshrc` for persistence. These flags are needed both when building tabula and when building any project that uses tabula as a dependency.
+
+| Platform | Extra CGO flags needed? |
+|----------|------------------------|
+| Ubuntu/Debian | No |
+| macOS Intel | No |
+| macOS Apple Silicon | Yes (see above) |
+
+### Install Tabula
 
 ```bash
 go get github.com/tsawler/tabula
@@ -317,6 +354,37 @@ markdown, _ := reader.MarkdownWithOptions(opts)
 | `NavigationExclusionStandard` | Explicit + class/id pattern matching (nav, navbar, menu, footer, sidebar, etc.) |
 | `NavigationExclusionAggressive` | Standard + link-density heuristics (excludes sections with >60% link text) |
 
+### OCR Fallback for Scanned PDFs
+
+Tabula automatically uses OCR when a PDF page contains no native text (i.e., scanned documents). This happens transparently—no code changes needed:
+
+```go
+// Works automatically on scanned PDFs
+text, warnings, err := tabula.Open("scanned-document.pdf").Text()
+if err != nil {
+    log.Fatal(err)
+}
+
+// Check if OCR was used
+for _, w := range warnings {
+    if w.Code == tabula.WarningOCRFallback {
+        fmt.Println("Note: OCR was used for some pages")
+    }
+}
+```
+
+**How it works:**
+1. For each page, Tabula first attempts native PDF text extraction
+2. If a page has no text fragments (common in scanned PDFs), it extracts embedded images
+3. Images are converted to PNG and processed through Tesseract OCR
+4. A `WarningOCRFallback` is added to indicate which pages used OCR
+
+**Supported image formats in PDFs:**
+- CCITT Group 3/4 fax (common in scanned documents)
+- DCT (JPEG)
+- Grayscale, RGB, and CMYK color spaces
+- 1-bit, 4-bit, and 8-bit depths
+
 ## RAG Integration
 
 ### Chunk Filtering
@@ -443,6 +511,7 @@ formatted := tabula.FormatWarnings(warnings)
 
 Common warnings:
 - "Detected messy/display-oriented PDF traits" - PDF may have unusual text layout
+- "Used OCR fallback (scanned content)" - Page contained only images; text extracted via OCR
 - High fragmentation warnings - Text is split into many small fragments
 
 ## Error Handling Helpers
@@ -457,7 +526,12 @@ count := tabula.Must(tabula.Open("doc.pdf").PageCount())
 
 ```bash
 go test ./...
+
+# Or using Task (handles CGO flags automatically)
+task test
 ```
+
+**Note:** On Apple Silicon Macs, ensure you've set the CGO flags described in the Installation section, or use `task test` which sets them automatically.
 
 ## License
 

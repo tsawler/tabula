@@ -80,7 +80,7 @@ func decodeWithFilter(data []byte, filterName string, params Dict) ([]byte, erro
 		return nil, fmt.Errorf("RunLengthDecode not yet implemented")
 
 	case "CCITTFaxDecode", "CCF":
-		return nil, fmt.Errorf("CCITTFaxDecode not yet implemented")
+		return filters.CCITTFaxDecode(data, dictToParams(params))
 
 	case "JBIG2Decode":
 		return nil, fmt.Errorf("JBIG2Decode not yet implemented")

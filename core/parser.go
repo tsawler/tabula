@@ -49,6 +49,17 @@ func NewParser(r io.Reader) *Parser {
 // nextToken advances the parser to the next token by shifting the lookahead.
 func (p *Parser) nextToken() error {
 	p.currentToken = p.peekToken
+
+	// If we just moved "stream" into currentToken, don't try to read the next token
+	// because it's binary data that can't be tokenized normally.
+	// The parseStream function will handle reading the binary data directly.
+	if p.currentToken != nil &&
+		p.currentToken.Type == TokenKeyword &&
+		string(p.currentToken.Value) == "stream" {
+		p.peekToken = nil
+		return nil
+	}
+
 	token, err := p.lexer.NextToken()
 	if err != nil {
 		return err
@@ -389,31 +400,25 @@ func (p *Parser) parseStream(dict Dict) (*Stream, error) {
 		return nil, fmt.Errorf("invalid stream length: %d", length)
 	}
 
-	// IMPORTANT: The parser pre-fetches tokens, so when currentToken is 'stream',
-	// peekToken has already been loaded. Loading peekToken caused the lexer to:
-	// 1. Skip whitespace after 'stream' (including the EOL)
-	// 2. Start tokenizing the stream data!
+	// Per PDF spec, the 'stream' keyword is followed by either:
+	// - A single LF (0x0A), or
+	// - A CR+LF sequence (0x0D 0x0A)
+	// Then exactly 'length' bytes of stream data follow.
 	//
-	// For binary stream data, the lexer might tokenize the first few bytes as a token.
-	// We need to "recover" these bytes from peekToken and include them in the stream data.
+	// Since we stopped loading peekToken when we saw 'stream', the lexer
+	// is positioned right after the 'stream' keyword. We need to:
+	// 1. Skip the mandatory EOL
+	// 2. Read exactly 'length' bytes
 
-	var data []byte
-
-	// If peekToken has data, it consumed some bytes from the stream
-	// Add those bytes back to our stream data
-	if p.peekToken != nil && len(p.peekToken.Value) > 0 {
-		// peekToken consumed some bytes - add them to stream data
-		data = append(data, p.peekToken.Value...)
+	// Skip the EOL after 'stream'
+	if err := p.lexer.SkipStreamEOL(); err != nil {
+		return nil, fmt.Errorf("failed to skip EOL after stream keyword: %w", err)
 	}
 
-	// Read the remaining bytes (length - bytes already consumed)
-	remainingBytes := length - len(data)
-	if remainingBytes > 0 {
-		moreData, err := p.lexer.ReadBytes(remainingBytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to read stream data: %w", err)
-		}
-		data = append(data, moreData...)
+	// Read exactly 'length' bytes of stream data
+	data, err := p.lexer.ReadBytes(length)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read stream data: %w", err)
 	}
 
 	// After the stream data, there should be an 'endstream' keyword
