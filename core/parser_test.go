@@ -1,6 +1,7 @@
 package core
 
 import (
+	"fmt"
 	"io"
 	"strings"
 	"testing"
@@ -688,6 +689,62 @@ endobj`
 
 	if pages, ok := dict.GetIndirectRef("Pages"); !ok || pages.Number != 2 {
 		t.Errorf("expected Pages=2 0 R")
+	}
+}
+
+// mockResolver implements ReferenceResolver for testing
+type mockResolver struct {
+	objects map[int]Object
+}
+
+func (m *mockResolver) ResolveReference(ref IndirectRef) (Object, error) {
+	if obj, ok := m.objects[ref.Number]; ok {
+		return obj, nil
+	}
+	return nil, fmt.Errorf("object %d not found", ref.Number)
+}
+
+func TestParseStreamWithIndirectLength(t *testing.T) {
+	// Stream with indirect length reference (5 0 R)
+	input := "1 0 obj\n<< /Length 5 0 R >>\nstream\nHello\nendstream\nendobj"
+	parser := NewParser(strings.NewReader(input))
+
+	// Set up a mock resolver that returns 6 (length of "Hello\n")
+	resolver := &mockResolver{
+		objects: map[int]Object{
+			5: Int(6),
+		},
+	}
+	parser.SetReferenceResolver(resolver)
+
+	indObj, err := parser.ParseIndirectObject()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	stream, ok := indObj.Object.(*Stream)
+	if !ok {
+		t.Fatalf("expected *Stream, got %T", indObj.Object)
+	}
+
+	if string(stream.Data) != "Hello\n" {
+		t.Errorf("expected stream data 'Hello\\n', got %q", string(stream.Data))
+	}
+}
+
+func TestParseStreamWithIndirectLengthNoResolver(t *testing.T) {
+	// Stream with indirect length reference but no resolver set
+	input := "1 0 obj\n<< /Length 5 0 R >>\nstream\nHello\nendstream\nendobj"
+	parser := NewParser(strings.NewReader(input))
+
+	_, err := parser.ParseIndirectObject()
+	if err == nil {
+		t.Fatal("expected error when no resolver set")
+	}
+
+	expectedMsg := "indirect reference for stream length requires a reference resolver"
+	if !strings.Contains(err.Error(), expectedMsg) {
+		t.Errorf("expected error containing %q, got %q", expectedMsg, err.Error())
 	}
 }
 
