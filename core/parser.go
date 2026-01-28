@@ -13,12 +13,25 @@ func min(a, b int) int {
 	return b
 }
 
+// ReferenceResolver is an interface for resolving indirect references.
+// This allows the parser to resolve indirect stream lengths when needed.
+type ReferenceResolver interface {
+	ResolveReference(ref IndirectRef) (Object, error)
+}
+
 // Parser parses PDF objects from an io.Reader using a Lexer for tokenization.
 // It supports parsing all PDF object types including indirect objects and streams.
 type Parser struct {
 	lexer        *Lexer
 	currentToken *Token // Current token being processed
 	peekToken    *Token // Next token (lookahead)
+	resolver     ReferenceResolver
+}
+
+// SetReferenceResolver sets the reference resolver for the parser.
+// This is needed to resolve indirect stream lengths.
+func (p *Parser) SetReferenceResolver(resolver ReferenceResolver) {
+	p.resolver = resolver
 }
 
 // NewParser creates a new PDF parser for the given reader.
@@ -355,9 +368,19 @@ func (p *Parser) parseStream(dict Dict) (*Stream, error) {
 	case Int:
 		length = int(v)
 	case IndirectRef:
-		// Length is an indirect reference - we can't resolve it here
-		// The caller will need to resolve it and create the stream manually
-		return nil, fmt.Errorf("indirect reference for stream length not yet supported in parser")
+		// Length is an indirect reference - resolve it using the resolver
+		if p.resolver == nil {
+			return nil, fmt.Errorf("indirect reference for stream length requires a reference resolver")
+		}
+		resolved, err := p.resolver.ResolveReference(v)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve stream length reference: %w", err)
+		}
+		resolvedInt, ok := resolved.(Int)
+		if !ok {
+			return nil, fmt.Errorf("stream length reference resolved to %T, expected Int", resolved)
+		}
+		length = int(resolvedInt)
 	default:
 		return nil, fmt.Errorf("invalid type for stream length: %T", lengthObj)
 	}

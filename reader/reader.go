@@ -218,6 +218,7 @@ func (r *Reader) getUncompressedObject(objNum int, entry *core.XRefEntry) (core.
 
 	// Parse the indirect object
 	parser := core.NewParser(r.file)
+	parser.SetReferenceResolver(r)
 	indObj, err := parser.ParseIndirectObject()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse object %d: %w", objNum, err)
