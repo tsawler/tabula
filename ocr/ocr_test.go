@@ -1,3 +1,5 @@
+//go:build ocr
+
 package ocr
 
 import (

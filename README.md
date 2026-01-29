@@ -18,13 +18,25 @@ A Go text extraction library with a fluent API, designed for RAG (Retrieval-Augm
 - **RAG-Ready Chunking** - Semantic document chunking with metadata
 - **Markdown Export** - Convert extracted content to markdown
 - **PDF 1.0-1.7 Support** - Including modern XRef streams (PDF 1.5+)
-- **OCR Fallback** - Automatic text extraction from scanned PDFs via Tesseract
+- **Optional OCR** - Text extraction from scanned PDFs via Tesseract (build with `-tags ocr`)
 
 ## Installation
 
-### Prerequisites
+```bash
+go get github.com/tsawler/tabula
+```
 
-Tabula requires [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) for scanned PDF support.
+By default, Tabula builds as pure Go with no CGO dependencies. This handles PDF, DOCX, ODT, XLSX, PPTX, HTML, and EPUB files with native text.
+
+### Optional: OCR Support for Scanned PDFs
+
+To enable OCR for scanned PDFs (pages with no native text), build with the `ocr` tag:
+
+```bash
+go build -tags ocr
+```
+
+This requires [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) to be installed:
 
 **macOS (Homebrew):**
 ```bash
@@ -42,7 +54,7 @@ apt-get install tesseract-ocr-fra tesseract-ocr-deu  # French, German, etc.
 
 ### CGO Flags (macOS Apple Silicon only)
 
-On Apple Silicon Macs (M1/M2/M3/M4), Homebrew installs to `/opt/homebrew` instead of `/usr/local`. You must set CGO flags for the compiler to find Tesseract:
+On Apple Silicon Macs (M1/M2/M3/M4), when building with `-tags ocr`, you must set CGO flags for the compiler to find Tesseract:
 
 ```bash
 export CGO_CPPFLAGS="-I/opt/homebrew/include"
@@ -51,17 +63,11 @@ export CGO_LDFLAGS="-L/opt/homebrew/lib"
 
 Add these to your `~/.zshrc` for persistence. These flags are needed both when building tabula and when building any project that uses tabula as a dependency.
 
-| Platform | Extra CGO flags needed? |
-|----------|------------------------|
+| Platform | CGO flags needed? |
+|----------|-------------------|
 | Ubuntu/Debian | No |
 | macOS Intel | No |
-| macOS Apple Silicon | Yes (see above) |
-
-### Install Tabula
-
-```bash
-go get github.com/tsawler/tabula
-```
+| macOS Apple Silicon | Yes (with `-tags ocr` only) |
 
 ## Quick Start
 
@@ -356,10 +362,10 @@ markdown, _ := reader.MarkdownWithOptions(opts)
 
 ### OCR Fallback for Scanned PDFs
 
-Tabula automatically uses OCR when a PDF page contains no native text (i.e., scanned documents). This happens transparently—no code changes needed:
+When built with `-tags ocr`, Tabula automatically uses OCR when a PDF page contains no native text (i.e., scanned documents). This happens transparently—no code changes needed:
 
 ```go
-// Works automatically on scanned PDFs
+// Works automatically on scanned PDFs (when built with -tags ocr)
 text, warnings, err := tabula.Open("scanned-document.pdf").Text()
 if err != nil {
     log.Fatal(err)
@@ -373,11 +379,22 @@ for _, w := range warnings {
 }
 ```
 
+**Build requirements:**
+```bash
+# Without OCR - scanned pages return empty text
+go build
+
+# With OCR - scanned pages use Tesseract
+go build -tags ocr
+```
+
 **How it works:**
 1. For each page, Tabula first attempts native PDF text extraction
 2. If a page has no text fragments (common in scanned PDFs), it extracts embedded images
 3. Images are converted to PNG and processed through Tesseract OCR
 4. A `WarningOCRFallback` is added to indicate which pages used OCR
+
+**Without the `ocr` build tag:** OCR is disabled and `ocr.New()` returns `ocr.ErrOCRNotEnabled`. Scanned PDF pages will return empty text.
 
 **Supported image formats in PDFs:**
 - CCITT Group 3/4 fax (common in scanned documents)
@@ -525,13 +542,18 @@ count := tabula.Must(tabula.Open("doc.pdf").PageCount())
 ## Testing
 
 ```bash
+# Run tests without OCR (pure Go)
 go test ./...
 
-# Or using Task (handles CGO flags automatically)
-task test
+# Run tests with OCR enabled (requires Tesseract)
+go test -tags ocr ./...
+
+# Or using Task
+task test       # without OCR
+task test-ocr   # with OCR (handles CGO flags automatically)
 ```
 
-**Note:** On Apple Silicon Macs, ensure you've set the CGO flags described in the Installation section, or use `task test` which sets them automatically.
+**Note:** On Apple Silicon Macs with OCR enabled, ensure you've set the CGO flags described in the Installation section, or use `task test-ocr` which sets them automatically.
 
 ## License
 
