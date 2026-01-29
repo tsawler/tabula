@@ -27,6 +27,15 @@ tasks:
       CGO_LDFLAGS: "{{.CGO_LDFLAGS}}"
     silent: true
 
+  test-ocr:
+    desc: Run all tests with OCR support enabled (requires Tesseract)
+    cmds:
+      - go test -tags ocr ./...
+    env:
+      CGO_CPPFLAGS: "{{.CGO_CPPFLAGS}}"
+      CGO_LDFLAGS: "{{.CGO_LDFLAGS}}"
+    silent: true
+
   coverage:
     desc: Print app test coverage
     cmds:
