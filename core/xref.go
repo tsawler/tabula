@@ -190,8 +190,13 @@ func (x *XRefParser) isXRefStream() (bool, error) {
 
 	// XRef stream starts with an object definition: "num gen obj"
 	// e.g., "5 0 obj"
+	// Note: Some PDFs use only CR as line terminator, causing Scanner to read
+	// past the object definition into the dictionary. We check for >= 3 parts
+	// to handle this case.
+	// Also, some PDFs have no whitespace between "obj" and the dictionary,
+	// e.g., "530 0 obj<<..." - we check if the third part starts with "obj".
 	parts := strings.Fields(line)
-	if len(parts) == 3 && parts[2] == "obj" {
+	if len(parts) >= 3 && (parts[2] == "obj" || strings.HasPrefix(parts[2], "obj<<") || strings.HasPrefix(parts[2], "obj<")) {
 		return true, nil
 	}
 
