@@ -34,6 +34,22 @@ func TestXRefStreamDetection(t *testing.T) {
 			wantStream: false,
 			wantError:  true,
 		},
+		{
+			// Some PDFs (e.g., from Microsoft Word) use only CR as line terminator,
+			// causing bufio.Scanner to read the entire dictionary as one "line".
+			// This test ensures we still correctly detect xref streams in this case.
+			name:       "xref stream with CR-only line ending",
+			content:    "530 0 obj\r<</Type /XRef/Size 10/W[1 3 1]>>stream",
+			wantStream: true,
+			wantError:  false,
+		},
+		{
+			// Same test with dictionary appearing on same line (no line break at all)
+			name:       "xref stream with no line break after obj",
+			content:    "530 0 obj<</Type /XRef/Size 10/W[1 3 1]>>stream\n",
+			wantStream: true,
+			wantError:  false,
+		},
 	}
 
 	for _, tt := range tests {
