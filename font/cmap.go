@@ -183,45 +183,31 @@ func (cm *CMap) parseBfChar(content string) error {
 
 // parseBfCharSection parses a single beginbfchar/endbfchar section
 func (cm *CMap) parseBfCharSection(section string) error {
-	// Split into lines
-	lines := strings.Split(section, "\n")
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if line == "" {
-			continue
+	// Find all hex strings in the entire section (handles no-newline CMaps)
+	// Format: <srcCode> <dstUnicode> pairs, may or may not have whitespace/newlines
+	hexStrings := make([]string, 0)
+	startIdx := 0
+	for {
+		idx := strings.Index(section[startIdx:], "<")
+		if idx == -1 {
+			break
 		}
-
-		// Parse hex strings: <srcCode> <dstUnicode>
-		// Split by < to handle <21><d83d dc4b> format
-		var srcHex, dstHex string
-
-		// Find all hex strings in the line
-		hexStrings := make([]string, 0)
-		startIdx := 0
-		for {
-			idx := strings.Index(line[startIdx:], "<")
-			if idx == -1 {
-				break
-			}
-			idx += startIdx
-			endIdx := strings.Index(line[idx:], ">")
-			if endIdx == -1 {
-				break
-			}
-			endIdx += idx
-
-			hexStr := line[idx+1 : endIdx]
-			hexStrings = append(hexStrings, hexStr)
-			startIdx = endIdx + 1
+		idx += startIdx
+		endIdx := strings.Index(section[idx:], ">")
+		if endIdx == -1 {
+			break
 		}
+		endIdx += idx
 
-		if len(hexStrings) < 2 {
-			continue
-		}
+		hexStr := section[idx+1 : endIdx]
+		hexStrings = append(hexStrings, hexStr)
+		startIdx = endIdx + 1
+	}
 
-		srcHex = hexStrings[0]
-		dstHex = hexStrings[1]
+	// Process hex strings in pairs: (srcCode, dstUnicode)
+	for i := 0; i+1 < len(hexStrings); i += 2 {
+		srcHex := hexStrings[i]
+		dstHex := hexStrings[i+1]
 
 		if srcHex == "" || dstHex == "" {
 			continue
@@ -247,8 +233,6 @@ func (cm *CMap) parseBfCharSection(section string) error {
 		// Convert destination to Unicode string
 		unicode, err := hexToUnicode(dstHex)
 		if err != nil {
-			// Debug: show the error
-			_ = err // Silently continue for now
 			continue
 		}
 
@@ -293,7 +277,75 @@ func (cm *CMap) parseBfRange(content string) error {
 
 // parseBfRangeSection parses a single beginbfrange/endbfrange section
 func (cm *CMap) parseBfRangeSection(section string) error {
-	// Split into lines
+	// Check for array format first (contains "[")
+	// Array format needs special handling as it can span multiple entries
+	if strings.Contains(section, "[") {
+		return cm.parseBfRangeSectionWithArrays(section)
+	}
+
+	// Simple format: <start> <end> <unicode> triplets
+	// Handle CMaps without newlines by processing all hex strings in groups of 3
+	hexStrings := make([]string, 0)
+	startIdx := 0
+	for {
+		idx := strings.Index(section[startIdx:], "<")
+		if idx == -1 {
+			break
+		}
+		idx += startIdx
+		endIdx := strings.Index(section[idx:], ">")
+		if endIdx == -1 {
+			break
+		}
+		endIdx += idx
+
+		hexStr := section[idx+1 : endIdx]
+		hexStrings = append(hexStrings, hexStr)
+		startIdx = endIdx + 1
+	}
+
+	// Process hex strings in groups of 3: (start, end, unicode)
+	for i := 0; i+2 < len(hexStrings); i += 3 {
+		startHex := hexStrings[i]
+		endHex := hexStrings[i+1]
+		dstHex := hexStrings[i+2]
+
+		if startHex == "" || endHex == "" || dstHex == "" {
+			continue
+		}
+
+		// Track actual byte width from source code hex length
+		srcHexLen := len(startHex)
+		if srcHexLen%2 != 0 {
+			srcHexLen++
+		}
+		srcByteWidth := srcHexLen / 2
+		if srcByteWidth > cm.actualByteWidth {
+			cm.actualByteWidth = srcByteWidth
+		}
+
+		startCode, err1 := parseHexToUint32(startHex)
+		endCode, err2 := parseHexToUint32(endHex)
+		dstUnicode, err3 := parseHexToUint32(dstHex)
+
+		if err1 != nil || err2 != nil || err3 != nil {
+			continue
+		}
+
+		// Add range mapping
+		cm.rangeMappings = append(cm.rangeMappings, CMapRange{
+			StartCode:    startCode,
+			EndCode:      endCode,
+			StartUnicode: dstUnicode,
+		})
+	}
+
+	return nil
+}
+
+// parseBfRangeSectionWithArrays handles bfrange sections that contain array format entries
+func (cm *CMap) parseBfRangeSectionWithArrays(section string) error {
+	// Split into lines for array handling (arrays may span lines)
 	lines := strings.Split(section, "\n")
 
 	i := 0
@@ -304,7 +356,7 @@ func (cm *CMap) parseBfRangeSection(section string) error {
 			continue
 		}
 
-		// Check if this is an array format (multi-line)
+		// Check if this is an array format
 		if strings.Contains(line, "[") {
 			// Array format: <start> <end> [<u1> <u2> ...]
 			// This may span multiple lines
@@ -318,8 +370,7 @@ func (cm *CMap) parseBfRangeSection(section string) error {
 			continue
 		}
 
-		// Simple format: <start> <end> <unicode>
-		// Find all hex strings in the line to handle tight packing like <21><21><0052>
+		// Simple format on this line: <start> <end> <unicode>
 		hexStrings := make([]string, 0)
 		startIdx := 0
 		for {
@@ -339,45 +390,39 @@ func (cm *CMap) parseBfRangeSection(section string) error {
 			startIdx = endIdx + 1
 		}
 
-		if len(hexStrings) < 3 {
-			i++
-			continue
+		// Process in groups of 3
+		for j := 0; j+2 < len(hexStrings); j += 3 {
+			startHex := hexStrings[j]
+			endHex := hexStrings[j+1]
+			dstHex := hexStrings[j+2]
+
+			if startHex == "" || endHex == "" || dstHex == "" {
+				continue
+			}
+
+			srcHexLen := len(startHex)
+			if srcHexLen%2 != 0 {
+				srcHexLen++
+			}
+			srcByteWidth := srcHexLen / 2
+			if srcByteWidth > cm.actualByteWidth {
+				cm.actualByteWidth = srcByteWidth
+			}
+
+			startCode, err1 := parseHexToUint32(startHex)
+			endCode, err2 := parseHexToUint32(endHex)
+			dstUnicode, err3 := parseHexToUint32(dstHex)
+
+			if err1 != nil || err2 != nil || err3 != nil {
+				continue
+			}
+
+			cm.rangeMappings = append(cm.rangeMappings, CMapRange{
+				StartCode:    startCode,
+				EndCode:      endCode,
+				StartUnicode: dstUnicode,
+			})
 		}
-
-		startHex := hexStrings[0]
-		endHex := hexStrings[1]
-		dstHex := hexStrings[2]
-
-		if startHex == "" || endHex == "" || dstHex == "" {
-			i++
-			continue
-		}
-
-		// Track actual byte width from source code hex length
-		srcHexLen := len(startHex)
-		if srcHexLen%2 != 0 {
-			srcHexLen++
-		}
-		srcByteWidth := srcHexLen / 2
-		if srcByteWidth > cm.actualByteWidth {
-			cm.actualByteWidth = srcByteWidth
-		}
-
-		startCode, err1 := parseHexToUint32(startHex)
-		endCode, err2 := parseHexToUint32(endHex)
-		dstUnicode, err3 := parseHexToUint32(dstHex)
-
-		if err1 != nil || err2 != nil || err3 != nil {
-			i++
-			continue
-		}
-
-		// Add range mapping
-		cm.rangeMappings = append(cm.rangeMappings, CMapRange{
-			StartCode:    startCode,
-			EndCode:      endCode,
-			StartUnicode: dstUnicode,
-		})
 
 		i++
 	}
