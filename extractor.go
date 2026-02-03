@@ -191,42 +191,49 @@ func (e *Extractor) Close() error {
 			err := e.reader.Close()
 			e.reader = nil
 			e.ownsReader = false
+			e.readerOpened = false // Allow re-opening if needed
 			return err
 		}
 		if e.docxReader != nil {
 			err := e.docxReader.Close()
 			e.docxReader = nil
 			e.ownsReader = false
+			e.readerOpened = false
 			return err
 		}
 		if e.odtReader != nil {
 			err := e.odtReader.Close()
 			e.odtReader = nil
 			e.ownsReader = false
+			e.readerOpened = false
 			return err
 		}
 		if e.xlsxReader != nil {
 			err := e.xlsxReader.Close()
 			e.xlsxReader = nil
 			e.ownsReader = false
+			e.readerOpened = false
 			return err
 		}
 		if e.pptxReader != nil {
 			err := e.pptxReader.Close()
 			e.pptxReader = nil
 			e.ownsReader = false
+			e.readerOpened = false
 			return err
 		}
 		if e.htmlReader != nil {
 			err := e.htmlReader.Close()
 			e.htmlReader = nil
 			e.ownsReader = false
+			e.readerOpened = false
 			return err
 		}
 		if e.epubReader != nil {
 			err := e.epubReader.Close()
 			e.epubReader = nil
 			e.ownsReader = false
+			e.readerOpened = false
 			return err
 		}
 	}
