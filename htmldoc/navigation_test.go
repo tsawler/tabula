@@ -452,8 +452,8 @@ func TestNormalizeClassName(t *testing.T) {
 
 func TestLinkDensityCalculation(t *testing.T) {
 	tests := []struct {
-		name         string
-		html         string
+		name           string
+		html           string
 		expectExcluded bool
 	}{
 		{

@@ -984,7 +984,7 @@ func TestMergeResources(t *testing.T) {
 
 	child := core.Dict{
 		"Font": core.Dict{
-			"F1": core.Name("Arial"), // Override F1
+			"F1": core.Name("Arial"),   // Override F1
 			"F3": core.Name("Courier"), // Add F3
 		},
 		"XObject": core.Dict{

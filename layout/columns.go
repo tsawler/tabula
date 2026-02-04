@@ -225,17 +225,18 @@ func (d *ColumnDetector) separateSpanningFragments(fragments []text.TextFragment
 
 	// Additional filter: if spanning content looks like stray body text, move it to regular
 	// Spanning content like titles should be at distinct Y positions from body content
-	spanning = filterStraySpanningContent(spanning, regular)
+	spanning, recoveredRegular := filterStraySpanningContent(spanning, regular)
+	regular = append(regular, recoveredRegular...)
 
 	return regular, spanning
 }
 
-// filterStraySpanningContent moves spanning lines back to regular if they appear to be
-// stray body text rather than actual titles/headers. Body text that spans gaps is unusual
-// and often indicates incorrect gap detection rather than true spanning content.
-func filterStraySpanningContent(spanning, regular []text.TextFragment) []text.TextFragment {
+// filterStraySpanningContent separates spanning lines into true spanning content
+// (headers, titles) and stray body text that should go back to regular content.
+// Returns (trueSpanning, recoveredRegular).
+func filterStraySpanningContent(spanning, regular []text.TextFragment) ([]text.TextFragment, []text.TextFragment) {
 	if len(spanning) == 0 {
-		return spanning
+		return spanning, nil
 	}
 
 	// Group spanning fragments by Y (into lines)
@@ -243,7 +244,7 @@ func filterStraySpanningContent(spanning, regular []text.TextFragment) []text.Te
 
 	// Find the Y position range of regular content
 	if len(regular) == 0 {
-		return spanning
+		return spanning, nil
 	}
 
 	regularMinY, regularMaxY := float64(1e9), float64(0)
@@ -259,6 +260,7 @@ func filterStraySpanningContent(spanning, regular []text.TextFragment) []text.Te
 	// Keep only spanning lines that are clearly separate from body content
 	// (at least 20 points away from the regular content Y range)
 	var filteredSpanning []text.TextFragment
+	var recoveredRegular []text.TextFragment
 	tolerance := 20.0
 
 	for _, line := range spanningLines {
@@ -279,12 +281,13 @@ func filterStraySpanningContent(spanning, regular []text.TextFragment) []text.Te
 
 		if isAboveBody || isBelowBody || isNearTop {
 			filteredSpanning = append(filteredSpanning, line...)
+		} else {
+			// Lines in the middle of body content go back to regular
+			recoveredRegular = append(recoveredRegular, line...)
 		}
-		// Lines in the middle of body content are moved back to regular implicitly
-		// by not being added to filteredSpanning
 	}
 
-	return filteredSpanning
+	return filteredSpanning, recoveredRegular
 }
 
 // Gap represents a vertical whitespace gap
@@ -751,22 +754,25 @@ func (l *ColumnLayout) getSpanningText() string {
 
 	var result string
 	for lineIdx, line := range lines {
-		// Sort fragments within line by X (left to right)
-		// Use stable sort with tolerance for overlapping fragments
-		sort.SliceStable(line, func(i, j int) bool {
-			tolerance := line[i].FontSize * xTolerance
-			if absFloat64(line[i].X-line[j].X) < tolerance {
-				return false // Treat as equal, preserve stream order
-			}
-			return line[i].X < line[j].X
-		})
+		// Check if this line's stream order should be preserved
+		if !shouldPreserveStreamOrder(line) {
+			// Sort fragments within line by X (left to right)
+			// Use stable sort with tolerance for overlapping fragments
+			sort.SliceStable(line, func(i, j int) bool {
+				tolerance := line[i].FontSize * xTolerance
+				if absFloat64(line[i].X-line[j].X) < tolerance {
+					return false // Treat as equal, preserve stream order
+				}
+				return line[i].X < line[j].X
+			})
+		}
 
 		// Assemble line text
 		for i, frag := range line {
 			if i > 0 {
 				prevFrag := line[i-1]
 				gap := frag.X - (prevFrag.X + prevFrag.Width)
-				if gap > frag.Height*0.1 {
+				if gap > frag.Height*0.1 || gap < -frag.Height*0.5 {
 					result += " "
 				}
 			}
@@ -782,6 +788,59 @@ func (l *ColumnLayout) getSpanningText() string {
 	return result
 }
 
+// shouldPreserveStreamOrder detects if a line's fragments have X coordinates
+// that jump back and forth, indicating the PDF placed text for visual alignment
+// but used stream order for reading order. In such cases, sorting by X
+// would destroy the correct reading order.
+func shouldPreserveStreamOrder(fragments []text.TextFragment) bool {
+	if len(fragments) < 3 {
+		return false
+	}
+
+	// Count significant "backward jumps" where X decreases substantially
+	backwardJumps := 0
+	totalMoves := 0
+	avgFontSize := float64(0)
+	maxBackwardJump := float64(0)
+
+	for i := 0; i < len(fragments)-1; i++ {
+		avgFontSize += fragments[i].FontSize
+	}
+	avgFontSize /= float64(len(fragments) - 1)
+	if avgFontSize < 1 {
+		avgFontSize = 1
+	}
+
+	// A jump is "backward" if X decreases by more than 2x font size
+	// (small overlaps are normal due to kerning)
+	threshold := avgFontSize * 2
+
+	for i := 0; i < len(fragments)-1; i++ {
+		xDiff := fragments[i+1].X - fragments[i].X
+		if xDiff < -threshold {
+			backwardJumps++
+			if -xDiff > maxBackwardJump {
+				maxBackwardJump = -xDiff
+			}
+		}
+		totalMoves++
+	}
+
+	// Preserve stream order if there are ANY backward jumps with:
+	// 1. More than 3% of moves being backward jumps (even occasional interleaving)
+	// 2. OR any single backward jump > 15 points (~1.5x font size)
+	// These thresholds are deliberately low because X-sorting can severely garble
+	// text when content from different columns shares the same Y coordinate.
+	if totalMoves > 0 && float64(backwardJumps)/float64(totalMoves) > 0.03 {
+		return true
+	}
+	if maxBackwardJump > 15.0 {
+		return true
+	}
+
+	return false
+}
+
 // getColumnText returns text from a single column
 func (l *ColumnLayout) getColumnText(col Column) string {
 	if len(col.Fragments) == 0 {
@@ -794,23 +853,29 @@ func (l *ColumnLayout) getColumnText(col Column) string {
 	var result string
 
 	for lineIdx, line := range lines {
-		// Sort fragments within line by X (left to right)
-		// Use stable sort with tolerance for overlapping fragments
-		sort.SliceStable(line, func(i, j int) bool {
-			tolerance := line[i].FontSize * xTolerance
-			if absFloat64(line[i].X-line[j].X) < tolerance {
-				return false // Treat as equal, preserve stream order
-			}
-			return line[i].X < line[j].X
-		})
+		// Check if this line's stream order should be preserved
+		// (X coordinates jump back and forth, indicating visual placement)
+		if !shouldPreserveStreamOrder(line) {
+			// Sort fragments within line by X (left to right)
+			// Use stable sort with tolerance for overlapping fragments
+			sort.SliceStable(line, func(i, j int) bool {
+				tolerance := line[i].FontSize * xTolerance
+				if absFloat64(line[i].X-line[j].X) < tolerance {
+					return false // Treat as equal, preserve stream order
+				}
+				return line[i].X < line[j].X
+			})
+		}
 
 		// Assemble line text
 		for i, frag := range line {
 			if i > 0 {
 				// Add space between fragments if there's a gap
+				// For stream-order preserved lines, check stream-order gap
 				prevFrag := line[i-1]
 				gap := frag.X - (prevFrag.X + prevFrag.Width)
-				if gap > frag.Height*0.1 { // Small gap threshold
+				// For backwards jumps (stream order), use a simple space heuristic
+				if gap > frag.Height*0.1 || gap < -frag.Height*0.5 {
 					result += " "
 				}
 			}

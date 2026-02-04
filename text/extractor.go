@@ -39,10 +39,10 @@ type Extractor struct {
 	fragments []TextFragment // Extracted text fragments
 
 	// XObject support
-	resources      core.Dict                                      // Current resources dictionary
-	resolver       func(core.IndirectRef) (core.Object, error)    // Reference resolver
-	xobjectDepth   int                                            // Current XObject nesting depth
-	maxXObjectDepth int                                           // Maximum nesting depth (prevents infinite recursion)
+	resources       core.Dict                                   // Current resources dictionary
+	resolver        func(core.IndirectRef) (core.Object, error) // Reference resolver
+	xobjectDepth    int                                         // Current XObject nesting depth
+	maxXObjectDepth int                                         // Maximum nesting depth (prevents infinite recursion)
 }
 
 // NewExtractor creates a new text extractor with initialized graphics state.
