@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"image"
 	"image/color"
+	"image/jpeg"
 	"image/png"
 
 	"github.com/tsawler/tabula/core"
@@ -188,21 +189,36 @@ func (img *PageImage) ToPNG() ([]byte, error) {
 	var goImg image.Image
 	var err error
 
-	// Handle different color spaces and bit depths
-	switch img.ColorSpace {
-	case "DeviceGray", "CalGray", "ICCBased":
-		goImg, err = img.toGrayImage()
-	case "DeviceRGB", "CalRGB":
-		goImg, err = img.toRGBImage()
-	case "DeviceCMYK":
-		goImg, err = img.toCMYKImage()
-	default:
-		// Try grayscale as fallback
-		goImg, err = img.toGrayImage()
+	// Check if the data is still JPEG-encoded (DCTDecode returns raw JPEG)
+	if len(img.Data) >= 2 && img.Data[0] == 0xFF && img.Data[1] == 0xD8 {
+		// Decode JPEG data
+		goImg, err = jpeg.Decode(bytes.NewReader(img.Data))
+		if err != nil {
+			return nil, fmt.Errorf("failed to decode JPEG: %w", err)
+		}
+	} else {
+		// Handle raw pixel data based on color space
+		switch img.ColorSpace {
+		case "DeviceGray", "CalGray", "ICCBased":
+			goImg, err = img.toGrayImage()
+		case "DeviceRGB", "CalRGB":
+			goImg, err = img.toRGBImage()
+		case "DeviceCMYK":
+			goImg, err = img.toCMYKImage()
+		default:
+			// Try grayscale as fallback
+			goImg, err = img.toGrayImage()
+		}
+
+		if err != nil {
+			return nil, err
+		}
 	}
 
-	if err != nil {
-		return nil, err
+	// Separation colorspace represents ink density (high = more ink = darker)
+	// For OCR, we need to invert so text appears dark on light background
+	if img.ColorSpace == "Separation" {
+		goImg = invertImage(goImg)
 	}
 
 	// Encode as PNG
@@ -212,6 +228,27 @@ func (img *PageImage) ToPNG() ([]byte, error) {
 	}
 
 	return buf.Bytes(), nil
+}
+
+// invertImage inverts the colors of an image (for Separation colorspace).
+func invertImage(src image.Image) image.Image {
+	bounds := src.Bounds()
+	dst := image.NewRGBA(bounds)
+
+	for y := bounds.Min.Y; y < bounds.Max.Y; y++ {
+		for x := bounds.Min.X; x < bounds.Max.X; x++ {
+			r, g, b, a := src.At(x, y).RGBA()
+			// Invert RGB values (RGBA returns 16-bit values, scale to 8-bit)
+			dst.Set(x, y, color.RGBA{
+				R: uint8(255 - r>>8),
+				G: uint8(255 - g>>8),
+				B: uint8(255 - b>>8),
+				A: uint8(a >> 8),
+			})
+		}
+	}
+
+	return dst
 }
 
 // toGrayImage converts grayscale pixel data to an image.Gray.
