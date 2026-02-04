@@ -185,23 +185,22 @@ func (d *LineDetector) groupIntoLines(fragments []text.TextFragment) [][]text.Te
 		return nil
 	}
 
-	// Sort fragments by Y (descending, top to bottom in PDF coords) then X
+	// Calculate adaptive tolerance based on actual content characteristics
+	// This handles PDFs where CTM scaling compresses coordinates
+	adaptiveTolerance := d.calculateAdaptiveTolerance(fragments)
+
+	// Sort fragments by Y (descending, top to bottom in PDF coords) only
+	// Preserve stream order for same-Y fragments - X sorting happens per-line later
+	// (if shouldPreserveStreamOrder returns false for that line)
 	sorted := make([]text.TextFragment, len(fragments))
 	copy(sorted, fragments)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		yDiff := sorted[i].Y - sorted[j].Y
-		avgHeight := (sorted[i].Height + sorted[j].Height) / 2
-		yTol := avgHeight * d.config.LineHeightTolerance
-		if absFloat64(yDiff) > yTol {
+		if absFloat64(yDiff) > adaptiveTolerance {
 			return yDiff > 0 // Higher Y first (top of page)
 		}
-
-		// Same line - sort by X with tolerance
-		xTol := sorted[i].FontSize * xTolerance
-		if absFloat64(sorted[i].X-sorted[j].X) < xTol {
-			return false // Treat as equal, preserve stream order
-		}
-		return sorted[i].X < sorted[j].X // Left to right
+		// Same line - preserve stream order (return false means don't swap)
+		return false
 	})
 
 	var lines [][]text.TextFragment
@@ -216,22 +215,22 @@ func (d *LineDetector) groupIntoLines(fragments []text.TextFragment) [][]text.Te
 		// Check if fragment is on same line as previous
 		// Use the average Y of the current line for better accuracy
 		avgY := d.averageLineY(currentLine)
-		avgHeight := d.averageFragmentHeight(currentLine)
-		tolerance := avgHeight * d.config.LineHeightTolerance
 
-		if absFloat64(frag.Y-avgY) <= tolerance {
+		if absFloat64(frag.Y-avgY) <= adaptiveTolerance {
 			// Same line
 			currentLine = append(currentLine, frag)
 		} else {
-			// New line - sort current line by X and save it
+			// New line - sort current line by X if stream order shouldn't be preserved
 			// Use stable sort with tolerance to handle overlapping fragments (Word/Quartz issue)
-			sort.SliceStable(currentLine, func(i, j int) bool {
-				xTol := currentLine[i].FontSize * xTolerance
-				if absFloat64(currentLine[i].X-currentLine[j].X) < xTol {
-					return false // Treat as equal, preserve stream order
-				}
-				return currentLine[i].X < currentLine[j].X
-			})
+			if !shouldPreserveStreamOrder(currentLine) {
+				sort.SliceStable(currentLine, func(i, j int) bool {
+					xTol := currentLine[i].FontSize * xTolerance
+					if absFloat64(currentLine[i].X-currentLine[j].X) < xTol {
+						return false // Treat as equal, preserve stream order
+					}
+					return currentLine[i].X < currentLine[j].X
+				})
+			}
 			lines = append(lines, currentLine)
 			currentLine = []text.TextFragment{frag}
 		}
@@ -239,17 +238,99 @@ func (d *LineDetector) groupIntoLines(fragments []text.TextFragment) [][]text.Te
 
 	// Don't forget the last line
 	if len(currentLine) > 0 {
-		sort.SliceStable(currentLine, func(i, j int) bool {
-			xTol := currentLine[i].FontSize * xTolerance
-			if absFloat64(currentLine[i].X-currentLine[j].X) < xTol {
-				return false // Treat as equal, preserve stream order
-			}
-			return currentLine[i].X < currentLine[j].X
-		})
+		if !shouldPreserveStreamOrder(currentLine) {
+			sort.SliceStable(currentLine, func(i, j int) bool {
+				xTol := currentLine[i].FontSize * xTolerance
+				if absFloat64(currentLine[i].X-currentLine[j].X) < xTol {
+					return false // Treat as equal, preserve stream order
+				}
+				return currentLine[i].X < currentLine[j].X
+			})
+		}
 		lines = append(lines, currentLine)
 	}
 
 	return lines
+}
+
+// calculateAdaptiveTolerance determines the Y tolerance for line grouping based on
+// actual content characteristics. This handles PDFs where CTM scaling compresses
+// coordinates, making standard font-height-based tolerance too large.
+func (d *LineDetector) calculateAdaptiveTolerance(fragments []text.TextFragment) float64 {
+	if len(fragments) == 0 {
+		return 2.0 // Default minimum
+	}
+
+	// Calculate average font height
+	totalHeight := 0.0
+	for _, f := range fragments {
+		totalHeight += f.Height
+	}
+	avgHeight := totalHeight / float64(len(fragments))
+
+	// Standard tolerance based on font height
+	standardTolerance := avgHeight * d.config.LineHeightTolerance
+
+	// Analyze actual Y gaps in the content to detect if coordinates are compressed
+	// Sort unique Y positions to find typical line spacing
+	yPositions := make(map[float64]bool)
+	for _, f := range fragments {
+		// Round Y to avoid floating point noise
+		roundedY := float64(int(f.Y*10)) / 10
+		yPositions[roundedY] = true
+	}
+
+	if len(yPositions) < 3 {
+		return standardTolerance // Not enough data
+	}
+
+	// Convert to sorted slice
+	uniqueYs := make([]float64, 0, len(yPositions))
+	for y := range yPositions {
+		uniqueYs = append(uniqueYs, y)
+	}
+	sort.Float64s(uniqueYs)
+
+	// Calculate gaps between adjacent Y positions
+	gaps := make([]float64, 0, len(uniqueYs)-1)
+	for i := 1; i < len(uniqueYs); i++ {
+		gap := absFloat64(uniqueYs[i] - uniqueYs[i-1])
+		if gap > 0.1 { // Ignore tiny gaps (same line with baseline variation)
+			gaps = append(gaps, gap)
+		}
+	}
+
+	if len(gaps) == 0 {
+		return standardTolerance
+	}
+
+	// Sort gaps to find percentiles
+	sort.Float64s(gaps)
+
+	// Use the 10th percentile gap as the tolerance threshold
+	// This is more conservative - ensures we don't merge distinct lines
+	// The 10th percentile represents the smallest inter-line gaps (excluding noise)
+	p10Index := len(gaps) / 10
+	if p10Index < 0 {
+		p10Index = 0
+	}
+	minInterLineGap := gaps[p10Index]
+
+	// If the min inter-line gap is much smaller than the font height,
+	// the coordinates are likely scaled/compressed.
+	// Use a very conservative tolerance to avoid merging separate lines.
+	if minInterLineGap < avgHeight*0.5 && minInterLineGap > 0.1 {
+		// Coordinates are compressed - use gap-based tolerance
+		// Set tolerance to about 20% of the minimum gap to be very conservative
+		adaptiveTolerance := minInterLineGap * 0.2
+		if adaptiveTolerance < 0.15 {
+			adaptiveTolerance = 0.15 // Very small minimum for compressed coordinates
+		}
+		return adaptiveTolerance
+	}
+
+	// Standard case - use font-height-based tolerance
+	return standardTolerance
 }
 
 // averageLineY returns the average Y coordinate of fragments in a line

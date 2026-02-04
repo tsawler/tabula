@@ -274,8 +274,8 @@ func TestGetEncoding(t *testing.T) {
 
 func TestInferEncodingFromFontName(t *testing.T) {
 	tests := []struct {
-		fontName     string
-		expectedEnc  string
+		fontName    string
+		expectedEnc string
 	}{
 		// Symbol fonts
 		{"Symbol", "SymbolEncoding"},

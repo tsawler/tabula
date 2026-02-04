@@ -218,47 +218,41 @@ func (d *ReadingOrderDetector) detectInvertedY(fragments []text.TextFragment, pa
 		}
 	}
 
-	// Use the relationship between Y coordinates and page height to determine
-	// the coordinate system. This is more reliable than looking at stream order
-	// since PDFs often have content rendered in arbitrary order (e.g., footers first).
+	// IMPORTANT: PDF coordinates may be scaled by a CTM (Current Transformation Matrix).
+	// When coordinates are CTM-scaled, maxY can be much smaller than pageHeight even
+	// though the coordinate system is still standard (Y=0 at bottom, higher Y = higher on page).
 	//
-	// In standard PDF coordinates (Y=0 at bottom):
-	//   - Content near the top of the page has Y values close to pageHeight
-	//   - maxY should be a significant fraction of pageHeight (typically 70-95%)
+	// For example, a CTM of [0.1 0 0 0.1 0 0] scales all coordinates by 1/10,
+	// so a 792pt page would have coordinates in the 0-79.2 range.
 	//
-	// In inverted coordinates (Y=0 at top):
-	//   - Content near the top of the page has Y values close to 0
-	//   - maxY would be much smaller relative to typical page heights
+	// We should NOT assume inverted Y just because coordinates are small relative to
+	// pageHeight. Instead, we only detect inverted Y when we have strong evidence,
+	// such as coordinates that clearly increase downward in reading order.
 	//
-	// The key insight: in standard coordinates, maxY approaches pageHeight,
-	// while in inverted coordinates, maxY is bounded by content position.
+	// The safest approach is to default to standard PDF coordinates per the PDF spec.
 
-	if pageHeight > 0 {
-		// If maxY is more than half of pageHeight, assume standard coordinates.
-		// This works because page content typically spans most of the page height,
-		// so in standard coords (Y=0 at bottom), maxY will be close to pageHeight.
-		if maxY > pageHeight*0.5 {
-			return false // Standard coordinates
-		}
-
-		// If maxY is less than 30% of pageHeight and minY is close to 0,
-		// this strongly suggests inverted coordinates where content starts
-		// at Y=0 (top) and increases downward.
-		if maxY < pageHeight*0.3 && minY < pageHeight*0.1 {
-			return true // Inverted coordinates
+	// Check if this looks like CTM-scaled coordinates
+	// If maxY is very small relative to pageHeight but spans a reasonable range,
+	// it's likely CTM scaling, not inverted coordinates
+	yRange := maxY - minY
+	if pageHeight > 0 && maxY < pageHeight*0.5 {
+		// Coordinates don't span the full page - could be CTM scaling
+		// Check if there's a reasonable spread relative to the content range itself
+		if yRange > 10 { // At least 10 points of content spread
+			// This looks like CTM-scaled standard coordinates, not inverted
+			// In truly inverted coordinates, we'd expect to see coordinates
+			// spanning from near 0 to near pageHeight
+			return false
 		}
 	}
 
-	// Fallback: use content range heuristic
-	// If Y values span a range starting near 0, it's likely inverted
-	yRange := maxY - minY
-	if yRange > 0 && minY < yRange*0.1 {
-		// Content starts very close to Y=0, suggesting inverted coords
-		// where the top of the page is at Y=0
-		return maxY < pageHeight*0.5
+	// If maxY is more than half of pageHeight, definitely standard coordinates
+	if pageHeight > 0 && maxY > pageHeight*0.5 {
+		return false // Standard coordinates
 	}
 
 	// Default to standard PDF coordinates per PDF specification
+	// This is the correct default as the PDF spec defines Y=0 at bottom
 	return false
 }
 
