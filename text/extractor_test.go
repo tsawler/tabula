@@ -910,3 +910,127 @@ func TestIsWhitespace(t *testing.T) {
 		}
 	}
 }
+
+// TestSetResourceContext tests that SetResourceContext properly configures the extractor
+func TestSetResourceContext(t *testing.T) {
+	ex := NewExtractor()
+
+	// Initially, resources should be nil
+	if ex.resources != nil {
+		t.Error("expected resources to be nil initially")
+	}
+
+	// Set resources
+	resources := core.Dict{
+		"Font": core.Dict{
+			"F1": core.Name("Helvetica"),
+		},
+	}
+	resolver := func(ref core.IndirectRef) (core.Object, error) {
+		return nil, nil
+	}
+
+	ex.SetResourceContext(resources, resolver)
+
+	if ex.resources == nil {
+		t.Error("expected resources to be set")
+	}
+	if ex.resolver == nil {
+		t.Error("expected resolver to be set")
+	}
+}
+
+// TestInvokeXObjectWithoutContext tests that Do operator is silently ignored without context
+func TestInvokeXObjectWithoutContext(t *testing.T) {
+	ex := NewExtractor()
+	ex.RegisterFont("/F1", "Helvetica", "Type1")
+
+	// This should not panic or error - Do should be silently ignored
+	operations := []contentstream.Operation{
+		{Operator: "BT", Operands: []core.Object{}},
+		{Operator: "Tf", Operands: []core.Object{core.Name("F1"), core.Int(12)}},
+		{Operator: "Tj", Operands: []core.Object{core.String("Before")}},
+		{Operator: "Do", Operands: []core.Object{core.Name("X0")}}, // Should be ignored
+		{Operator: "Tj", Operands: []core.Object{core.String("After")}},
+		{Operator: "ET", Operands: []core.Object{}},
+	}
+
+	fragments, err := ex.Extract(operations)
+	if err != nil {
+		t.Fatalf("extraction failed: %v", err)
+	}
+
+	if len(fragments) != 2 {
+		t.Errorf("expected 2 fragments, got %d", len(fragments))
+	}
+
+	text := ex.GetText()
+	if !strings.Contains(text, "Before") || !strings.Contains(text, "After") {
+		t.Errorf("expected text to contain 'Before' and 'After', got: %s", text)
+	}
+}
+
+// TestMergeResources tests the resource merging logic
+func TestMergeResources(t *testing.T) {
+	ex := NewExtractor()
+
+	parent := core.Dict{
+		"Font": core.Dict{
+			"F1": core.Name("Helvetica"),
+			"F2": core.Name("Times"),
+		},
+		"ColorSpace": core.Name("DeviceRGB"),
+	}
+
+	child := core.Dict{
+		"Font": core.Dict{
+			"F1": core.Name("Arial"), // Override F1
+			"F3": core.Name("Courier"), // Add F3
+		},
+		"XObject": core.Dict{
+			"X1": core.Name("SomeXObject"),
+		},
+	}
+
+	merged := ex.mergeResources(parent, child)
+
+	// Check that ColorSpace was inherited from parent
+	if merged["ColorSpace"] != core.Name("DeviceRGB") {
+		t.Error("expected ColorSpace to be inherited from parent")
+	}
+
+	// Check that XObject was added from child
+	if merged["XObject"] == nil {
+		t.Error("expected XObject to be added from child")
+	}
+
+	// Check that Font dict was merged properly
+	fontDict, ok := merged["Font"].(core.Dict)
+	if !ok {
+		t.Fatal("expected Font to be a Dict")
+	}
+
+	// F1 should be overridden by child
+	if fontDict["F1"] != core.Name("Arial") {
+		t.Errorf("expected F1 to be Arial (from child), got %v", fontDict["F1"])
+	}
+
+	// F2 should be inherited from parent
+	if fontDict["F2"] != core.Name("Times") {
+		t.Errorf("expected F2 to be Times (from parent), got %v", fontDict["F2"])
+	}
+
+	// F3 should be added from child
+	if fontDict["F3"] != core.Name("Courier") {
+		t.Errorf("expected F3 to be Courier (from child), got %v", fontDict["F3"])
+	}
+}
+
+// TestMaxXObjectDepth tests that deeply nested XObjects are limited
+func TestMaxXObjectDepth(t *testing.T) {
+	ex := NewExtractor()
+
+	if ex.maxXObjectDepth != 10 {
+		t.Errorf("expected maxXObjectDepth to be 10, got %d", ex.maxXObjectDepth)
+	}
+}

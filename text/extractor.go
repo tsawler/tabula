@@ -37,15 +37,29 @@ type Extractor struct {
 	fonts map[string]*font.Font        // Registered fonts by name
 
 	fragments []TextFragment // Extracted text fragments
+
+	// XObject support
+	resources      core.Dict                                      // Current resources dictionary
+	resolver       func(core.IndirectRef) (core.Object, error)    // Reference resolver
+	xobjectDepth   int                                            // Current XObject nesting depth
+	maxXObjectDepth int                                           // Maximum nesting depth (prevents infinite recursion)
 }
 
 // NewExtractor creates a new text extractor with initialized graphics state.
 func NewExtractor() *Extractor {
 	return &Extractor{
-		gs:        graphicsstate.NewGraphicsState(),
-		fonts:     make(map[string]*font.Font),
-		fragments: make([]TextFragment, 0),
+		gs:              graphicsstate.NewGraphicsState(),
+		fonts:           make(map[string]*font.Font),
+		fragments:       make([]TextFragment, 0),
+		maxXObjectDepth: 10, // Reasonable limit for nested XObjects
 	}
+}
+
+// SetResourceContext configures the extractor with resources and a resolver
+// for XObject processing. This enables extraction of text from Form XObjects.
+func (e *Extractor) SetResourceContext(resources core.Dict, resolver func(core.IndirectRef) (core.Object, error)) {
+	e.resources = resources
+	e.resolver = resolver
 }
 
 // RegisterFont registers a font by name for use during extraction.
@@ -331,9 +345,196 @@ func (e *Extractor) processOperation(op contentstream.Operation) error {
 				e.showText([]byte(str))
 			}
 		}
+
+	// XObject invocation
+	case "Do":
+		if len(op.Operands) == 1 {
+			if name, ok := op.Operands[0].(core.Name); ok {
+				if err := e.invokeXObject(string(name)); err != nil {
+					// Log but don't fail - XObject errors shouldn't stop extraction
+					// The error is silently ignored as the PDF may still have
+					// extractable text in other parts
+				}
+			}
+		}
 	}
 
 	return nil
+}
+
+// invokeXObject handles the Do operator by processing Form XObjects.
+// It extracts text from nested Form XObjects, handling their own resources and graphics state.
+func (e *Extractor) invokeXObject(name string) error {
+	// Check if we have resources and resolver configured
+	if e.resources == nil || e.resolver == nil {
+		return nil // No XObject support configured
+	}
+
+	// Check recursion depth
+	if e.xobjectDepth >= e.maxXObjectDepth {
+		return fmt.Errorf("XObject nesting too deep (max %d)", e.maxXObjectDepth)
+	}
+
+	// Get XObject dictionary from resources
+	xobjectDictObj := e.resources.Get("XObject")
+	if xobjectDictObj == nil {
+		return nil // No XObjects in resources
+	}
+
+	// Resolve XObject dictionary if it's a reference
+	xobjectDictResolved, err := resolveIfRef(xobjectDictObj, e.resolver)
+	if err != nil {
+		return fmt.Errorf("failed to resolve XObject dictionary: %w", err)
+	}
+
+	xobjectDict, ok := xobjectDictResolved.(core.Dict)
+	if !ok {
+		return nil // XObject is not a dictionary
+	}
+
+	// Look up the specific XObject by name
+	xobjRef := xobjectDict.Get(name)
+	if xobjRef == nil {
+		// Try without leading slash
+		xobjRef = xobjectDict.Get(strings.TrimPrefix(name, "/"))
+	}
+	if xobjRef == nil {
+		return nil // XObject not found
+	}
+
+	// Resolve the XObject
+	xobjResolved, err := resolveIfRef(xobjRef, e.resolver)
+	if err != nil {
+		return fmt.Errorf("failed to resolve XObject %s: %w", name, err)
+	}
+
+	// Must be a stream (Form XObjects are streams)
+	xobjStream, ok := xobjResolved.(*core.Stream)
+	if !ok {
+		return nil // Not a stream, might be an image XObject
+	}
+
+	// Check if it's a Form XObject
+	subtype := xobjStream.Dict.Get("Subtype")
+	if subtype == nil {
+		return nil
+	}
+	subtypeName, ok := subtype.(core.Name)
+	if !ok || string(subtypeName) != "Form" {
+		return nil // Not a Form XObject (might be Image)
+	}
+
+	// Decode the XObject content stream
+	data, err := xobjStream.Decode()
+	if err != nil {
+		return fmt.Errorf("failed to decode XObject stream: %w", err)
+	}
+
+	if len(data) == 0 {
+		return nil // Empty content
+	}
+
+	// Get XObject's own resources (if any)
+	var xobjResources core.Dict
+	if resObj := xobjStream.Dict.Get("Resources"); resObj != nil {
+		resResolved, err := resolveIfRef(resObj, e.resolver)
+		if err == nil {
+			if resDict, ok := resResolved.(core.Dict); ok {
+				xobjResources = resDict
+			}
+		}
+	}
+
+	// Register fonts from XObject's resources
+	if xobjResources != nil {
+		if err := e.RegisterFontsFromResources(xobjResources, e.resolver); err != nil {
+			// Non-fatal - continue with existing fonts
+		}
+	}
+
+	// Save current state
+	e.gs.Save()
+	e.xobjectDepth++
+
+	// Save current resources and set XObject's resources (or merged)
+	oldResources := e.resources
+	if xobjResources != nil {
+		// Use XObject's resources, but keep parent resources as fallback
+		// by merging them (XObject resources take precedence)
+		e.resources = e.mergeResources(oldResources, xobjResources)
+	}
+
+	// Apply XObject's transformation matrix if present
+	if matrixObj := xobjStream.Dict.Get("Matrix"); matrixObj != nil {
+		if matrixArr, ok := matrixObj.(core.Array); ok && len(matrixArr) == 6 {
+			matrix := operandsToMatrix([]core.Object(matrixArr))
+			e.gs.Transform(matrix)
+		}
+	}
+
+	// Parse and process the XObject content stream
+	parser := contentstream.NewParser(data)
+	operations, err := parser.Parse()
+	if err != nil {
+		// Restore state and return error
+		e.resources = oldResources
+		e.xobjectDepth--
+		e.gs.Restore()
+		return fmt.Errorf("failed to parse XObject content: %w", err)
+	}
+
+	// Process operations
+	for _, op := range operations {
+		if err := e.processOperation(op); err != nil {
+			// Continue processing despite errors
+		}
+	}
+
+	// Restore state
+	e.resources = oldResources
+	e.xobjectDepth--
+	e.gs.Restore()
+
+	return nil
+}
+
+// mergeResources creates a merged resources dictionary where child resources
+// take precedence over parent resources. This is used for XObject processing.
+func (e *Extractor) mergeResources(parent, child core.Dict) core.Dict {
+	if parent == nil {
+		return child
+	}
+	if child == nil {
+		return parent
+	}
+
+	// Create a new dict with parent entries
+	merged := make(core.Dict)
+	for k, v := range parent {
+		merged[k] = v
+	}
+
+	// Override/add with child entries
+	for k, v := range child {
+		// For sub-dictionaries like Font, XObject, etc., we should merge them
+		if parentSub, ok := parent[k].(core.Dict); ok {
+			if childSub, ok := v.(core.Dict); ok {
+				// Merge sub-dictionaries
+				mergedSub := make(core.Dict)
+				for sk, sv := range parentSub {
+					mergedSub[sk] = sv
+				}
+				for sk, sv := range childSub {
+					mergedSub[sk] = sv
+				}
+				merged[k] = mergedSub
+				continue
+			}
+		}
+		merged[k] = v
+	}
+
+	return merged
 }
 
 // showText processes a text showing operation (Tj), decoding and positioning the text.
@@ -455,6 +656,13 @@ func (e *Extractor) GetText() string {
 
 	// Group fragments by lines (same Y coordinate within tolerance)
 	lines := groupFragments(fragments)
+
+	// Sort lines by Y position (descending - top to bottom in page coordinates)
+	// PDF coordinate system has origin at bottom-left, so higher Y = higher on page
+	sort.SliceStable(lines, func(i, j int) bool {
+		// Use the Y of the first fragment in each line
+		return lines[i][0].Y > lines[j][0].Y
+	})
 
 	var sb strings.Builder
 
@@ -700,16 +908,25 @@ func groupFragments(fragments []TextFragment) [][]TextFragment {
 		// 2. X position that overlaps with existing line content
 		fragEndX := frag.X + frag.Width
 
-		// Check if Y actually differs (even slightly) - this distinguishes
-		// column changes from normal text flow
-		yDiffers := verticalDist > 0.5
+		// Check if Y differs significantly - this distinguishes column changes from
+		// normal baseline variations (subscripts, superscripts, kerning adjustments).
+		// Use 15% of font height as threshold to tolerate baseline variations while
+		// still detecting true column overlaps.
+		yDiffThreshold := prevFrag.Height * 0.15
+		if yDiffThreshold < 1.0 {
+			yDiffThreshold = 1.0 // Minimum 1 point threshold
+		}
+		yDiffers := verticalDist > yDiffThreshold
 
 		// Check if X is within the line's existing range (would overlap)
 		xWithinLineRange := frag.X >= lineMinX && frag.X <= lineMaxX
 
-		// If Y differs slightly AND X overlaps with line content, it's likely
-		// a different column/stream of text
-		isOverlappingColumn := sameLineByY && yDiffers && xWithinLineRange
+		// If Y differs notably AND X overlaps with line content AND fragment is
+		// not just whitespace, it's likely a different column/stream of text.
+		// Whitespace fragments often have slightly different baselines and shouldn't
+		// trigger column detection.
+		isWhitespaceFragment := len(frag.Text) > 0 && frag.Text == " " || frag.Text == ""
+		isOverlappingColumn := sameLineByY && yDiffers && xWithinLineRange && !isWhitespaceFragment
 
 		if sameLineByY && !isLineWrap && !isOverlappingColumn {
 			// Same line - Y is close, X didn't jump back, and no significant overlap
@@ -766,8 +983,22 @@ func (e *Extractor) detectLineDirection(fragments []TextFragment) Direction {
 
 // reorderFragmentsForReading reorders fragments for proper reading order based on direction.
 // LTR text is sorted left-to-right, RTL text is sorted right-to-left.
+// For character-level PDFs where stream order is already correct, it preserves stream order
+// to avoid breaking kerning and intentional character positioning.
 func (e *Extractor) reorderFragmentsForReading(fragments []TextFragment, lineDir Direction) []TextFragment {
 	if len(fragments) <= 1 {
+		return fragments
+	}
+
+	// Check if this is a character-level line (high fragmentation)
+	// and if stream order is already mostly sorted by X
+	isCharacterLevel := e.isCharacterLevelLine(fragments)
+	streamOrderScore := e.calculateStreamOrderScore(fragments, lineDir)
+
+	// If character-level and stream order is reasonably sorted (score > 0.7),
+	// trust the stream order instead of X-sorting
+	if isCharacterLevel && streamOrderScore > 0.7 {
+		// Return fragments in original stream order
 		return fragments
 	}
 
@@ -795,6 +1026,58 @@ func (e *Extractor) reorderFragmentsForReading(fragments []TextFragment, lineDir
 	})
 
 	return ordered
+}
+
+// isCharacterLevelLine checks if a line consists of highly fragmented text
+// (mostly single characters per fragment), which indicates character-level positioning.
+func (e *Extractor) isCharacterLevelLine(fragments []TextFragment) bool {
+	if len(fragments) == 0 {
+		return false
+	}
+
+	totalChars := 0
+	for _, f := range fragments {
+		totalChars += len([]rune(f.Text))
+	}
+
+	avgCharsPerFragment := float64(totalChars) / float64(len(fragments))
+	return avgCharsPerFragment <= 2.0
+}
+
+// calculateStreamOrderScore calculates how well the fragments are already sorted
+// in the stream order. Returns a score from 0 to 1, where 1 means perfectly sorted.
+// This helps detect when stream order should be trusted over X-sorting.
+func (e *Extractor) calculateStreamOrderScore(fragments []TextFragment, lineDir Direction) float64 {
+	if len(fragments) <= 1 {
+		return 1.0
+	}
+
+	// Count how many adjacent pairs are in correct order
+	correctPairs := 0
+	totalPairs := len(fragments) - 1
+
+	for i := 0; i < totalPairs; i++ {
+		curr := fragments[i]
+		next := fragments[i+1]
+
+		// Allow tolerance for kerning (characters can overlap slightly)
+		tolerance := curr.FontSize * 0.5 // 50% of font size tolerance for kerning
+
+		var inOrder bool
+		if lineDir == RTL {
+			// For RTL, X should decrease (or stay within tolerance)
+			inOrder = next.X <= curr.X+tolerance
+		} else {
+			// For LTR, X should increase (or stay within tolerance)
+			inOrder = next.X >= curr.X-tolerance
+		}
+
+		if inOrder {
+			correctPairs++
+		}
+	}
+
+	return float64(correctPairs) / float64(totalPairs)
 }
 
 // calculateHorizontalDistance calculates the gap between two fragments,

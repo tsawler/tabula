@@ -556,6 +556,11 @@ func (r *Reader) extractTextWithFragments(page *pages.Page) (*text.Extractor, []
 		// Non-fatal - continue with default font handling
 	}
 
+	// Set resource context for XObject support
+	if resources, resErr := page.Resources(); resErr == nil && resources != nil {
+		extractor.SetResourceContext(resources, resolverFunc)
+	}
+
 	// Extract text fragments
 	fragments, err := extractor.ExtractFromBytes(allData)
 	if err != nil {
