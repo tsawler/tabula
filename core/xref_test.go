@@ -3,6 +3,7 @@ package core
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -220,6 +221,18 @@ func TestFindXRef(t *testing.T) {
 			"with extra whitespace",
 			"content\nstartxref\n  5678  \n%%EOF\n",
 			5678,
+			false,
+		},
+		{
+			"CR-only line endings",
+			"some pdf content\rstartxref\r1234\r%%EOF",
+			1234,
+			false,
+		},
+		{
+			"CRLF line endings",
+			"some pdf content\r\nstartxref\r\n1234\r\n%%EOF",
+			1234,
 			false,
 		},
 		{
@@ -854,5 +867,143 @@ func TestParseEntry_InvalidOffset(t *testing.T) {
 	_, err := parser.parseEntry("abcdefghij 00000 n ")
 	if err == nil {
 		t.Error("expected error for invalid offset")
+	}
+}
+
+// crOnlyPDF builds a minimal valid PDF using \r (CR-only) line endings,
+// matching files produced by some generators (e.g. Illustrator, InDesign).
+func crOnlyPDF(t *testing.T, text string) []byte {
+	t.Helper()
+
+	var buf bytes.Buffer
+	offsets := make([]int, 6)
+
+	buf.WriteString("%PDF-1.4\r")
+
+	offsets[1] = buf.Len()
+	buf.WriteString("1 0 obj\r<</Type /Catalog /Pages 2 0 R>>\rendobj\r")
+
+	offsets[2] = buf.Len()
+	buf.WriteString("2 0 obj\r<</Type /Pages /Kids [3 0 R] /Count 1>>\rendobj\r")
+
+	offsets[3] = buf.Len()
+	buf.WriteString("3 0 obj\r<</Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources <</Font <</F1 5 0 R>>>>>>\rendobj\r")
+
+	stream := fmt.Sprintf("BT /F1 12 Tf 100 700 Td (%s) Tj ET", text)
+	offsets[4] = buf.Len()
+	fmt.Fprintf(&buf, "4 0 obj\r<</Length %d>>\rstream\r%s\rendstream\rendobj\r", len(stream), stream)
+
+	offsets[5] = buf.Len()
+	buf.WriteString("5 0 obj\r<</Type /Font /Subtype /Type1 /BaseFont /Helvetica>>\rendobj\r")
+
+	xrefOffset := buf.Len()
+	buf.WriteString("xref\r0 6\r")
+	fmt.Fprintf(&buf, "%010d 65535 f \r", 0)
+	for i := 1; i <= 5; i++ {
+		fmt.Fprintf(&buf, "%010d 00000 n \r", offsets[i])
+	}
+	buf.WriteString("trailer\r<</Size 6 /Root 1 0 R>>\rstartxref\r")
+	fmt.Fprintf(&buf, "%d\r", xrefOffset)
+	buf.WriteString("%%EOF\r")
+
+	return buf.Bytes()
+}
+
+// TestParseXRef_CROnlyLineEndings tests parsing a complete XRef table
+// from a PDF that uses bare CR (\r) line endings.
+func TestParseXRef_CROnlyLineEndings(t *testing.T) {
+	pdf := crOnlyPDF(t, "hello")
+	reader := bytes.NewReader(pdf)
+	parser := NewXRefParser(reader)
+
+	table, err := parser.ParseXRefFromEOF()
+	if err != nil {
+		t.Fatalf("ParseXRefFromEOF() error: %v", err)
+	}
+
+	if table.Size() != 6 {
+		t.Errorf("expected 6 entries, got %d", table.Size())
+	}
+
+	// Verify free entry
+	entry0, ok := table.Get(0)
+	if !ok {
+		t.Fatal("expected entry 0 to exist")
+	}
+	if entry0.InUse {
+		t.Error("expected entry 0 to be free")
+	}
+
+	// Verify in-use entries exist
+	for i := 1; i <= 5; i++ {
+		entry, ok := table.Get(i)
+		if !ok {
+			t.Errorf("expected entry %d to exist", i)
+			continue
+		}
+		if !entry.InUse {
+			t.Errorf("expected entry %d to be in-use", i)
+		}
+	}
+
+	// Verify trailer
+	rootObj := table.Trailer.Get("Root")
+	if rootObj == nil {
+		t.Fatal("expected Root in trailer")
+	}
+}
+
+// TestScanLines tests the custom line scanner
+func TestScanLines(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{"LF only", "a\nb\nc", []string{"a", "b", "c"}},
+		{"CR only", "a\rb\rc", []string{"a", "b", "c"}},
+		{"CRLF only", "a\r\nb\r\nc", []string{"a", "b", "c"}},
+		{"mixed endings", "a\nb\rc\r\nd", []string{"a", "b", "c", "d"}},
+		{"empty lines LF", "a\n\nb", []string{"a", "", "b"}},
+		{"empty lines CR", "a\r\rb", []string{"a", "", "b"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			scanner := bufio.NewScanner(strings.NewReader(tt.input))
+			scanner.Split(scanLines)
+
+			var got []string
+			for scanner.Scan() {
+				got = append(got, scanner.Text())
+			}
+			if err := scanner.Err(); err != nil {
+				t.Fatalf("scanner error: %v", err)
+			}
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %d lines %v, want %d lines %v", len(got), got, len(tt.want), tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("line %d: got %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+// TestIsXRefStream_CROnlyTraditional tests detection of traditional xref
+// with CR-only line endings.
+func TestIsXRefStream_CROnlyTraditional(t *testing.T) {
+	reader := strings.NewReader("xref\r0 6\r")
+	parser := NewXRefParser(reader)
+
+	isStream, err := parser.isXRefStream()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if isStream {
+		t.Error("expected traditional xref, got stream")
 	}
 }
