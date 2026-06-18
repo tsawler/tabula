@@ -3,8 +3,11 @@ package tabula
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/tsawler/tabula/core"
 	"github.com/tsawler/tabula/docx"
@@ -59,9 +62,6 @@ type Extractor struct {
 
 	// Warnings accumulated during processing
 	warnings []Warning
-
-	// OCR client for scanned PDF fallback (lazy initialized)
-	ocrClient *ocr.Client
 }
 
 // clone creates a shallow copy of the Extractor with a deep copy of options.
@@ -82,7 +82,6 @@ func (e *Extractor) clone() *Extractor {
 		options:      e.options.clone(),
 		err:          e.err,
 		warnings:     append([]Warning(nil), e.warnings...),
-		ocrClient:    e.ocrClient,
 	}
 	return newExt
 }
@@ -180,12 +179,6 @@ func (e *Extractor) ensureReader() error {
 // Close releases resources associated with the Extractor.
 // It is safe to call Close multiple times.
 func (e *Extractor) Close() error {
-	// Close OCR client if it was initialized
-	if e.ocrClient != nil {
-		e.ocrClient.Close()
-		e.ocrClient = nil
-	}
-
 	if e.ownsReader {
 		if e.reader != nil {
 			err := e.reader.Close()
@@ -302,6 +295,33 @@ func (e *Extractor) ExcludeHeadersAndFooters() *Extractor {
 	newExt := e.clone()
 	newExt.options.excludeHeaders = true
 	newExt.options.excludeFooters = true
+	return newExt
+}
+
+// OCRLanguage sets the Tesseract language(s) used when OCR'ing scanned pages,
+// e.g. "eng" or "eng+fra". The corresponding tessdata language packs must be
+// installed. Has effect only when built with -tags ocr.
+//
+// Example:
+//
+//	text, _, err := tabula.Open("scan.pdf").OCRLanguage("eng+fra").Text()
+func (e *Extractor) OCRLanguage(lang string) *Extractor {
+	newExt := e.clone()
+	newExt.options.ocrLanguage = lang
+	return newExt
+}
+
+// OCRPageSegMode sets the Tesseract page segmentation mode for OCR (see the
+// ocr.PSM_* constants). Has effect only when built with -tags ocr.
+//
+// Example:
+//
+//	import "github.com/tsawler/tabula/ocr"
+//	text, _, err := tabula.Open("scan.pdf").OCRPageSegMode(ocr.PSM_SINGLE_COLUMN).Text()
+func (e *Extractor) OCRPageSegMode(mode ocr.PageSegMode) *Extractor {
+	newExt := e.clone()
+	newExt.options.ocrPSM = mode
+	newExt.options.ocrPSMSet = true
 	return newExt
 }
 
@@ -550,8 +570,16 @@ func (e *Extractor) Text() (string, []Warning, error) {
 		}
 	}
 
-	// Process each requested page
-	var result strings.Builder
+	// Phase 1 (sequential — touches the reader): extract each page's native text
+	// and, for pages that need it, prepare OCR images. A page's native text and
+	// its OCR result are merged so a stamp/watermark overlay survives.
+	pageTexts := make([]string, len(requestedPages))
+	type ocrCtx struct {
+		pageNum   int
+		fragments []text.TextFragment
+	}
+	var jobs []ocrJob
+	var ctxs []ocrCtx
 	for i, pd := range requestedPages {
 		// Check for messy PDF traits on the first page processed
 		if i == 0 {
@@ -559,56 +587,40 @@ func (e *Extractor) Text() (string, []Warning, error) {
 		}
 
 		fragments := pd.fragments
-
-		// Filter headers/footers
 		if headerFooterResult != nil {
 			height, _ := pd.page.Height()
 			fragments = headerFooterResult.FilterFragments(pd.index, fragments, height)
 		}
 
-		// Sparse or no native text: attempt OCR fallback. This covers fully
-		// scanned pages as well as scans carrying only a native stamp/watermark
-		// overlay, whose body would otherwise be lost. Native text (if any) is
-		// merged with the OCR output so the overlay survives.
+		pageTexts[i] = e.nativePageText(fragments, pd.page)
+
+		// Sparse or no native text: queue an OCR fallback (covers fully scanned
+		// pages and scans carrying only a native stamp/watermark overlay).
 		if e.shouldTryOCR(fragments) {
-			ocrText, ocrErr := e.extractTextViaOCR(pd.page, pd.index+1)
-			if ocrErr == nil && strings.TrimSpace(ocrText) != "" {
-				merged := mergeNativeAndOCR(fragments, ocrText)
-				if i > 0 && result.Len() > 0 {
-					result.WriteString("\n\n")
-				}
-				result.WriteString(merged)
-				continue
+			if prepared := e.prepareOCRImages(pd.page); len(prepared) > 0 {
+				jobs = append(jobs, ocrJob{index: i, images: prepared})
+				ctxs = append(ctxs, ocrCtx{pageNum: pd.index + 1, fragments: fragments})
 			}
 		}
-
-		// Extract text
-		var pageText string
-		if e.options.preserveLayout {
-			width, _ := pd.page.Width()
-			pageText = e.extractPreserveLayout(fragments, width)
-		} else if e.options.joinParagraphs {
-			pageText = e.extractWithParagraphs(fragments, pd.page)
-		} else if e.options.byColumn {
-			pageText = e.extractByColumn(fragments, pd.page)
-		} else {
-			// Auto-detect: use reading order if multi-column or character-level
-			width, _ := pd.page.Width()
-			height, _ := pd.page.Height()
-			if isCharacterLevel(fragments) || detectMultiColumn(fragments, width, height) {
-				pageText = e.extractByColumn(fragments, pd.page)
-			} else {
-				pageText = e.assembleText(fragments)
-			}
-		}
-
-		if i > 0 && result.Len() > 0 && len(pageText) > 0 {
-			result.WriteString("\n\n")
-		}
-		result.WriteString(pageText)
 	}
 
-	return result.String(), e.warnings, nil
+	// Phase 2 (parallel): OCR the queued pages and override their text.
+	results := e.runOCRJobs(jobs)
+	for k, job := range jobs {
+		if strings.TrimSpace(results[job.index]) != "" {
+			pageTexts[job.index] = mergeNativeAndOCR(ctxs[k].fragments, results[job.index])
+			e.warnings = append(e.warnings, ocrWarning(ctxs[k].pageNum))
+		}
+	}
+
+	// Join non-empty pages.
+	var parts []string
+	for _, t := range pageTexts {
+		if len(t) > 0 {
+			parts = append(parts, t)
+		}
+	}
+	return strings.Join(parts, "\n\n"), e.warnings, nil
 }
 
 // extractWithParagraphs uses paragraph detection to join lines within paragraphs
@@ -1606,6 +1618,16 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 	headingDetector := layout.NewHeadingDetector()
 	listDetector := layout.NewListDetector()
 
+	// OCR is queued during this sequential (reader-bound) pass and run in
+	// parallel afterward; a queued page's content is replaced if OCR yields text.
+	type ocrTarget struct {
+		page      *model.Page
+		fragments []text.TextFragment
+		pageNum   int
+	}
+	var ocrJobsList []ocrJob
+	var ocrTargets []ocrTarget
+
 	for _, pageNum := range pageIndices {
 		page, err := e.reader.GetPage(pageNum)
 		if err != nil {
@@ -1635,21 +1657,16 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 		modelPage := model.NewPage(width, height)
 		modelPage.Number = pageNum + 1
 
-		// Sparse or no native text: fall back to OCR so Document()/Chunks()/
-		// ToMarkdown() recover scanned content the same way Text() does. OCR only
-		// contributes when the page has images, so born-digital sparse pages fall
-		// through to normal layout analysis below. The OCR'd text (merged with any
-		// native stamp/watermark) becomes a single paragraph element.
+		// Sparse or no native text: queue an OCR fallback so Document()/Chunks()/
+		// ToMarkdown() recover scanned content the same way Text() does. The page
+		// is still built by normal layout analysis below as the baseline; if OCR
+		// yields text it replaces the page's content in the parallel pass after
+		// the loop (so a scanned page with no native text gets its body, while a
+		// born-digital sparse page keeps its real layout if OCR finds nothing).
 		if e.shouldTryOCR(fragments) {
-			if ocrText, ocrErr := e.extractTextViaOCR(page, pageNum+1); ocrErr == nil && strings.TrimSpace(ocrText) != "" {
-				merged := mergeNativeAndOCR(fragments, ocrText)
-				modelPage.Layout = &model.PageLayout{
-					Paragraphs: []model.ParagraphInfo{{Text: merged, LineCount: strings.Count(merged, "\n") + 1}},
-					Stats:      model.LayoutStats{FragmentCount: len(fragments), ParagraphCount: 1},
-				}
-				modelPage.AddElement(&model.Paragraph{Text: merged})
-				doc.AddPage(modelPage)
-				continue
+			if prepared := e.prepareOCRImages(page); len(prepared) > 0 {
+				ocrJobsList = append(ocrJobsList, ocrJob{index: len(ocrJobsList), images: prepared})
+				ocrTargets = append(ocrTargets, ocrTarget{page: modelPage, fragments: fragments, pageNum: pageNum + 1})
 			}
 		}
 
@@ -1747,6 +1764,22 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 		}
 
 		doc.AddPage(modelPage)
+	}
+
+	// Parallel OCR pass: replace queued pages' content with their OCR text.
+	results := e.runOCRJobs(ocrJobsList)
+	for k, job := range ocrJobsList {
+		if strings.TrimSpace(results[job.index]) == "" {
+			continue
+		}
+		t := ocrTargets[k]
+		merged := mergeNativeAndOCR(t.fragments, results[job.index])
+		t.page.Elements = []model.Element{&model.Paragraph{Text: merged}}
+		t.page.Layout = &model.PageLayout{
+			Paragraphs: []model.ParagraphInfo{{Text: merged, LineCount: strings.Count(merged, "\n") + 1}},
+			Stats:      model.LayoutStats{FragmentCount: len(t.fragments), ParagraphCount: 1},
+		}
+		e.warnings = append(e.warnings, ocrWarning(t.pageNum))
 	}
 
 	return doc, e.warnings, nil
@@ -2313,49 +2346,193 @@ func mergeNativeAndOCR(fragments []text.TextFragment, ocrText string) string {
 	}
 }
 
-// extractTextViaOCR attempts to extract text from a page using OCR.
-// It extracts images from the page, converts them to PNG, and runs OCR.
-// Returns the extracted text or an error if OCR fails or no images are found.
-func (e *Extractor) extractTextViaOCR(page *pages.Page, pageNum int) (string, error) {
-	// Extract images from the page
+// maxOCRWorkers caps the goroutines used for parallel page OCR. Each worker
+// holds its own Tesseract client (memory-heavy), so this bounds resource use.
+const maxOCRWorkers = 4
+
+// preparedImage is a page image rendered to PNG and ready for OCR, with the
+// effective DPI to hint Tesseract (0 = unknown).
+type preparedImage struct {
+	png []byte
+	dpi int
+}
+
+// ocrJob is one page's prepared images awaiting OCR, identified by index.
+type ocrJob struct {
+	index  int
+	images []preparedImage
+}
+
+// prepareOCRImages extracts and pre-processes a page's images for OCR. It must
+// run on the single reader goroutine (it seeks the file); the returned PNGs are
+// then safe to OCR concurrently. Returns nil when the page has no images.
+func (e *Extractor) prepareOCRImages(page *pages.Page) []preparedImage {
 	images, err := e.reader.ExtractPageImages(page)
 	if err != nil || len(images) == 0 {
-		return "", err
+		return nil
 	}
+	// Rotate to match the page's /Rotate so OCR sees upright text.
+	rotation := page.Rotate()
+	pageW, _ := page.Width()
+	pageH, _ := page.Height()
 
-	// Lazily initialize OCR client
-	if e.ocrClient == nil {
-		client, err := ocr.New()
-		if err != nil {
-			return "", fmt.Errorf("failed to initialize OCR: %w", err)
-		}
-		e.ocrClient = client
-	}
-
-	var texts []string
+	var prepared []preparedImage
 	for _, img := range images {
-		// Convert image to PNG
-		pngData, err := img.ToPNG()
+		dpi := estimateImageDPI(img.Width, img.Height, pageW, pageH)
+		scale := ocrUpscale(dpi)
+		png, err := img.ToPNGForOCR(rotation, scale)
 		if err != nil {
 			continue
 		}
-
-		// Run OCR on the image
-		text, err := e.ocrClient.RecognizeImage(pngData)
-		if err == nil && text != "" {
-			texts = append(texts, text)
+		eff := 0
+		if dpi >= minPlausibleDPI {
+			eff = int(float64(dpi)*scale + 0.5)
 		}
+		prepared = append(prepared, preparedImage{png: png, dpi: eff})
+	}
+	return prepared
+}
+
+// runOCRJobs runs Tesseract over the prepared page images concurrently and
+// returns the recognized text keyed by job index. Each worker uses its own OCR
+// client (Tesseract is not safe to share across goroutines). Returns an empty
+// map when OCR is unavailable (e.g. built without -tags ocr).
+func (e *Extractor) runOCRJobs(jobs []ocrJob) map[int]string {
+	results := make(map[int]string, len(jobs))
+	if len(jobs) == 0 {
+		return results
 	}
 
-	if len(texts) == 0 {
-		return "", nil
+	workers := runtime.NumCPU()
+	if workers > maxOCRWorkers {
+		workers = maxOCRWorkers
+	}
+	if workers > len(jobs) {
+		workers = len(jobs)
 	}
 
-	// Add warning about OCR fallback
-	e.warnings = append(e.warnings, Warning{
+	// Pre-create one client per worker; if none can start, OCR is unavailable.
+	var clients []*ocr.Client
+	for i := 0; i < workers; i++ {
+		c, err := ocr.New()
+		if err != nil {
+			break
+		}
+		if e.options.ocrLanguage != "" {
+			_ = c.SetLanguage(e.options.ocrLanguage)
+		}
+		if e.options.ocrPSMSet {
+			_ = c.SetPageSegMode(e.options.ocrPSM)
+		}
+		clients = append(clients, c)
+	}
+	if len(clients) == 0 {
+		return results
+	}
+	defer func() {
+		for _, c := range clients {
+			c.Close()
+		}
+	}()
+
+	jobCh := make(chan ocrJob)
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	for _, c := range clients {
+		wg.Add(1)
+		go func(client *ocr.Client) {
+			defer wg.Done()
+			for job := range jobCh {
+				var texts []string
+				for _, pi := range job.images {
+					if pi.dpi > 0 {
+						_ = client.SetVariable("user_defined_dpi", strconv.Itoa(pi.dpi))
+					}
+					if t, err := client.RecognizeImage(pi.png); err == nil && t != "" {
+						texts = append(texts, t)
+					}
+				}
+				text := strings.Join(texts, "\n")
+				mu.Lock()
+				results[job.index] = text
+				mu.Unlock()
+			}
+		}(c)
+	}
+	for _, job := range jobs {
+		jobCh <- job
+	}
+	close(jobCh)
+	wg.Wait()
+	return results
+}
+
+// nativePageText extracts a page's text from its fragments using the configured
+// layout strategy.
+func (e *Extractor) nativePageText(fragments []text.TextFragment, page *pages.Page) string {
+	switch {
+	case e.options.preserveLayout:
+		width, _ := page.Width()
+		return e.extractPreserveLayout(fragments, width)
+	case e.options.joinParagraphs:
+		return e.extractWithParagraphs(fragments, page)
+	case e.options.byColumn:
+		return e.extractByColumn(fragments, page)
+	default:
+		width, _ := page.Width()
+		height, _ := page.Height()
+		if isCharacterLevel(fragments) || detectMultiColumn(fragments, width, height) {
+			return e.extractByColumn(fragments, page)
+		}
+		return e.assembleText(fragments)
+	}
+}
+
+// ocrWarning builds the per-page OCR-fallback warning.
+func ocrWarning(pageNum int) Warning {
+	return Warning{
 		Code:    WarningOCRFallback,
 		Message: fmt.Sprintf("Page %d: Used OCR fallback (scanned content)", pageNum),
-	})
+	}
+}
 
-	return strings.Join(texts, "\n"), nil
+const (
+	// minPlausibleDPI is the lowest estimated DPI we trust as a full-page scan;
+	// below it the image is probably a partial/decorative image, so we neither
+	// upscale nor hint a (bogus) resolution.
+	minPlausibleDPI = 60
+	// targetOCRDPI is the resolution low-DPI scans are upscaled toward.
+	targetOCRDPI = 300
+)
+
+// estimateImageDPI estimates an image's resolution (DPI) from its pixel size
+// relative to the page size in points (72 pt = 1 inch), assuming the image spans
+// the page — true for full-page scans. Returns 0 when the page size is unknown.
+func estimateImageDPI(pxW, pxH int, pageWpts, pageHpts float64) int {
+	best := 0
+	if pageWpts > 0 {
+		if d := int(float64(pxW)*72/pageWpts + 0.5); d > best {
+			best = d
+		}
+	}
+	if pageHpts > 0 {
+		if d := int(float64(pxH)*72/pageHpts + 0.5); d > best {
+			best = d
+		}
+	}
+	return best
+}
+
+// ocrUpscale returns the factor to enlarge an image of the given estimated DPI
+// toward targetOCRDPI (capped at 3x). Images already near/above target, of
+// unknown DPI, or of implausibly low DPI are left unscaled.
+func ocrUpscale(dpi int) float64 {
+	if dpi < minPlausibleDPI || dpi >= targetOCRDPI-50 {
+		return 1.0
+	}
+	s := float64(targetOCRDPI) / float64(dpi)
+	if s > 3.0 {
+		s = 3.0
+	}
+	return s
 }

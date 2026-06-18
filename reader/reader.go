@@ -1,10 +1,13 @@
 package reader
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"os"
 	"regexp"
+	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/tsawler/tabula/core"
@@ -232,20 +235,162 @@ func (r *Reader) loadXRef() (*core.XRefTable, error) {
 	xrefParser := core.NewXRefParser(r.file)
 	table, err := xrefParser.ParseXRefFromEOF()
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse xref: %w", err)
+		// The real xref is missing or corrupt; reconstruct it by scanning.
+		return r.rebuildXRef()
 	}
 
 	// Handle incremental updates if present
-	if table.Trailer.Get("Prev") != nil {
-		tables, err := xrefParser.ParseAllXRefs()
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse all xrefs: %w", err)
+	if table.Trailer != nil && table.Trailer.Get("Prev") != nil {
+		if tables, err := xrefParser.ParseAllXRefs(); err == nil {
+			table = core.MergeXRefTables(tables...)
 		}
-		// Merge all tables
-		table = core.MergeXRefTables(tables...)
+	}
+
+	// If the xref parsed but is unusable (no document catalog reachable), fall
+	// back to a scan-based rebuild.
+	if table.Trailer == nil || table.Trailer.Get("Root") == nil {
+		if rebuilt, rerr := r.rebuildXRef(); rerr == nil {
+			return rebuilt, nil
+		}
 	}
 
 	return table, nil
+}
+
+// objHeaderRe matches a PDF indirect-object header ("N G obj") at the start of a
+// line, used to reconstruct a damaged cross-reference table.
+var objHeaderRe = regexp.MustCompile(`(?m)^[ \t]*(\d+)[ \t]+(\d+)[ \t]+obj\b`)
+
+// rebuildXRef reconstructs the cross-reference table by scanning the whole file
+// for object headers — a recovery path for PDFs whose xref is missing,
+// truncated, or malformed. It also expands object streams so compressed objects
+// are reachable, and recovers the trailer (a real one if present, otherwise
+// synthesized from the document catalog).
+func (r *Reader) rebuildXRef() (*core.XRefTable, error) {
+	if _, err := r.file.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	data, err := io.ReadAll(r.file)
+	if err != nil {
+		return nil, err
+	}
+
+	table := core.NewXRefTable()
+	for _, m := range objHeaderRe.FindAllSubmatchIndex(data, -1) {
+		num, err1 := strconv.Atoi(string(data[m[2]:m[3]]))
+		gen, err2 := strconv.Atoi(string(data[m[4]:m[5]]))
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		// A later occurrence (incremental update) supersedes an earlier one.
+		table.Entries[num] = &core.XRefEntry{
+			Type:       core.XRefEntryUncompressed,
+			Offset:     int64(m[2]), // start of the object number
+			Generation: gen,
+			InUse:      true,
+		}
+	}
+	if len(table.Entries) == 0 {
+		return nil, fmt.Errorf("xref rebuild: no objects found")
+	}
+
+	// Activate the table (with fresh caches) so we can resolve objects while
+	// finishing the recovery.
+	r.xrefTable = table
+	r.objCache = make(map[int]core.Object)
+	r.objStmCache = make(map[int]*core.ObjectStream)
+
+	r.expandObjectStreams(table)
+
+	trailer := recoverTrailer(data)
+	if trailer == nil || trailer.Get("Root") == nil {
+		if root := r.findCatalog(table); root != nil {
+			trailer = core.Dict{"Root": *root}
+		}
+	}
+	if trailer == nil || trailer.Get("Root") == nil {
+		return nil, fmt.Errorf("xref rebuild: no document catalog found")
+	}
+	table.Trailer = trailer
+	return table, nil
+}
+
+// expandObjectStreams adds compressed-object entries for every object held in an
+// object stream found during the rebuild scan, so they become resolvable.
+func (r *Reader) expandObjectStreams(table *core.XRefTable) {
+	nums := make([]int, 0, len(table.Entries))
+	for n := range table.Entries {
+		nums = append(nums, n)
+	}
+	for _, n := range nums {
+		obj, err := r.GetObject(n)
+		if err != nil {
+			continue
+		}
+		stream, ok := obj.(*core.Stream)
+		if !ok {
+			continue
+		}
+		if t, _ := stream.Dict.Get("Type").(core.Name); string(t) != "ObjStm" {
+			continue
+		}
+		os, err := core.NewObjectStream(stream)
+		if err != nil {
+			continue
+		}
+		members, err := os.ObjectNumbers()
+		if err != nil {
+			continue
+		}
+		for i, onum := range members {
+			if _, exists := table.Entries[onum]; exists {
+				continue // an uncompressed definition wins
+			}
+			table.Entries[onum] = &core.XRefEntry{
+				Type:       core.XRefEntryCompressed,
+				Offset:     int64(n), // object stream number
+				Generation: i,        // index within the stream
+				InUse:      true,
+			}
+		}
+	}
+}
+
+// findCatalog scans resolved objects for the document catalog and returns a
+// reference to it.
+func (r *Reader) findCatalog(table *core.XRefTable) *core.IndirectRef {
+	nums := make([]int, 0, len(table.Entries))
+	for n := range table.Entries {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+	for _, n := range nums {
+		obj, err := r.GetObject(n)
+		if err != nil {
+			continue
+		}
+		if d, ok := obj.(core.Dict); ok {
+			if t, _ := d.Get("Type").(core.Name); string(t) == "Catalog" {
+				return &core.IndirectRef{Number: n, Generation: 0}
+			}
+		}
+	}
+	return nil
+}
+
+// recoverTrailer parses the last "trailer" dictionary in the file, if any.
+func recoverTrailer(data []byte) core.Dict {
+	idx := bytes.LastIndex(data, []byte("trailer"))
+	if idx < 0 {
+		return nil
+	}
+	p := core.NewParser(bytes.NewReader(data[idx+len("trailer"):]))
+	obj, err := p.ParseObject()
+	if err != nil {
+		return nil
+	}
+	d, _ := obj.(core.Dict)
+	return d
 }
 
 // Version returns the PDF version

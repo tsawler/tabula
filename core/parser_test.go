@@ -765,18 +765,21 @@ func TestParseStreamWithBinaryData(t *testing.T) {
 }
 
 func TestParseStreamWithIndirectLengthNoResolver(t *testing.T) {
-	// Stream with indirect length reference but no resolver set
+	// Stream with an indirect /Length but no resolver: rather than failing, the
+	// parser leniently scans to 'endstream' and recovers the data.
 	input := "1 0 obj\n<< /Length 5 0 R >>\nstream\nHello\nendstream\nendobj"
 	parser := NewParser(strings.NewReader(input))
 
-	_, err := parser.ParseIndirectObject()
-	if err == nil {
-		t.Fatal("expected error when no resolver set")
+	obj, err := parser.ParseIndirectObject()
+	if err != nil {
+		t.Fatalf("expected lenient recovery, got error: %v", err)
 	}
-
-	expectedMsg := "indirect reference for stream length requires a reference resolver"
-	if !strings.Contains(err.Error(), expectedMsg) {
-		t.Errorf("expected error containing %q, got %q", expectedMsg, err.Error())
+	stream, ok := obj.Object.(*Stream)
+	if !ok {
+		t.Fatalf("expected *Stream, got %T", obj.Object)
+	}
+	if string(stream.Data) != "Hello" {
+		t.Errorf("recovered data = %q, want %q", stream.Data, "Hello")
 	}
 }
 
@@ -814,5 +817,23 @@ func BenchmarkParserIndirectObject(b *testing.B) {
 	for i := 0; i < b.N; i++ {
 		parser := NewParser(strings.NewReader(input))
 		parser.ParseIndirectObject()
+	}
+}
+
+// TestParseStreamMissingLength: a stream with no /Length is recovered by
+// scanning to 'endstream' (lenient parsing of malformed PDFs).
+func TestParseStreamMissingLength(t *testing.T) {
+	input := "1 0 obj\n<< /Type /Foo >>\nstream\nHello World\nendstream\nendobj"
+	parser := NewParser(strings.NewReader(input))
+	obj, err := parser.ParseIndirectObject()
+	if err != nil {
+		t.Fatalf("expected lenient recovery, got error: %v", err)
+	}
+	stream, ok := obj.Object.(*Stream)
+	if !ok {
+		t.Fatalf("expected *Stream, got %T", obj.Object)
+	}
+	if string(stream.Data) != "Hello World" {
+		t.Errorf("recovered data = %q, want %q", stream.Data, "Hello World")
 	}
 }

@@ -18,7 +18,9 @@ A Go text extraction library with a fluent API, designed for RAG (Retrieval-Augm
 - **RAG-Ready Chunking** - Semantic document chunking with metadata
 - **Markdown Export** - Convert extracted content to markdown
 - **PDF 1.0-1.7 Support** - Including modern XRef streams (PDF 1.5+)
-- **Optional OCR** - Text extraction from scanned PDFs via Tesseract (build with `-tags ocr`)
+- **Encrypted PDFs** - Opens RC4 and AES (V2/V3) encrypted files secured with an empty user/owner password
+- **Damaged-PDF Recovery** - Rebuilds a missing/corrupt cross-reference table by scanning, and recovers streams with a missing or wrong `/Length`
+- **Optional OCR** - Text extraction from scanned PDFs via Tesseract, feeding `Text()`, `ToMarkdown()`, and `Chunks()` alike. Decodes JBIG2 and JPEG2000 scans, auto-rotates per `/Rotate`, and upscales low-DPI images; language and page-segmentation mode are configurable (build with `-tags ocr`)
 
 ## Installation
 
@@ -288,6 +290,8 @@ ext := tabula.FromHTMLReader(resp.Body)
 | `JoinParagraphs()` | Join text fragments into paragraphs | PDF |
 | `ByColumn()` | Process multi-column layouts column by column | PDF |
 | `PreserveLayout()` | Maintain spatial positioning | PDF |
+| `OCRLanguage("eng+fra")` | Tesseract language(s) for scanned-page OCR | PDF (with `-tags ocr`) |
+| `OCRPageSegMode(ocr.PSM_AUTO)` | Tesseract page-segmentation mode | PDF (with `-tags ocr`) |
 
 **Note:** HTML files are single-page documents, so page selection options don't apply. For HTML navigation/header/footer removal, use the `htmldoc` package directly with `NavigationExclusionMode` options (see below).
 
@@ -365,7 +369,7 @@ markdown, _ := reader.MarkdownWithOptions(opts)
 
 ### OCR Fallback for Scanned PDFs
 
-When built with `-tags ocr`, Tabula automatically uses OCR when a PDF page contains no native text (i.e., scanned documents). This happens transparently—no code changes needed:
+When built with `-tags ocr`, Tabula automatically OCRs scanned PDF pages. It applies to every text path — `Text()`, `ToMarkdown()`, and `Chunks()` — so scanned content flows into your RAG chunks transparently, no code changes needed:
 
 ```go
 // Works automatically on scanned PDFs (when built with -tags ocr)
@@ -393,17 +397,50 @@ go build -tags ocr
 
 **How it works:**
 1. For each page, Tabula first attempts native PDF text extraction
-2. If a page has no text fragments (common in scanned PDFs), it extracts embedded images
-3. Images are converted to PNG and processed through Tesseract OCR
+2. If a page has no native text — or only a sparse stamp/watermark over a scan — it extracts the page's images (including those nested in Form XObjects)
+3. Images are uprighted per the page `/Rotate`, low-resolution scans are upscaled toward ~300 DPI, then processed through Tesseract OCR
 4. A `WarningOCRFallback` is added to indicate which pages used OCR
+
+**Configuring OCR:**
+```go
+import "github.com/tsawler/tabula/ocr"
+
+text, _, err := tabula.Open("scan.pdf").
+    OCRLanguage("eng+fra").              // language packs (requires tessdata)
+    OCRPageSegMode(ocr.PSM_SINGLE_COLUMN). // page-segmentation mode
+    Text()
+```
 
 **Without the `ocr` build tag:** OCR is disabled and `ocr.New()` returns `ocr.ErrOCRNotEnabled`. Scanned PDF pages will return empty text.
 
 **Supported image formats in PDFs:**
 - CCITT Group 3/4 fax (common in scanned documents)
 - DCT (JPEG)
-- Grayscale, RGB, and CMYK color spaces
-- 1-bit, 4-bit, and 8-bit depths
+- JBIG2 and JPEG2000 (via jbig2dec and openjpeg; requires `-tags ocr`)
+- Grayscale, RGB, CMYK, and Indexed (palette) color spaces, with `/Decode` and image masks honored
+- 1-bit, 2-bit, 4-bit, and 8-bit depths
+
+### Encrypted PDFs
+
+Tabula transparently decrypts PDFs that use the standard security handler with an
+empty user (or owner) password — the common "restricted permissions, open to all"
+case. RC4 and AES (V2/V3, i.e. revisions 2–6) are supported. No API or build tag
+is needed; `tabula.Open(...)` just works:
+
+```go
+text, _, err := tabula.Open("encrypted.pdf").Text()
+```
+
+A PDF that genuinely requires a password (neither the empty user nor owner
+password unlocks it) returns an error.
+
+### Damaged PDFs
+
+When a file's cross-reference table is missing, truncated, or corrupt, Tabula
+rebuilds it by scanning the file for objects (expanding object streams so
+compressed objects remain reachable) and recovering the trailer from the document
+catalog. Streams whose `/Length` is missing or wrong are recovered by scanning to
+the `endstream` keyword. These fallbacks are automatic.
 
 ## RAG Integration
 
