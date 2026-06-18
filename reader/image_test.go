@@ -2,6 +2,7 @@ package reader
 
 import (
 	"image"
+	"image/color"
 	"testing"
 )
 
@@ -391,5 +392,83 @@ func TestPageImage_toIndexedImage_4bit(t *testing.T) {
 	}
 	if c := goImg.RGBAAt(1, 0); c.R != 0x00 {
 		t.Errorf("pixel 1: got R=%d, want 0 (index 0=black)", c.R)
+	}
+}
+
+// --- #5: rotateImage ---
+
+// rotateImage rotates clockwise; verify direction with a 2x2 gray image.
+func TestRotateImage(t *testing.T) {
+	// src:  (0,0)=10 (1,0)=20 / (0,1)=30 (1,1)=40
+	src := image.NewGray(image.Rect(0, 0, 2, 2))
+	src.SetGray(0, 0, color.Gray{10})
+	src.SetGray(1, 0, color.Gray{20})
+	src.SetGray(0, 1, color.Gray{30})
+	src.SetGray(1, 1, color.Gray{40})
+
+	gray := func(im image.Image, x, y int) uint8 {
+		r, _, _, _ := im.At(x, y).RGBA()
+		return uint8(r >> 8)
+	}
+
+	// 0 degrees is a no-op (same image returned).
+	if got := rotateImage(src, 0); got != image.Image(src) {
+		t.Error("0° should return the source unchanged")
+	}
+
+	// 90° clockwise: left column moves to the top row.
+	r90 := rotateImage(src, 90)
+	for _, c := range []struct {
+		x, y int
+		want uint8
+	}{
+		{0, 0, 30}, {1, 0, 10}, {0, 1, 40}, {1, 1, 20},
+	} {
+		if got := gray(r90, c.x, c.y); got != c.want {
+			t.Errorf("90° (%d,%d) = %d, want %d", c.x, c.y, got, c.want)
+		}
+	}
+
+	// 180°: point reflection.
+	r180 := rotateImage(src, 180)
+	for _, c := range []struct {
+		x, y int
+		want uint8
+	}{
+		{0, 0, 40}, {1, 0, 30}, {0, 1, 20}, {1, 1, 10},
+	} {
+		if got := gray(r180, c.x, c.y); got != c.want {
+			t.Errorf("180° (%d,%d) = %d, want %d", c.x, c.y, got, c.want)
+		}
+	}
+
+	// 270° clockwise (= 90° CCW): inverse of 90°.
+	r270 := rotateImage(src, 270)
+	for _, c := range []struct {
+		x, y int
+		want uint8
+	}{
+		{0, 0, 20}, {1, 0, 40}, {0, 1, 10}, {1, 1, 30},
+	} {
+		if got := gray(r270, c.x, c.y); got != c.want {
+			t.Errorf("270° (%d,%d) = %d, want %d", c.x, c.y, got, c.want)
+		}
+	}
+}
+
+// --- #6: scaleImage ---
+
+func TestScaleImage(t *testing.T) {
+	src := image.NewGray(image.Rect(0, 0, 10, 8))
+	up := scaleImage(src, 2.0)
+	if b := up.Bounds(); b.Dx() != 20 || b.Dy() != 16 {
+		t.Errorf("scaled dims = %dx%d, want 20x16", b.Dx(), b.Dy())
+	}
+	// Scale <= 1 is a no-op (never downscale here).
+	if got := scaleImage(src, 1.0); got != image.Image(src) {
+		t.Error("scale 1.0 should return the source unchanged")
+	}
+	if got := scaleImage(src, 0.5); got != image.Image(src) {
+		t.Error("scale < 1 should return the source unchanged")
 	}
 }

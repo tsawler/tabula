@@ -368,51 +368,54 @@ func (p *Parser) parseStream(dict Dict) (*Stream, error) {
 		return nil, fmt.Errorf("expected 'stream' keyword")
 	}
 
-	// Get the length from the dictionary
-	lengthObj := dict.Get("Length")
-	if lengthObj == nil {
-		return nil, fmt.Errorf("stream dictionary missing 'Length' entry")
-	}
-
-	var length int
-	switch v := lengthObj.(type) {
+	// Determine the stream length. A missing, non-integer, or unresolvable
+	// /Length is handled leniently below by scanning to 'endstream' — real-world
+	// PDFs are frequently malformed this way.
+	length, lenient := -1, false
+	switch v := dict.Get("Length").(type) {
+	case nil:
+		lenient = true
 	case Int:
 		length = int(v)
 	case IndirectRef:
-		// Length is an indirect reference - resolve it using the resolver
 		if p.resolver == nil {
-			return nil, fmt.Errorf("indirect reference for stream length requires a reference resolver")
+			lenient = true
+			break
 		}
-		resolved, err := p.resolver.ResolveReference(v)
-		if err != nil {
-			return nil, fmt.Errorf("failed to resolve stream length reference: %w", err)
+		if resolved, err := p.resolver.ResolveReference(v); err == nil {
+			if n, ok := resolved.(Int); ok {
+				length = int(n)
+			} else {
+				lenient = true
+			}
+		} else {
+			lenient = true
 		}
-		resolvedInt, ok := resolved.(Int)
-		if !ok {
-			return nil, fmt.Errorf("stream length reference resolved to %T, expected Int", resolved)
-		}
-		length = int(resolvedInt)
 	default:
-		return nil, fmt.Errorf("invalid type for stream length: %T", lengthObj)
+		lenient = true
 	}
-
 	if length < 0 {
-		return nil, fmt.Errorf("invalid stream length: %d", length)
+		lenient = true
 	}
 
-	// Per PDF spec, the 'stream' keyword is followed by either:
-	// - A single LF (0x0A), or
-	// - A CR+LF sequence (0x0D 0x0A)
-	// Then exactly 'length' bytes of stream data follow.
-	//
-	// Since we stopped loading peekToken when we saw 'stream', the lexer
-	// is positioned right after the 'stream' keyword. We need to:
-	// 1. Skip the mandatory EOL
-	// 2. Read exactly 'length' bytes
-
-	// Skip the EOL after 'stream'
+	// The 'stream' keyword is followed by a single LF or a CR+LF, then the
+	// binary data. Skip that EOL.
 	if err := p.lexer.SkipStreamEOL(); err != nil {
 		return nil, fmt.Errorf("failed to skip EOL after stream keyword: %w", err)
+	}
+
+	// Lenient path: /Length is missing or invalid, so read up to 'endstream'.
+	if lenient {
+		data, err := p.lexer.ReadUntilEndstream()
+		if err != nil {
+			return nil, fmt.Errorf("failed to read stream data: %w", err)
+		}
+		// ReadUntilEndstream consumed through the 'endstream' keyword; resync.
+		p.currentToken = nil
+		p.peekToken = nil
+		p.nextToken()
+		p.nextToken()
+		return &Stream{Dict: dict, Data: data}, nil
 	}
 
 	// Read exactly 'length' bytes of stream data

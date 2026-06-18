@@ -76,3 +76,8 @@ func (c *Client) SetLanguage(lang string) error {
 func (c *Client) SetPageSegMode(mode PageSegMode) error {
 	return ErrOCRNotEnabled
 }
+
+// SetVariable returns an error indicating OCR support is not enabled.
+func (c *Client) SetVariable(name, value string) error {
+	return ErrOCRNotEnabled
+}

@@ -602,6 +602,34 @@ func (l *Lexer) ReadBytes(n int) ([]byte, error) {
 	return data, nil
 }
 
+// ReadUntilEndstream reads forward until the 'endstream' keyword, returning the
+// stream data that precedes it with the single trailing EOL stripped. It is used
+// to recover streams whose /Length is missing or invalid; the lexer is left
+// positioned just after 'endstream'.
+func (l *Lexer) ReadUntilEndstream() ([]byte, error) {
+	marker := []byte("endstream")
+	var buf []byte
+	for {
+		b, err := l.reader.ReadByte()
+		if err != nil {
+			return nil, fmt.Errorf("unexpected EOF searching for endstream")
+		}
+		l.pos++
+		buf = append(buf, b)
+		if len(buf) >= len(marker) && bytes.HasSuffix(buf, marker) {
+			data := buf[:len(buf)-len(marker)]
+			// Strip the single EOL (LF or CR+LF) that precedes 'endstream'.
+			if n := len(data); n > 0 && data[n-1] == '\n' {
+				data = data[:n-1]
+			}
+			if n := len(data); n > 0 && data[n-1] == '\r' {
+				data = data[:n-1]
+			}
+			return data, nil
+		}
+	}
+}
+
 // SkipBytes discards exactly n bytes from the underlying reader.
 func (l *Lexer) SkipBytes(n int) error {
 	for i := 0; i < n; i++ {

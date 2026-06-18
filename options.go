@@ -1,5 +1,7 @@
 package tabula
 
+import "github.com/tsawler/tabula/ocr"
+
 // ExtractOptions holds configuration for text extraction.
 type ExtractOptions struct {
 	// Page selection (1-indexed in API, stored as-is)
@@ -13,6 +15,11 @@ type ExtractOptions struct {
 	byColumn       bool
 	preserveLayout bool
 	joinParagraphs bool // Join lines within paragraphs with spaces instead of newlines
+
+	// OCR options (scanned-PDF fallback only; effective with -tags ocr)
+	ocrLanguage string          // Tesseract language(s), e.g. "eng" or "eng+fra"
+	ocrPSM      ocr.PageSegMode // page segmentation mode
+	ocrPSMSet   bool            // whether ocrPSM was explicitly set
 }
 
 // defaultOptions returns the default extraction options.
@@ -35,6 +42,9 @@ func (o ExtractOptions) clone() ExtractOptions {
 		byColumn:       o.byColumn,
 		preserveLayout: o.preserveLayout,
 		joinParagraphs: o.joinParagraphs,
+		ocrLanguage:    o.ocrLanguage,
+		ocrPSM:         o.ocrPSM,
+		ocrPSMSet:      o.ocrPSMSet,
 	}
 
 	// Deep copy pages slice

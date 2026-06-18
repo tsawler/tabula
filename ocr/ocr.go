@@ -96,3 +96,9 @@ func (c *Client) SetLanguage(lang string) error {
 func (c *Client) SetPageSegMode(mode PageSegMode) error {
 	return c.client.SetPageSegMode(gosseract.PageSegMode(mode))
 }
+
+// SetVariable sets a Tesseract configuration variable, e.g.
+// SetVariable("user_defined_dpi", "300") to hint the image resolution.
+func (c *Client) SetVariable(name, value string) error {
+	return c.client.SetVariable(gosseract.SettableVariable(name), value)
+}

@@ -7,6 +7,9 @@ import (
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"sort"
+
+	xdraw "golang.org/x/image/draw"
 
 	"github.com/tsawler/tabula/core"
 	"github.com/tsawler/tabula/imagecodec"
@@ -43,65 +46,82 @@ type PageImage struct {
 	Globals []byte
 }
 
-// ExtractPageImages extracts all image XObjects from a page.
-// It returns a slice of PageImage containing decoded image data.
+// maxFormDepth bounds recursion into nested Form XObjects (cycle/runaway guard).
+const maxFormDepth = 12
+
+// ExtractPageImages extracts all image XObjects reachable from a page, including
+// those nested inside Form XObjects, in deterministic order.
 func (r *Reader) ExtractPageImages(page *pages.Page) ([]PageImage, error) {
 	resources, err := page.Resources()
 	if err != nil {
 		return nil, nil // Page has no resources
 	}
-
-	xobjectObj := resources.Get("XObject")
-	if xobjectObj == nil {
-		return nil, nil // No XObjects in resources
-	}
-
-	// Resolve XObject dict if it's a reference
-	xobjectResolved, err := r.Resolve(xobjectObj)
-	if err != nil {
-		return nil, fmt.Errorf("failed to resolve XObject dictionary: %w", err)
-	}
-
-	xobjects, ok := xobjectResolved.(core.Dict)
-	if !ok {
-		return nil, nil // XObject is not a dictionary
-	}
-
 	var images []PageImage
+	r.collectImages(resources, &images, 0)
+	return images, nil
+}
 
-	for name, xobj := range xobjects {
-		// Resolve XObject
-		resolved, err := r.Resolve(xobj)
+// collectImages appends every image XObject reachable from a resource
+// dictionary, recursing into Form XObjects (a scan is sometimes wrapped in one).
+// XObjects are visited in sorted name order so multi-image pages — e.g. scans
+// split into horizontal strips — extract deterministically instead of in Go's
+// random map order.
+func (r *Reader) collectImages(resources core.Dict, out *[]PageImage, depth int) {
+	if resources == nil || depth > maxFormDepth {
+		return
+	}
+	xobj := resources.Get("XObject")
+	if xobj == nil {
+		return
+	}
+	resolved, err := r.Resolve(xobj)
+	if err != nil {
+		return
+	}
+	xobjects, ok := resolved.(core.Dict)
+	if !ok {
+		return
+	}
+
+	names := make([]string, 0, len(xobjects))
+	for name := range xobjects {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		resolved, err := r.Resolve(xobjects[name])
 		if err != nil {
-			continue // Skip XObjects that can't be resolved
-		}
-
-		stream, ok := resolved.(*core.Stream)
-		if !ok {
-			continue // Not a stream
-		}
-
-		// Check if it's an image
-		subtype := stream.Dict.Get("Subtype")
-		if subtype == nil {
 			continue
 		}
-
-		subtypeName, ok := subtype.(core.Name)
-		if !ok || string(subtypeName) != "Image" {
-			continue // Not an image
+		stream, ok := resolved.(*core.Stream)
+		if !ok {
+			continue
 		}
-
-		// Extract image properties
-		img, err := r.extractImage(name, stream)
-		if err != nil {
-			continue // Skip images that fail to extract
+		switch subtype, _ := stream.Dict.Get("Subtype").(core.Name); string(subtype) {
+		case "Image":
+			if img, err := r.extractImage(name, stream); err == nil {
+				*out = append(*out, *img)
+			}
+		case "Form":
+			if formRes, ok := r.resolveDict(stream.Dict.Get("Resources")); ok {
+				r.collectImages(formRes, out, depth+1)
+			}
 		}
-
-		images = append(images, *img)
 	}
+}
 
-	return images, nil
+// resolveDict resolves obj (possibly indirect) to a dictionary.
+func (r *Reader) resolveDict(obj core.Object) (core.Dict, bool) {
+	if obj == nil {
+		return nil, false
+	}
+	resolved, err := r.Resolve(obj)
+	if err != nil {
+		return nil, false
+	}
+	d, ok := resolved.(core.Dict)
+	return d, ok
 }
 
 // resolveInt resolves obj (which may be an indirect reference) and returns its
@@ -389,9 +409,9 @@ func (r *Reader) parseColorSpace(obj core.Object) string {
 	return "DeviceGray"
 }
 
-// ToPNG converts the decoded pixel data to PNG format.
-// This is suitable for use with OCR engines like Tesseract.
-func (img *PageImage) ToPNG() ([]byte, error) {
+// decode converts the image's data to a Go image based on its filter and color
+// space, applying the Separation inversion.
+func (img *PageImage) decode() (image.Image, error) {
 	var goImg image.Image
 	var err error
 
@@ -427,19 +447,93 @@ func (img *PageImage) ToPNG() ([]byte, error) {
 		return nil, err
 	}
 
-	// Separation colorspace represents ink density (high = more ink = darker)
-	// For OCR, we need to invert so text appears dark on light background
+	// Separation colorspace represents ink density (high = more ink = darker);
+	// invert so text appears dark on a light background for OCR.
 	if img.ColorSpace == "Separation" {
 		goImg = invertImage(goImg)
 	}
+	return goImg, nil
+}
 
-	// Encode as PNG
+// ToPNG converts the decoded pixel data to PNG format, suitable for OCR engines.
+func (img *PageImage) ToPNG() ([]byte, error) {
+	goImg, err := img.decode()
+	if err != nil {
+		return nil, err
+	}
+	return encodePNG(goImg)
+}
+
+// ToPNGForOCR prepares the image for OCR: it decodes, uprights it by rotation
+// (clockwise degrees, for pages that declare a /Rotate), and upscales it by
+// scale (>1) to lift low-resolution scans toward a more OCR-friendly DPI.
+func (img *PageImage) ToPNGForOCR(rotation int, scale float64) ([]byte, error) {
+	goImg, err := img.decode()
+	if err != nil {
+		return nil, err
+	}
+	goImg = rotateImage(goImg, rotation)
+	if scale > 1.0 {
+		goImg = scaleImage(goImg, scale)
+	}
+	return encodePNG(goImg)
+}
+
+// scaleImage upscales src by the given factor using high-quality resampling.
+func scaleImage(src image.Image, scale float64) image.Image {
+	b := src.Bounds()
+	w := int(float64(b.Dx())*scale + 0.5)
+	h := int(float64(b.Dy())*scale + 0.5)
+	if w <= b.Dx() || h <= b.Dy() {
+		return src
+	}
+	dst := image.NewRGBA(image.Rect(0, 0, w, h))
+	xdraw.CatmullRom.Scale(dst, dst.Bounds(), src, b, xdraw.Over, nil)
+	return dst
+}
+
+func encodePNG(im image.Image) ([]byte, error) {
 	var buf bytes.Buffer
-	if err := png.Encode(&buf, goImg); err != nil {
+	if err := png.Encode(&buf, im); err != nil {
 		return nil, fmt.Errorf("failed to encode PNG: %w", err)
 	}
-
 	return buf.Bytes(), nil
+}
+
+// rotateImage rotates src clockwise by degrees (normalized to 0/90/180/270).
+func rotateImage(src image.Image, degrees int) image.Image {
+	d := ((degrees % 360) + 360) % 360
+	if d == 0 || (d != 90 && d != 180 && d != 270) {
+		return src
+	}
+	b := src.Bounds()
+	w, h := b.Dx(), b.Dy()
+	switch d {
+	case 180:
+		dst := image.NewRGBA(image.Rect(0, 0, w, h))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				dst.Set(w-1-x, h-1-y, src.At(b.Min.X+x, b.Min.Y+y))
+			}
+		}
+		return dst
+	case 90:
+		dst := image.NewRGBA(image.Rect(0, 0, h, w))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				dst.Set(h-1-y, x, src.At(b.Min.X+x, b.Min.Y+y))
+			}
+		}
+		return dst
+	default: // 270
+		dst := image.NewRGBA(image.Rect(0, 0, h, w))
+		for y := 0; y < h; y++ {
+			for x := 0; x < w; x++ {
+				dst.Set(y, w-1-x, src.At(b.Min.X+x, b.Min.Y+y))
+			}
+		}
+		return dst
+	}
 }
 
 // invertImage inverts the colors of an image (for Separation colorspace).
