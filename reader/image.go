@@ -84,33 +84,41 @@ func (r *Reader) ExtractPageImages(page *pages.Page) ([]PageImage, error) {
 	return images, nil
 }
 
+// resolveInt resolves obj (which may be an indirect reference) and returns its
+// integer value. ok is false when obj is nil, can't be resolved, or isn't an Int.
+func (r *Reader) resolveInt(obj core.Object) (int, bool) {
+	if obj == nil {
+		return 0, false
+	}
+	resolved, err := r.Resolve(obj)
+	if err != nil {
+		return 0, false
+	}
+	if n, ok := resolved.(core.Int); ok {
+		return int(n), true
+	}
+	return 0, false
+}
+
 // extractImage extracts a single image from a stream.
 func (r *Reader) extractImage(name string, stream *core.Stream) (*PageImage, error) {
 	dict := stream.Dict
 
-	// Get image dimensions
-	widthObj := dict.Get("Width")
-	heightObj := dict.Get("Height")
-	if widthObj == nil || heightObj == nil {
-		return nil, fmt.Errorf("image missing Width or Height")
-	}
-
-	width, ok := widthObj.(core.Int)
+	// Get image dimensions. Width/Height (like Length) may be indirect
+	// references — common in scanner output — so resolve before reading.
+	width, ok := r.resolveInt(dict.Get("Width"))
 	if !ok {
-		return nil, fmt.Errorf("invalid Width type: %T", widthObj)
+		return nil, fmt.Errorf("image missing or invalid Width")
 	}
-
-	height, ok := heightObj.(core.Int)
+	height, ok := r.resolveInt(dict.Get("Height"))
 	if !ok {
-		return nil, fmt.Errorf("invalid Height type: %T", heightObj)
+		return nil, fmt.Errorf("image missing or invalid Height")
 	}
 
-	// Get bits per component (defaults to 1 for bi-level images like CCITT)
+	// Get bits per component (defaults to 8); may also be indirect.
 	bpc := 8
-	if bpcObj := dict.Get("BitsPerComponent"); bpcObj != nil {
-		if bpcInt, ok := bpcObj.(core.Int); ok {
-			bpc = int(bpcInt)
-		}
+	if n, ok := r.resolveInt(dict.Get("BitsPerComponent")); ok {
+		bpc = n
 	}
 
 	// Get color space
@@ -119,9 +127,12 @@ func (r *Reader) extractImage(name string, stream *core.Stream) (*PageImage, err
 		colorSpace = r.parseColorSpace(csObj)
 	}
 
-	// Get filter for format detection
+	// Get filter for format detection (resolve in case it's an indirect ref).
 	filter := ""
 	if filterObj := dict.Get("Filter"); filterObj != nil {
+		if resolved, err := r.Resolve(filterObj); err == nil {
+			filterObj = resolved
+		}
 		if filterName, ok := filterObj.(core.Name); ok {
 			filter = string(filterName)
 		} else if filterArr, ok := filterObj.(core.Array); ok && len(filterArr) > 0 {

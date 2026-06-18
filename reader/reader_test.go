@@ -1,8 +1,10 @@
 package reader
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/tsawler/tabula/core"
@@ -1135,5 +1137,60 @@ func TestWithRealPDF_AllPages(t *testing.T) {
 		if err != nil {
 			t.Errorf("failed to extract text from page %d: %v", i, err)
 		}
+	}
+}
+
+// TestStreamWithIndirectLength guards against a regression where resolving a
+// stream's indirect /Length seeked the shared file handle and left the parser
+// reading the stream body from the wrong offset (scanner output — e.g. Brother
+// MFCs — commonly uses an indirect /Length). The stream is larger than the
+// lexer's read buffer so the body read crosses a buffer boundary, which is
+// where the corrupted file position previously caused a short read / EOF.
+func TestStreamWithIndirectLength(t *testing.T) {
+	streamData := strings.Repeat("ABCDEFGH", 1024) // 8 KB > read buffer
+
+	var b strings.Builder
+	b.WriteString("%PDF-1.4\n")
+	offsets := map[int]int{}
+	write := func(num int, s string) {
+		offsets[num] = b.Len()
+		b.WriteString(s)
+	}
+	write(1, "1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
+	write(2, "2 0 obj\n<< /Type /Pages /Kids [] /Count 0 >>\nendobj\n")
+	// Object 3's /Length is an indirect reference to object 4, which lives after
+	// the stream — so resolving it seeks forward, the exact trigger for the bug.
+	write(3, "3 0 obj\n<< /Length 4 0 R >>\nstream\n"+streamData+"\nendstream\nendobj\n")
+	write(4, fmt.Sprintf("4 0 obj\n%d\nendobj\n", len(streamData)))
+
+	xrefOff := b.Len()
+	b.WriteString("xref\n0 5\n")
+	b.WriteString("0000000000 65535 f\n")
+	for i := 1; i <= 4; i++ {
+		b.WriteString(fmt.Sprintf("%010d 00000 n\n", offsets[i]))
+	}
+	b.WriteString("trailer\n<< /Size 5 /Root 1 0 R >>\nstartxref\n")
+	b.WriteString(fmt.Sprintf("%d\n%%%%EOF", xrefOff))
+
+	r, err := Open(createTempPDF(t, b.String()))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer r.Close()
+
+	obj, err := r.GetObject(3)
+	if err != nil {
+		t.Fatalf("GetObject(3): %v", err)
+	}
+	stream, ok := obj.(*core.Stream)
+	if !ok {
+		t.Fatalf("object 3 is %T, want *core.Stream", obj)
+	}
+	data, err := stream.Decode()
+	if err != nil {
+		t.Fatalf("decode stream: %v", err)
+	}
+	if string(data) != streamData {
+		t.Fatalf("stream body mismatch: got %d bytes, want %d", len(data), len(streamData))
 	}
 }
