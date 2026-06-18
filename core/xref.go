@@ -2,6 +2,7 @@ package core
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"io"
 	"strconv"
@@ -127,7 +128,9 @@ func (x *XRefParser) FindXRef() (int64, error) {
 	}
 
 	// Parse the offset after startxref
+	// Normalize line endings: some PDFs use only CR (\r) instead of LF (\n) or CRLF (\r\n)
 	afterStartXRef := content[idx+len("startxref"):]
+	afterStartXRef = strings.NewReplacer("\r\n", "\n", "\r", "\n").Replace(afterStartXRef)
 	lines := strings.Split(afterStartXRef, "\n")
 	if len(lines) < 2 {
 		return 0, fmt.Errorf("invalid startxref format")
@@ -178,6 +181,7 @@ func (x *XRefParser) ParseXRef(offset int64) (*XRefTable, error) {
 // streams start with an object definition like "5 0 obj".
 func (x *XRefParser) isXRefStream() (bool, error) {
 	scanner := bufio.NewScanner(x.reader)
+	scanner.Split(scanLines)
 	if !scanner.Scan() {
 		return false, fmt.Errorf("failed to read first line")
 	}
@@ -207,6 +211,7 @@ func (x *XRefParser) isXRefStream() (bool, error) {
 // The format is: "xref\n<subsections>\ntrailer\n<dict>\nstartxref\n<offset>\n%%EOF"
 func (x *XRefParser) parseTraditionalXRef() (*XRefTable, error) {
 	scanner := bufio.NewScanner(x.reader)
+	scanner.Split(scanLines)
 
 	// Read "xref" keyword
 	if !scanner.Scan() {
@@ -643,4 +648,42 @@ func (x *XRefParser) ParseAllXRefs() ([]*XRefTable, error) {
 	}
 
 	return tables, nil
+}
+
+// scanLines is a bufio.SplitFunc that recognizes \n, \r\n, and bare \r as line
+// terminators. Go's default bufio.ScanLines does not treat a bare \r as a line
+// ending, which causes failures when parsing PDFs that use CR-only line endings
+// (e.g., files produced by Adobe Illustrator or InDesign).
+func scanLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+
+	// Look for \r or \n, whichever comes first
+	cr := bytes.IndexByte(data, '\r')
+	lf := bytes.IndexByte(data, '\n')
+
+	switch {
+	case cr >= 0 && (lf < 0 || cr < lf):
+		// CR found first: check for CRLF
+		if cr+1 < len(data) {
+			if data[cr+1] == '\n' {
+				return cr + 2, data[:cr], nil // CRLF
+			}
+			return cr + 1, data[:cr], nil // bare CR
+		}
+		// CR is last byte; need more data to check for following LF
+		if atEOF {
+			return len(data), data[:cr], nil
+		}
+		return 0, nil, nil // request more data
+	case lf >= 0:
+		return lf + 1, data[:lf], nil // LF
+	}
+
+	// No line terminator found
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil // request more data
 }
