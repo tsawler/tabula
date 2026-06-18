@@ -210,6 +210,15 @@ func (r *Reader) GetObject(objNum int) (core.Object, error) {
 
 // getUncompressedObject reads an object directly from the file
 func (r *Reader) getUncompressedObject(objNum int, entry *core.XRefEntry) (core.Object, error) {
+	// Reading an object seeks the shared file handle. A caller in the middle of
+	// a sequential parse (e.g. parseStream resolving an indirect /Length before
+	// reading the stream body) relies on the file position being undisturbed, so
+	// save and restore it. Without this, resolving an indirect reference mid-parse
+	// leaves the parser reading from the wrong offset.
+	if saved, serr := r.file.Seek(0, io.SeekCurrent); serr == nil {
+		defer r.file.Seek(saved, io.SeekStart)
+	}
+
 	// Seek to object position
 	_, err := r.file.Seek(entry.Offset, io.SeekStart)
 	if err != nil {
