@@ -566,14 +566,18 @@ func (e *Extractor) Text() (string, []Warning, error) {
 			fragments = headerFooterResult.FilterFragments(pd.index, fragments, height)
 		}
 
-		// If no text fragments, attempt OCR fallback
-		if len(fragments) == 0 {
+		// Sparse or no native text: attempt OCR fallback. This covers fully
+		// scanned pages as well as scans carrying only a native stamp/watermark
+		// overlay, whose body would otherwise be lost. Native text (if any) is
+		// merged with the OCR output so the overlay survives.
+		if e.shouldTryOCR(fragments) {
 			ocrText, ocrErr := e.extractTextViaOCR(pd.page, pd.index+1)
-			if ocrErr == nil && ocrText != "" {
+			if ocrErr == nil && strings.TrimSpace(ocrText) != "" {
+				merged := mergeNativeAndOCR(fragments, ocrText)
 				if i > 0 && result.Len() > 0 {
 					result.WriteString("\n\n")
 				}
-				result.WriteString(ocrText)
+				result.WriteString(merged)
 				continue
 			}
 		}
@@ -1631,6 +1635,24 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 		modelPage := model.NewPage(width, height)
 		modelPage.Number = pageNum + 1
 
+		// Sparse or no native text: fall back to OCR so Document()/Chunks()/
+		// ToMarkdown() recover scanned content the same way Text() does. OCR only
+		// contributes when the page has images, so born-digital sparse pages fall
+		// through to normal layout analysis below. The OCR'd text (merged with any
+		// native stamp/watermark) becomes a single paragraph element.
+		if e.shouldTryOCR(fragments) {
+			if ocrText, ocrErr := e.extractTextViaOCR(page, pageNum+1); ocrErr == nil && strings.TrimSpace(ocrText) != "" {
+				merged := mergeNativeAndOCR(fragments, ocrText)
+				modelPage.Layout = &model.PageLayout{
+					Paragraphs: []model.ParagraphInfo{{Text: merged, LineCount: strings.Count(merged, "\n") + 1}},
+					Stats:      model.LayoutStats{FragmentCount: len(fragments), ParagraphCount: 1},
+				}
+				modelPage.AddElement(&model.Paragraph{Text: merged})
+				doc.AddPage(modelPage)
+				continue
+			}
+		}
+
 		// Perform layout analysis
 		roResult := roDetector.Detect(fragments, width, height)
 
@@ -2244,6 +2266,50 @@ func convertListType(lt layout.ListType) model.ListType {
 		return model.ListTypeCheckbox
 	default:
 		return model.ListTypeUnknown
+	}
+}
+
+// ocrMinNativeChars is the native-text threshold (in characters) below which a
+// PDF page is treated as scanned and sent to OCR. Pure-image pages have ~0
+// native chars; a scanned page carrying only a stamp or watermark (e.g.
+// "SAMPLE LETTER") still falls under this, so its scanned body is recovered.
+// Real text pages are far above it and are never OCR'd. OCR only contributes
+// when the page actually has images, so born-digital sparse pages are unaffected.
+const ocrMinNativeChars = 100
+
+// nativeCharCount sums the trimmed text length of a page's fragments.
+func nativeCharCount(fragments []text.TextFragment) int {
+	n := 0
+	for _, f := range fragments {
+		n += len(strings.TrimSpace(f.Text))
+	}
+	return n
+}
+
+// shouldTryOCR reports whether a page's native text is sparse enough to warrant
+// an OCR fallback attempt.
+func (e *Extractor) shouldTryOCR(fragments []text.TextFragment) bool {
+	return nativeCharCount(fragments) < ocrMinNativeChars
+}
+
+// mergeNativeAndOCR combines a page's sparse native text (e.g. an overlay stamp)
+// with OCR output so neither is lost. Either side may be empty.
+func mergeNativeAndOCR(fragments []text.TextFragment, ocrText string) string {
+	var parts []string
+	for _, f := range fragments {
+		if t := strings.TrimSpace(f.Text); t != "" {
+			parts = append(parts, t)
+		}
+	}
+	native := strings.TrimSpace(strings.Join(parts, " "))
+	ocrText = strings.TrimSpace(ocrText)
+	switch {
+	case native == "":
+		return ocrText
+	case ocrText == "":
+		return native
+	default:
+		return native + "\n\n" + ocrText
 	}
 }
 
