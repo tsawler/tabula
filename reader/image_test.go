@@ -300,3 +300,96 @@ func BenchmarkToPNG(b *testing.B) {
 // Mock image interface for testing
 var _ image.Image = (*image.Gray)(nil)
 var _ image.Image = (*image.RGBA)(nil)
+
+// --- #2: /Decode inversion, image masks, indexed palettes ---
+
+// A /Decode of [1 0] flips black/white — the common case for inverted CCITT
+// scans and image masks. Same data as the bilevel test, opposite result.
+func TestPageImage_toBilevelGray_DecodeInverts(t *testing.T) {
+	img := &PageImage{
+		Width: 16, Height: 1, ColorSpace: "DeviceGray", BitsPerComponent: 1,
+		Data:   []byte{0xFF, 0x00}, // 8 ones, 8 zeros
+		Decode: []float64{1, 0},
+	}
+	goImg, err := img.toBilevelGray()
+	if err != nil {
+		t.Fatalf("toBilevelGray: %v", err)
+	}
+	for x := 0; x < 8; x++ { // ones now map to black
+		if goImg.GrayAt(x, 0).Y != 0 {
+			t.Errorf("pixel %d: got %d, want 0 (inverted)", x, goImg.GrayAt(x, 0).Y)
+		}
+	}
+	for x := 8; x < 16; x++ { // zeros now map to white
+		if goImg.GrayAt(x, 0).Y != 255 {
+			t.Errorf("pixel %d: got %d, want 255 (inverted)", x, goImg.GrayAt(x, 0).Y)
+		}
+	}
+}
+
+// 8-bit grayscale honors /Decode endpoints (here a full inversion).
+func TestPageImage_toGray8_DecodeInverts(t *testing.T) {
+	img := &PageImage{
+		Width: 3, Height: 1, ColorSpace: "DeviceGray", BitsPerComponent: 8,
+		Data:   []byte{0, 128, 255},
+		Decode: []float64{1, 0},
+	}
+	goImg, err := img.toGrayImage()
+	if err != nil {
+		t.Fatalf("toGrayImage: %v", err)
+	}
+	want := []uint8{255, 127, 0}
+	for x, w := range want {
+		if got := goImg.GrayAt(x, 0).Y; got != w {
+			t.Errorf("pixel %d: got %d, want %d", x, got, w)
+		}
+	}
+}
+
+// Indexed (palette) images resolve each index through the palette in the base
+// color space.
+func TestPageImage_toIndexedImage_RGB(t *testing.T) {
+	img := &PageImage{
+		Width: 3, Height: 1, ColorSpace: "Indexed", BitsPerComponent: 8,
+		Data:         []byte{0, 1, 2}, // indices
+		PaletteBase:  "DeviceRGB",
+		PaletteComps: 3,
+		Palette: []byte{
+			255, 0, 0, // 0 = red
+			0, 255, 0, // 1 = green
+			0, 0, 255, // 2 = blue
+		},
+	}
+	goImg, err := img.toIndexedImage()
+	if err != nil {
+		t.Fatalf("toIndexedImage: %v", err)
+	}
+	want := [][3]uint8{{255, 0, 0}, {0, 255, 0}, {0, 0, 255}}
+	for x, w := range want {
+		c := goImg.RGBAAt(x, 0)
+		if c.R != w[0] || c.G != w[1] || c.B != w[2] {
+			t.Errorf("pixel %d: got (%d,%d,%d), want (%d,%d,%d)", x, c.R, c.G, c.B, w[0], w[1], w[2])
+		}
+	}
+}
+
+// Indexed images with sub-byte indices (here 4-bit) unpack correctly.
+func TestPageImage_toIndexedImage_4bit(t *testing.T) {
+	img := &PageImage{
+		Width: 2, Height: 1, ColorSpace: "Indexed", BitsPerComponent: 4,
+		Data:         []byte{0x10}, // index 1 then index 0
+		PaletteBase:  "DeviceGray",
+		PaletteComps: 1,
+		Palette:      []byte{0x00, 0xFF}, // 0=black, 1=white
+	}
+	goImg, err := img.toIndexedImage()
+	if err != nil {
+		t.Fatalf("toIndexedImage: %v", err)
+	}
+	if c := goImg.RGBAAt(0, 0); c.R != 0xFF {
+		t.Errorf("pixel 0: got R=%d, want 255 (index 1=white)", c.R)
+	}
+	if c := goImg.RGBAAt(1, 0); c.R != 0x00 {
+		t.Errorf("pixel 1: got R=%d, want 0 (index 0=black)", c.R)
+	}
+}

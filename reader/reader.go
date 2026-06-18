@@ -33,6 +33,9 @@ type Reader struct {
 	objStmCache map[int]*core.ObjectStream // Cache for object streams
 	fileSize    int64
 	pageTree    *pages.PageTree // Cached page tree
+
+	security      *core.StdSecurityHandler // non-nil when the document is encrypted
+	encryptObjNum int                      // object number of the /Encrypt dict (not itself encrypted)
 }
 
 // Ensure Reader implements pages.ObjectResolver
@@ -68,7 +71,98 @@ func NewReader(file *os.File) (*Reader, error) {
 	reader.xrefTable = xrefTable
 	reader.trailer = xrefTable.Trailer
 
+	// Set up decryption if the document is encrypted. Must happen before any
+	// object strings/streams are read (other than the xref/trailer themselves,
+	// which are never encrypted).
+	if err := reader.setupSecurity(); err != nil {
+		return nil, err
+	}
+
 	return reader, nil
+}
+
+// setupSecurity builds the standard security handler when the trailer has an
+// /Encrypt entry. The Encrypt dictionary and document /ID are themselves
+// unencrypted, so resolving them here (before r.security is set) is safe.
+func (r *Reader) setupSecurity() error {
+	encObj := r.trailer.Get("Encrypt")
+	if encObj == nil {
+		return nil // not encrypted
+	}
+	if ref, ok := encObj.(core.IndirectRef); ok {
+		r.encryptObjNum = ref.Number
+	}
+	encResolved, err := r.Resolve(encObj)
+	if err != nil {
+		return fmt.Errorf("failed to resolve /Encrypt: %w", err)
+	}
+	encDict, ok := encResolved.(core.Dict)
+	if !ok {
+		return fmt.Errorf("/Encrypt is not a dictionary: %T", encResolved)
+	}
+
+	var id []byte
+	if arr, ok := r.trailer.Get("ID").(core.Array); ok && len(arr) > 0 {
+		if s, ok := arr[0].(core.String); ok {
+			id = []byte(s)
+		}
+	}
+
+	sec, err := core.NewStdSecurityHandler(encDict, id)
+	if err != nil {
+		return err
+	}
+	r.security = sec
+	return nil
+}
+
+// decryptObject recursively decrypts the strings and stream bodies of a freshly
+// parsed top-level object, using the object's number and generation. Containers
+// are mutated in place; XRef streams and (when not encrypted) Metadata streams
+// are left untouched.
+func (r *Reader) decryptObject(obj core.Object, num, gen int) core.Object {
+	switch v := obj.(type) {
+	case core.String:
+		if dec, err := r.security.Decrypt([]byte(v), num, gen, true); err == nil {
+			return core.String(dec)
+		}
+		return v
+	case core.Dict:
+		for k, e := range v {
+			v[k] = r.decryptObject(e, num, gen)
+		}
+		return v
+	case core.Array:
+		for i, e := range v {
+			v[i] = r.decryptObject(e, num, gen)
+		}
+		return v
+	case *core.Stream:
+		for k, e := range v.Dict {
+			v.Dict[k] = r.decryptObject(e, num, gen)
+		}
+		if !skipStreamDecrypt(v, r.security) {
+			if dec, err := r.security.Decrypt(v.Data, num, gen, false); err == nil {
+				v.Data = dec
+			}
+		}
+		return v
+	default:
+		return obj
+	}
+}
+
+// skipStreamDecrypt reports streams that are never encrypted: cross-reference
+// streams, and Metadata streams when /EncryptMetadata is false.
+func skipStreamDecrypt(s *core.Stream, sec *core.StdSecurityHandler) bool {
+	t, _ := s.Dict.Get("Type").(core.Name)
+	switch string(t) {
+	case "XRef":
+		return true
+	case "Metadata":
+		return !sec.EncryptMetadata()
+	}
+	return false
 }
 
 // Open opens a PDF file and returns a Reader
@@ -236,6 +330,13 @@ func (r *Reader) getUncompressedObject(objNum int, entry *core.XRefEntry) (core.
 	// Verify object number matches
 	if indObj.Ref.Number != objNum {
 		return nil, fmt.Errorf("object number mismatch: expected %d, got %d", objNum, indObj.Ref.Number)
+	}
+
+	// Decrypt the object's strings and stream body. The /Encrypt dict itself is
+	// not encrypted. Objects inside an object stream are decrypted once, when that
+	// stream is loaded here, so getCompressedObject does not decrypt again.
+	if r.security != nil && objNum != r.encryptObjNum {
+		return r.decryptObject(indObj.Object, objNum, indObj.Ref.Generation), nil
 	}
 
 	return indObj.Object, nil
