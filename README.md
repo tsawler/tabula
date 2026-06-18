@@ -36,18 +36,21 @@ To enable OCR for scanned PDFs (pages with no native text), build with the `ocr`
 go build -tags ocr
 ```
 
-This requires [Tesseract OCR](https://github.com/tesseract-ocr/tesseract) to be installed:
+The `ocr` tag enables Tesseract OCR for scanned pages, plus JBIG2 and JPEG2000
+image decoding (via jbig2dec and openjpeg) — the compression formats scanners
+commonly use that have no pure-Go decoder. It requires these libraries:
 
 **macOS (Homebrew):**
 ```bash
-brew install tesseract
+brew install tesseract jbig2dec openjpeg
 # Optional: additional language packs
 brew install tesseract-lang
 ```
 
 **Ubuntu/Debian:**
 ```bash
-apt-get install tesseract-ocr libtesseract-dev libleptonica-dev
+apt-get install tesseract-ocr libtesseract-dev libleptonica-dev \
+               libjbig2dec0-dev libopenjp2-7-dev
 # Optional: additional language packs
 apt-get install tesseract-ocr-fra tesseract-ocr-deu  # French, German, etc.
 ```

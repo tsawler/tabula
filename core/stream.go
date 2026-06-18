@@ -83,18 +83,23 @@ func decodeWithFilter(data []byte, filterName string, params Dict) ([]byte, erro
 		return filters.CCITTFaxDecode(data, dictToParams(params))
 
 	case "JBIG2Decode":
-		return nil, fmt.Errorf("JBIG2Decode not yet implemented")
+		// Decoded in the image layer (reader.ToPNG via imagecodec/jbig2dec),
+		// which has the page dimensions and JBIG2Globals it needs.
+		return data, nil
 
 	case "DCTDecode", "DCT":
-		// JPEG - return as-is for now (will handle in image extraction)
+		// JPEG - decoded in the image layer (reader.ToPNG via image/jpeg).
 		return data, nil
 
 	case "JPXDecode":
-		// JPEG2000 - return as-is for now
+		// JPEG2000 - decoded in the image layer (reader.ToPNG via openjpeg).
 		return data, nil
 
 	case "Crypt":
-		return nil, fmt.Errorf("Crypt filter not yet implemented")
+		// Decryption is applied at the object level by the reader's security
+		// handler before filters run, so by here the data is already plaintext
+		// (or the filter is /Identity). Pass through.
+		return data, nil
 
 	default:
 		return nil, fmt.Errorf("unknown filter: %s", filterName)
