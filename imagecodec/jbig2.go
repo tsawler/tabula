@@ -4,6 +4,10 @@ package imagecodec
 
 /*
 #cgo pkg-config: jbig2dec
+// jbig2dec's <jbig2.h> uses uint32_t/uint8_t but doesn't include <stdint.h>
+// itself; include it first so the build works on toolchains (e.g. musl/Alpine)
+// whose <stdlib.h> doesn't pull in <stdint.h> transitively.
+#include <stdint.h>
 #include <stdlib.h>
 #include <jbig2.h>
 
