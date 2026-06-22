@@ -55,10 +55,21 @@ func (dc *DocumentChunker) ChunkDocument(doc *model.Document) *ChunkCollection {
 	currentSection := []string{}
 	currentHeadingLevel := 0
 
+	// When the document carries no explicit heading structure, conservatively
+	// recover chapter-level headings from the text (e.g. scanned/OCR books).
+	promoteHeadings := dc.config.DetectHeadings && !documentHasHeadings(doc)
+
 	// Process each page
 	for _, page := range doc.Pages {
-		pageChunks := dc.chunkPage(page, docTitle, &currentSection, &currentHeadingLevel, toc, &chunkIndex)
+		pageChunks := dc.chunkPage(page, docTitle, &currentSection, &currentHeadingLevel, toc, &chunkIndex, promoteHeadings)
 		chunks = append(chunks, pageChunks...)
+	}
+
+	// Coalesce undersized fragments (heading-only chunks and sub-minimum
+	// chunks) so we don't emit tiny, low-value chunks for RAG. This applies
+	// to every format, since all extraction flows through this chunker.
+	if dc.sizeConfig.MergeSmallChunks {
+		chunks = dc.coalesceSmallChunks(chunks)
 	}
 
 	// Set total chunks count
@@ -69,8 +80,223 @@ func (dc *DocumentChunker) ChunkDocument(doc *model.Document) *ChunkCollection {
 	return NewChunkCollection(chunks)
 }
 
+// coalesceSmallChunks runs a post-processing pass over the produced chunks to
+// eliminate tiny, low-value fragments. It runs two sub-passes:
+//
+//  1. Heading attach: a heading-only chunk is merged forward into the first
+//     content chunk it introduces, so headings stop standing alone.
+//  2. Undersized merge: any remaining chunk smaller than the configured minimum
+//     is merged into an adjacent chunk (preferring the previous chunk in the
+//     same section), never exceeding the configured maximum.
+//
+// Chunk indices and contextual text are recomputed afterwards.
+func (dc *DocumentChunker) coalesceSmallChunks(chunks []*Chunk) []*Chunk {
+	if len(chunks) < 2 {
+		return chunks
+	}
+
+	// Resolve thresholds in characters so token/word-based configs work too.
+	minChars := ConvertSize(dc.sizeConfig.Min.Value, dc.sizeConfig.Min.Unit, SizeUnitCharacters)
+	maxChars := ConvertSize(dc.sizeConfig.Max.Value, dc.sizeConfig.Max.Unit, SizeUnitCharacters)
+	if maxChars <= 0 {
+		maxChars = int(^uint(0) >> 1) // effectively unbounded
+	}
+
+	chunks = dc.mergeHeadingChunks(chunks, maxChars)
+	if minChars > 0 {
+		chunks = dc.mergeUndersizedChunks(chunks, minChars, maxChars)
+	}
+
+	// Reindex so ChunkIndex/IDs remain contiguous after merges.
+	for i, c := range chunks {
+		c.Metadata.ChunkIndex = i
+		c.ID = fmt.Sprintf("chunk-%d", i)
+	}
+
+	return chunks
+}
+
+// mergeHeadingChunks merges heading-only chunks forward into the next content
+// chunk. Consecutive headings (e.g. an H1 immediately followed by an H2) are
+// accumulated and prepended together. Trailing headings with no following
+// content are left standalone.
+func (dc *DocumentChunker) mergeHeadingChunks(chunks []*Chunk, maxChars int) []*Chunk {
+	result := make([]*Chunk, 0, len(chunks))
+	var pending []*Chunk // accumulated heading-only chunks awaiting content
+
+	flushPending := func() {
+		result = append(result, pending...)
+		pending = nil
+	}
+
+	for _, c := range chunks {
+		if isHeadingOnlyChunk(c) {
+			pending = append(pending, c)
+			continue
+		}
+
+		if len(pending) > 0 {
+			var heads strings.Builder
+			for _, h := range pending {
+				if heads.Len() > 0 {
+					heads.WriteString("\n\n")
+				}
+				heads.WriteString(strings.TrimSpace(h.Text))
+			}
+
+			if heads.Len()+2+len(c.Text) <= maxChars {
+				c.Text = heads.String() + "\n\n" + strings.TrimSpace(c.Text)
+				for _, h := range pending {
+					for _, et := range h.Metadata.ElementTypes {
+						c.Metadata.ElementTypes = appendUnique(c.Metadata.ElementTypes, et)
+					}
+					if h.Metadata.PageStart != 0 && (c.Metadata.PageStart == 0 || h.Metadata.PageStart < c.Metadata.PageStart) {
+						c.Metadata.PageStart = h.Metadata.PageStart
+					}
+				}
+				// The body now opens with its section heading; carry the
+				// heading's level/title so the chunk still reports them. Use the
+				// last (deepest, immediately preceding) heading.
+				lastHeading := pending[len(pending)-1]
+				if c.Metadata.HeadingLevel == 0 {
+					c.Metadata.HeadingLevel = lastHeading.Metadata.HeadingLevel
+				}
+				if c.Metadata.SectionTitle == "" {
+					c.Metadata.SectionTitle = lastHeading.Metadata.SectionTitle
+				}
+				recomputeChunkStats(c)
+				pending = nil
+			} else {
+				// Headings won't fit; leave them as their own chunks.
+				flushPending()
+			}
+		}
+
+		result = append(result, c)
+	}
+
+	flushPending() // trailing headings, if any
+	return result
+}
+
+// mergeUndersizedChunks merges any chunk below minChars into an adjacent chunk,
+// preferring the previous chunk in the same section, then the next chunk, then
+// the previous chunk in any section. A merge is only performed when the result
+// stays within maxChars; otherwise the small chunk is kept as-is.
+func (dc *DocumentChunker) mergeUndersizedChunks(chunks []*Chunk, minChars, maxChars int) []*Chunk {
+	result := make([]*Chunk, 0, len(chunks))
+
+	i := 0
+	for i < len(chunks) {
+		c := chunks[i]
+
+		if len(c.Text) >= minChars {
+			result = append(result, c)
+			i++
+			continue
+		}
+
+		// Prefer merging back into the previous chunk if it shares the section.
+		if len(result) > 0 {
+			prev := result[len(result)-1]
+			if sameSectionPath(prev.Metadata.SectionPath, c.Metadata.SectionPath) &&
+				len(prev.Text)+2+len(c.Text) <= maxChars {
+				mergeChunkInto(prev, c, true)
+				i++
+				continue
+			}
+		}
+
+		// Otherwise fold into the following chunk if it fits.
+		if i+1 < len(chunks) {
+			next := chunks[i+1]
+			if len(c.Text)+2+len(next.Text) <= maxChars {
+				mergeChunkInto(next, c, false)
+				result = append(result, next)
+				i += 2
+				continue
+			}
+		}
+
+		// Last resort: merge back into the previous chunk regardless of section.
+		if len(result) > 0 {
+			prev := result[len(result)-1]
+			if len(prev.Text)+2+len(c.Text) <= maxChars {
+				mergeChunkInto(prev, c, true)
+				i++
+				continue
+			}
+		}
+
+		// Cannot merge without exceeding the maximum; keep as-is.
+		result = append(result, c)
+		i++
+	}
+
+	return result
+}
+
+// isHeadingOnlyChunk reports whether a chunk consists solely of a heading.
+func isHeadingOnlyChunk(c *Chunk) bool {
+	return len(c.Metadata.ElementTypes) == 1 && c.Metadata.ElementTypes[0] == "heading"
+}
+
+// sameSectionPath reports whether two section paths are identical.
+func sameSectionPath(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// mergeChunkInto merges src into dst. When srcAfter is true, src's text is
+// appended after dst's; otherwise it is prepended. Metadata (page range,
+// content flags, element types) is combined and statistics recomputed. dst's
+// section path/title and heading level are preserved.
+func mergeChunkInto(dst, src *Chunk, srcAfter bool) {
+	dstText := strings.TrimSpace(dst.Text)
+	srcText := strings.TrimSpace(src.Text)
+	if srcAfter {
+		dst.Text = dstText + "\n\n" + srcText
+	} else {
+		dst.Text = srcText + "\n\n" + dstText
+	}
+
+	if src.Metadata.PageStart != 0 && (dst.Metadata.PageStart == 0 || src.Metadata.PageStart < dst.Metadata.PageStart) {
+		dst.Metadata.PageStart = src.Metadata.PageStart
+	}
+	if src.Metadata.PageEnd > dst.Metadata.PageEnd {
+		dst.Metadata.PageEnd = src.Metadata.PageEnd
+	}
+
+	dst.Metadata.HasTable = dst.Metadata.HasTable || src.Metadata.HasTable
+	dst.Metadata.HasList = dst.Metadata.HasList || src.Metadata.HasList
+	dst.Metadata.HasImage = dst.Metadata.HasImage || src.Metadata.HasImage
+
+	for _, et := range src.Metadata.ElementTypes {
+		dst.Metadata.ElementTypes = appendUnique(dst.Metadata.ElementTypes, et)
+	}
+
+	recomputeChunkStats(dst)
+}
+
+// recomputeChunkStats refreshes derived statistics and contextual text after a
+// chunk's text has changed.
+func recomputeChunkStats(c *Chunk) {
+	c.Text = strings.TrimSpace(c.Text)
+	c.Metadata.CharCount = len(c.Text)
+	c.Metadata.WordCount = countWords(c.Text)
+	c.Metadata.EstimatedTokens = len(c.Text) / 4
+	c.TextWithContext = c.generateContextualText()
+}
+
 // chunkPage chunks a single page
-func (dc *DocumentChunker) chunkPage(page *model.Page, docTitle string, currentSection *[]string, currentHeadingLevel *int, toc []model.TOCEntry, chunkIndex *int) []*Chunk {
+func (dc *DocumentChunker) chunkPage(page *model.Page, docTitle string, currentSection *[]string, currentHeadingLevel *int, toc []model.TOCEntry, chunkIndex *int, promoteHeadings bool) []*Chunk {
 	var chunks []*Chunk
 
 	if page == nil {
@@ -93,6 +319,32 @@ func (dc *DocumentChunker) chunkPage(page *model.Page, docTitle string, currentS
 	for _, elem := range page.Elements {
 		switch e := elem.(type) {
 		case *model.Paragraph:
+			// Recover a chapter heading buried in paragraph text when the
+			// document has no explicit headings of its own.
+			if promoteHeadings {
+				if headText, bodyText, ok := detectChapterHeading(e.Text); ok {
+					flushTextBlock()
+
+					level := chapterHeadingLevel(headText)
+					updateSectionPath(currentSection, currentHeadingLevel, level, headText)
+
+					chunk := dc.createHeadingChunk(headText, docTitle, *currentSection, level, page.Number, chunkIndex)
+					chunks = append(chunks, chunk)
+
+					// Keep the remaining body text (the heading portion has been
+					// split off, so there is no duplication).
+					if strings.TrimSpace(bodyText) != "" {
+						if currentBlock.text != "" {
+							currentBlock.text += "\n\n"
+						}
+						currentBlock.text += bodyText
+						currentBlock.sectionPath = append([]string{}, *currentSection...)
+						currentBlock.elementTypes = appendUnique(currentBlock.elementTypes, "paragraph")
+					}
+					continue
+				}
+			}
+
 			// Update section context if this is a heading-like paragraph
 			if isHeadingElement(e.Text, toc, page.Number) {
 				// Flush current block before heading
@@ -502,6 +754,7 @@ func RAGOptimizedOptions() DocumentChunkOptions {
 			MaxChunkSize:    1000,
 			TargetChunkSize: 500,
 			OverlapSize:     50,
+			DetectHeadings:  true,
 		},
 		SizeConfig: OpenAIEmbeddingConfig(),
 	}
