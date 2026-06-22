@@ -15,7 +15,7 @@ A Go text extraction library with a fluent API, designed for RAG (Retrieval-Augm
 - **Layout Analysis** - Detect headings, paragraphs, lists, and tables
 - **Header/Footer Detection** - Automatically identify and exclude repeating content
 - **HTML Navigation Filtering** - Remove headers, footers, nav, and sidebars from web pages with configurable exclusion modes
-- **RAG-Ready Chunking** - Semantic document chunking with metadata
+- **RAG-Ready Chunking** - Semantic chunking with metadata: size-bounded chunks (no tiny fragments or over-max chunks) and automatic chapter-heading recovery for documents without explicit heading markup (e.g. scanned/OCR books)
 - **Markdown Export** - Convert extracted content to markdown
 - **PDF 1.0-1.7 Support** - Including modern XRef streams (PDF 1.5+)
 - **Encrypted PDFs** - Opens RC4 and AES (V2/V3) encrypted files secured with an empty user/owner password
@@ -323,7 +323,7 @@ ext := tabula.FromHTMLReader(resp.Body)
 
 **Note on HTML:** For HTML files, the entire document is treated as a single page. `PageCount()` returns 1. Semantic elements are preserved: headings (`<h1>`-`<h6>`), paragraphs (`<p>`), lists (`<ul>`, `<ol>`), tables (`<table>` with colspan/rowspan), code blocks (`<pre>`, `<code>`), and blockquotes (`<blockquote>`). Metadata is extracted from `<title>` and `<meta>` tags. For navigation/header/footer removal, use the `htmldoc` package with `NavigationExclusionMode` (see HTML Navigation Filtering section below).
 
-**Note on EPUB:** For EPUB files (both EPUB 2 and EPUB 3), each chapter (spine item) becomes a page. `PageCount()` returns the number of chapters. Dublin Core metadata is extracted (title, author, language, identifier/ISBN, etc.). The table of contents is parsed from NCX (EPUB 2) or nav document (EPUB 3). DRM-protected EPUBs are rejected with an error. Content is extracted using the HTML parser, preserving headings, paragraphs, lists, and tables.
+**Note on EPUB:** For EPUB files (both EPUB 2 and EPUB 3), each chapter (spine item) becomes a page. `PageCount()` returns the number of chapters. Dublin Core metadata is extracted (title, author, language, identifier/ISBN, etc.). The table of contents is parsed from NCX (EPUB 2) or nav document (EPUB 3). DRM-protected EPUBs are rejected with an error. Content is extracted using the HTML parser, preserving headings, paragraphs, lists, and tables. For scanned/OCR EPUBs that carry no heading markup, chapter-level headings are recovered heuristically from structural markers (CHAPTER, PART, APPENDIX, etc.) so chunks still receive section context; disable via `ChunkerConfig.DetectHeadings`.
 
 ### Inspection Methods (non-terminal, PDF only)
 

@@ -7,6 +7,7 @@
 bin/
 dist/
 CLAUDE.md
+test-epubs/*
 
 # Test binaries
 *.test

@@ -202,6 +202,14 @@ type ChunkerConfig struct {
 	// Default: true
 	PreserveParagraphs bool
 
+	// DetectHeadings enables conservative heuristic heading detection for
+	// documents that carry no explicit heading structure (common in
+	// scanned/OCR sources). Only strong structural markers (CHAPTER, PART,
+	// BOOK, SECTION, APPENDIX + enumerator) are promoted, and only when the
+	// document has no real headings of its own.
+	// Default: true
+	DetectHeadings bool
+
 	// IDPrefix is a prefix for generated chunk IDs
 	// Default: "chunk"
 	IDPrefix string
@@ -221,6 +229,7 @@ func DefaultChunkerConfig() ChunkerConfig {
 		SplitOnHeadings:        true,
 		MinHeadingLevel:        3,
 		PreserveParagraphs:     true,
+		DetectHeadings:         true,
 		IDPrefix:               "chunk",
 	}
 }

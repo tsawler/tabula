@@ -504,37 +504,195 @@ func isSentenceEndChar(c byte) bool {
 	return c == '.' || c == '!' || c == '?'
 }
 
-// SplitToSize splits text into chunks that meet size constraints
+// SplitToSize splits text into chunks that meet size constraints.
+//
+// Splitting is orphan-aware: each piece is cut as close to the maximum as a
+// clean boundary allows without ever exceeding it, but when the leftover tail
+// would fall below the minimum size the cut is rebalanced toward the middle so
+// both resulting pieces are healthy. This avoids stranding tiny fragments
+// (which the downstream coalescing pass cannot merge back in once their
+// neighbors are already at the maximum) and avoids producing over-maximum
+// chunks.
 func (sc *SizeCalculator) SplitToSize(text string, boundaries []Boundary) []string {
+	maxChars := ConvertSize(sc.config.Max.Value, sc.config.Max.Unit, SizeUnitCharacters)
+	minChars := ConvertSize(sc.config.Min.Value, sc.config.Min.Unit, SizeUnitCharacters)
+	if maxChars <= 0 {
+		return []string{text}
+	}
+
 	var chunks []string
 
 	remaining := text
 	for len(remaining) > 0 {
 		// Check if remaining text fits within max
-		if !sc.IsAboveMax(remaining) {
+		if len(remaining) <= maxChars {
 			chunks = append(chunks, remaining)
 			break
 		}
 
-		// Find split point using max limit (not target) to ensure chunks fit
-		splitPos := sc.FindSplitPointAt(remaining, boundaries, sc.config.Max.Value, sc.config.Max.Unit)
+		// Cut near the max by default. If doing so would leave a sub-minimum
+		// tail, rebalance toward the middle so neither piece is orphaned.
+		cut := maxChars
+		if len(remaining)-cut < minChars {
+			cut = len(remaining) / 2
+		}
+
+		// Find a clean split point at or before the upper bound (never exceeding
+		// the max), as close to the desired cut as possible.
+		splitPos := sc.findSplitPointWithin(remaining, boundaries, cut, maxChars)
 		if splitPos <= 0 || splitPos >= len(remaining) {
-			// Can't split further, add remaining as-is
-			chunks = append(chunks, remaining)
-			break
+			// Defensive: fall back to a hard cut at the max to guarantee
+			// progress and a within-max chunk.
+			splitPos = maxChars
 		}
 
 		chunk := strings.TrimSpace(remaining[:splitPos])
 		if chunk != "" {
 			chunks = append(chunks, chunk)
 		}
-		remaining = strings.TrimSpace(remaining[splitPos:])
+		rest := strings.TrimSpace(remaining[splitPos:])
+		if rest == remaining {
+			// No forward progress; emit what is left to avoid looping forever.
+			break
+		}
+		remaining = rest
 
 		// Update boundary positions for remaining text
 		boundaries = adjustBoundaryPositions(boundaries, splitPos)
 	}
 
 	return chunks
+}
+
+// findSplitPointWithin finds the best position to split text at or before
+// upper (an inclusive character bound that must never be exceeded), as close to
+// the desired cut position as possible. It prefers, in order: a high-scoring
+// semantic boundary, a sentence ending, then a word boundary. As a last resort
+// it returns upper (a hard cut). The returned position is always in (0, upper].
+func (sc *SizeCalculator) findSplitPointWithin(text string, boundaries []Boundary, cut, upper int) int {
+	if upper > len(text) {
+		upper = len(text)
+	}
+	if cut > upper {
+		cut = upper
+	}
+	if upper <= 0 {
+		return len(text)
+	}
+
+	// 1. Prefer a semantic boundary at or before upper, nearest the cut.
+	if sc.config.SplitAtSemanticBoundaries && len(boundaries) > 0 {
+		window := cut / 4
+		if window < 1 {
+			window = 1
+		}
+		if p := bestBoundaryWithin(boundaries, cut, window, upper); p > 0 {
+			return p
+		}
+	}
+
+	// 2. Sentence ending: prefer one at or before the cut, else look ahead up to upper.
+	if p := sentenceEndWithin(text, cut, upper); p > 0 {
+		return p
+	}
+
+	// 3. Word boundary: same preference order.
+	if p := wordBoundaryWithin(text, cut, upper); p > 0 {
+		return p
+	}
+
+	// 4. Hard cut at the upper bound.
+	return upper
+}
+
+// bestBoundaryWithin returns the highest-scored boundary whose position is in
+// (0, upper] and within window of cut, or 0 if none qualifies. Ties are broken
+// by proximity to cut.
+func bestBoundaryWithin(boundaries []Boundary, cut, window, upper int) int {
+	best := 0
+	bestScore := -1
+	bestDist := 0
+
+	minPos := cut - window
+	if minPos < 1 {
+		minPos = 1
+	}
+	maxPos := cut + window
+	if maxPos > upper {
+		maxPos = upper
+	}
+
+	for i := range boundaries {
+		p := boundaries[i].Position
+		if p < minPos || p > maxPos {
+			continue
+		}
+		dist := p - cut
+		if dist < 0 {
+			dist = -dist
+		}
+		if boundaries[i].Score > bestScore || (boundaries[i].Score == bestScore && dist < bestDist) {
+			best = p
+			bestScore = boundaries[i].Score
+			bestDist = dist
+		}
+	}
+
+	return best
+}
+
+// sentenceEndWithin finds a sentence ending near cut without exceeding upper. It
+// searches backward from cut first (up to 200 chars), then forward up to upper.
+// Returns 0 if none is found.
+func sentenceEndWithin(text string, cut, upper int) int {
+	start := cut
+	if start > upper {
+		start = upper
+	}
+
+	// Backward from the cut.
+	for i := start; i > 0 && i > cut-200; i-- {
+		if i <= len(text) && isSentenceEndChar(text[i-1]) {
+			if i >= len(text) || text[i] == ' ' || text[i] == '\n' {
+				return i
+			}
+		}
+	}
+
+	// Forward, but never past upper.
+	for i := start + 1; i <= upper && i <= len(text); i++ {
+		if isSentenceEndChar(text[i-1]) {
+			if i >= len(text) || text[i] == ' ' || text[i] == '\n' {
+				return i
+			}
+		}
+	}
+
+	return 0
+}
+
+// wordBoundaryWithin finds a whitespace word boundary near cut without exceeding
+// upper. It searches backward from cut first (up to 100 chars), then forward up
+// to upper. Returns 0 if none is found.
+func wordBoundaryWithin(text string, cut, upper int) int {
+	start := cut
+	if start > upper {
+		start = upper
+	}
+
+	for i := start; i > 0 && i > cut-100; i-- {
+		if i <= len(text) && (text[i-1] == ' ' || text[i-1] == '\n') {
+			return i
+		}
+	}
+
+	for i := start + 1; i <= upper && i <= len(text); i++ {
+		if text[i-1] == ' ' || text[i-1] == '\n' {
+			return i
+		}
+	}
+
+	return 0
 }
 
 // adjustBoundaryPositions adjusts boundary positions after a split
