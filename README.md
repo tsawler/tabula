@@ -20,7 +20,8 @@ A Go text extraction library with a fluent API, designed for RAG (Retrieval-Augm
 - **PDF 1.0-1.7 Support** - Including modern XRef streams (PDF 1.5+)
 - **Encrypted PDFs** - Opens RC4 and AES (V2/V3) encrypted files secured with an empty user/owner password
 - **Damaged-PDF Recovery** - Rebuilds a missing/corrupt cross-reference table by scanning, and recovers streams with a missing or wrong `/Length`
-- **Optional OCR** - Text extraction from scanned PDFs via Tesseract, feeding `Text()`, `ToMarkdown()`, and `Chunks()` alike. Decodes JBIG2 and JPEG2000 scans, auto-rotates per `/Rotate`, and upscales low-DPI images; language and page-segmentation mode are configurable (build with `-tags ocr`)
+- **Optional OCR** - Text extraction from scanned PDFs via Tesseract, feeding `Text()`, `ToMarkdown()`, and `Chunks()` alike. Renders whole pages (so vector-outlined text is captured, not just embedded scans), decodes JBIG2 and JPEG2000 scans, auto-rotates per `/Rotate`; language and page-segmentation mode are configurable (build with `-tags ocr`)
+- **Image Placement** - Enumerate a PDF's raster images with their on-page bounding box and page coverage (`Images()` / `PlacedImage`) — e.g. to tell a full-page scan from a discrete in-page figure
 
 ## Installation
 
@@ -44,7 +45,7 @@ commonly use that have no pure-Go decoder. It requires these libraries:
 
 **macOS (Homebrew):**
 ```bash
-brew install tesseract jbig2dec openjpeg
+brew install tesseract jbig2dec openjpeg poppler
 # Optional: additional language packs
 brew install tesseract-lang
 ```
@@ -52,10 +53,16 @@ brew install tesseract-lang
 **Ubuntu/Debian:**
 ```bash
 apt-get install tesseract-ocr libtesseract-dev libleptonica-dev \
-               libjbig2dec0-dev libopenjp2-7-dev
+               libjbig2dec0-dev libopenjp2-7-dev poppler-utils
 # Optional: additional language packs
 apt-get install tesseract-ocr-fra tesseract-ocr-deu  # French, German, etc.
 ```
+
+`poppler-utils` (the `pdftoppm` tool) is used to rasterize whole pages for OCR.
+It's an optional runtime dependency: when present, OCR reads vector-outlined text
+and text drawn over figures (which extracting embedded images alone misses); when
+absent, OCR falls back to the embedded-image path. It's invoked as a subprocess,
+so it needs no CGO flags.
 
 ### CGO Flags (macOS Apple Silicon only)
 
@@ -314,8 +321,9 @@ ext := tabula.FromHTMLReader(resp.Body)
 | `Blocks()` | `[]layout.Block` | Text blocks | PDF |
 | `Elements()` | `[]layout.LayoutElement` | All elements in reading order | PDF |
 | `Analyze()` | `*layout.AnalysisResult` | Complete layout analysis | PDF |
+| `Images()` | `[]PlacedImage` | Raster images with on-page bounding box + `Coverage()` | PDF |
 
-**Note on PDF-only methods:** The methods marked "PDF" in the tables above (`Pages`, `PageRange`, `JoinParagraphs`, `ByColumn`, `PreserveLayout`, `Fragments`, `Lines`, `Paragraphs`, `Headings`, `Lists`, `Blocks`, `Elements`, `Analyze`) exist because PDFs lack semantic structure - they store raw text fragments at arbitrary positions, requiring layout analysis to reconstruct document structure. DOCX, ODT, XLSX, PPTX, HTML, and EPUB files already contain explicit semantic markup, so these detection methods aren't needed. Use `Document()` to access the semantic structure for all formats.
+**Note on PDF-only methods:** The methods marked "PDF" in the tables above (`Pages`, `PageRange`, `JoinParagraphs`, `ByColumn`, `PreserveLayout`, `Fragments`, `Lines`, `Paragraphs`, `Headings`, `Lists`, `Blocks`, `Elements`, `Analyze`, `Images`) exist because PDFs lack semantic structure - they store raw text fragments at arbitrary positions, requiring layout analysis to reconstruct document structure. DOCX, ODT, XLSX, PPTX, HTML, and EPUB files already contain explicit semantic markup, so these detection methods aren't needed. Use `Document()` to access the semantic structure for all formats.
 
 **Note on XLSX:** For Excel files, each sheet becomes a page, and the sheet data is represented as a table element. `PageCount()` returns the number of sheets. `Text()` returns tab-separated values, while `ToMarkdown()` formats each sheet as a markdown table.
 
@@ -335,6 +343,38 @@ isCharLevel, _ := ext.IsCharacterLevel()  // Detect character-level PDFs
 isMultiCol, _ := ext.IsMultiColumn()      // Detect multi-column layouts
 pageCount, _ := ext.PageCount()           // Get page count (works with DOCX and ODT too)
 ```
+
+### Image Placement (PDF)
+
+`Images()` reports every raster image drawn in a PDF, with the bounding box it
+occupies on the page (in points). It walks each page's content stream tracking the
+current transformation matrix, so it knows how large each image is actually drawn —
+not just its pixel dimensions. `Coverage()` gives the fraction of the page an image
+covers, which distinguishes a full-page scan from a discrete in-page figure.
+
+```go
+images, err := tabula.Open("document.pdf").Images()
+if err != nil {
+    log.Fatal(err)
+}
+for _, img := range images {
+    fmt.Printf("page %d %s: %dx%dpx, covers %.0f%% of the page\n",
+        img.Page, img.Name, img.PixelWidth, img.PixelHeight, img.Coverage()*100)
+}
+
+// e.g. count discrete figures, ignoring full-page scans and tiny decorations:
+figures := 0
+for _, img := range images {
+    if c := img.Coverage(); c >= 0.02 && c < 0.90 {
+        figures++
+    }
+}
+```
+
+`Images()` respects `Pages(...)` / `PageRange(...)` selection, returns `(nil, nil)`
+for non-PDF formats, and is a terminal operation (it closes the reader). Inline
+images (`BI`/`ID`/`EI`) are not reported — only image XObjects drawn via `Do`,
+including those nested in Form XObjects.
 
 ### HTML Navigation Filtering
 
@@ -397,8 +437,8 @@ go build -tags ocr
 
 **How it works:**
 1. For each page, Tabula first attempts native PDF text extraction
-2. If a page has no native text — or only a sparse stamp/watermark over a scan — it extracts the page's images (including those nested in Form XObjects)
-3. Images are uprighted per the page `/Rotate`, low-resolution scans are upscaled toward ~300 DPI, then processed through Tesseract OCR
+2. If a page has no native text — or only a sparse stamp/watermark over a scan — Tabula renders the **entire page** to a bitmap at ~300 DPI (via `pdftoppm` from poppler-utils) and runs Tesseract on it. Rendering the whole page captures vector-outlined text and text drawn over or around figures — content that has no embedded image to extract — which a page whose "text" was converted to outlines (common in illustrated/design PDFs) otherwise loses entirely
+3. If `pdftoppm` isn't installed, it falls back to extracting the page's embedded images (including those nested in Form XObjects), uprighting them per the page `/Rotate` and upscaling low-resolution scans toward ~300 DPI before OCR
 4. A `WarningOCRFallback` is added to indicate which pages used OCR
 
 **Configuring OCR:**
