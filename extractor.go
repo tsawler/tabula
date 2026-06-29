@@ -597,7 +597,7 @@ func (e *Extractor) Text() (string, []Warning, error) {
 		// Sparse or no native text: queue an OCR fallback (covers fully scanned
 		// pages and scans carrying only a native stamp/watermark overlay).
 		if e.shouldTryOCR(fragments) {
-			if prepared := e.prepareOCRImages(pd.page); len(prepared) > 0 {
+			if prepared := e.prepareOCRImages(pd.page, pd.index+1); len(prepared) > 0 {
 				jobs = append(jobs, ocrJob{index: i, images: prepared})
 				ctxs = append(ctxs, ocrCtx{pageNum: pd.index + 1, fragments: fragments})
 			}
@@ -1664,7 +1664,7 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 		// the loop (so a scanned page with no native text gets its body, while a
 		// born-digital sparse page keeps its real layout if OCR finds nothing).
 		if e.shouldTryOCR(fragments) {
-			if prepared := e.prepareOCRImages(page); len(prepared) > 0 {
+			if prepared := e.prepareOCRImages(page, pageNum+1); len(prepared) > 0 {
 				ocrJobsList = append(ocrJobsList, ocrJob{index: len(ocrJobsList), images: prepared})
 				ocrTargets = append(ocrTargets, ocrTarget{page: modelPage, fragments: fragments, pageNum: pageNum + 1})
 			}
@@ -2363,10 +2363,20 @@ type ocrJob struct {
 	images []preparedImage
 }
 
-// prepareOCRImages extracts and pre-processes a page's images for OCR. It must
-// run on the single reader goroutine (it seeks the file); the returned PNGs are
-// then safe to OCR concurrently. Returns nil when the page has no images.
-func (e *Extractor) prepareOCRImages(page *pages.Page) []preparedImage {
+// prepareOCRImages prepares a page's image(s) for OCR. It first tries a
+// full-page render (pageNum is the 1-based physical page), which captures
+// vector-outlined text and vector artwork that extracting embedded images
+// misses; when no renderer is available it falls back to extracting and
+// pre-processing the page's embedded images. It must run on the single reader
+// goroutine (the embedded-image path seeks the file); the returned PNGs are then
+// safe to OCR concurrently. Returns nil when neither path yields an image.
+func (e *Extractor) prepareOCRImages(page *pages.Page, pageNum int) []preparedImage {
+	// Preferred: rasterize the whole page so OCR sees everything on it. Falls
+	// through to embedded-image extraction when the renderer isn't available.
+	if rendered := e.renderPageForOCR(pageNum); len(rendered) > 0 {
+		return rendered
+	}
+
 	images, err := e.reader.ExtractPageImages(page)
 	if err != nil || len(images) == 0 {
 		return nil
