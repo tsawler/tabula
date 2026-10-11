@@ -2,6 +2,9 @@ package font
 
 import (
 	"fmt"
+	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/tsawler/tabula/core"
 )
@@ -74,6 +77,11 @@ func NewType1Font(fontDict core.Dict, resolver func(core.IndirectRef) (core.Obje
 		// Just log the error but don't fail
 		// In a real implementation, you might want to use a logger here
 		_ = err // Suppress unused error
+	}
+
+	// Without a PDF Encoding entry, Type1 fonts use their font program encoding.
+	if fontDict.Get("Encoding") == nil {
+		t1.parseEmbeddedEncoding()
 	}
 
 	// Parse ToUnicode CMap if present
@@ -167,23 +175,8 @@ func (t1 *Type1Font) parseEncoding(fontDict core.Dict, resolver func(core.Indire
 // applyEncodingDifferences applies the Differences array to customize encoding
 // Format: [code name1 name2 ... code name1 name2 ...]
 func (t1 *Type1Font) applyEncodingDifferences(diffs core.Array) error {
-	code := 0
-	for _, item := range diffs {
-		switch v := item.(type) {
-		case core.Int:
-			// This is a starting code
-			code = int(v)
-		case core.Name:
-			// This is a glyph name mapped to current code
-			// We would need a glyph name to Unicode mapping table here
-			// For now, just increment the code
-			// TODO: Implement proper glyph name to Unicode mapping
-			code++
-		default:
-			return fmt.Errorf("invalid differences array item: %T", item)
-		}
-	}
-	return nil
+	return t1.Font.applyEncodingDifferences(diffs)
+
 }
 
 // parseWidths extracts character width information from the font dictionary
@@ -386,4 +379,64 @@ func getNumber(obj core.Object) float64 {
 	default:
 		return 0
 	}
+}
+
+// applyEncodingDifferences retains the custom mapping on the shared Font used
+// by text extraction, rather than only on the subtype wrapper.
+func (f *Font) applyEncodingDifferences(diffs core.Array) error {
+	code := 0
+	glyphs := make(map[byte]string)
+	for _, item := range diffs {
+		switch v := item.(type) {
+		case core.Int:
+			code = int(v)
+		case core.Name:
+			if code < 0 || code > 255 {
+				return fmt.Errorf("invalid encoding character code: %d", code)
+			}
+			glyphs[byte(code)] = string(v)
+			code++
+		default:
+			return fmt.Errorf("invalid differences array item: %T", item)
+		}
+	}
+	f.customEncoding = newCustomEncodingFromGlyphs(GetEncoding(f.Encoding), glyphs, strings.EqualFold(f.BaseFont[strings.LastIndex(f.BaseFont, "+")+1:], "ZapfDingbats"))
+	return nil
+}
+
+var type1EncodingEntry = regexp.MustCompile(`\bdup\s+(\d+)\s+/([A-Za-z0-9_.]+)\s+put\b`)
+
+// Read static encoding declarations in the unencrypted Type1 header. This is
+// deliberately not a PostScript interpreter; unsupported programs keep fallback.
+func (t1 *Type1Font) parseEmbeddedEncoding() {
+	if t1.FontDescriptor == nil || t1.FontDescriptor.FontFile == nil {
+		return
+	}
+	data, err := t1.FontDescriptor.FontFile.Decode()
+	if err != nil {
+		return
+	}
+	header := strings.SplitN(string(data), "currentfile eexec", 2)[0]
+	start := strings.Index(header, "/Encoding")
+	if start < 0 {
+		return
+	}
+	header = header[start:]
+	// Ignore PostScript comments, including declarations quoted in comments.
+	var lines []string
+	for _, line := range strings.Split(header, "\n") {
+		lines = append(lines, strings.SplitN(line, "%", 2)[0])
+	}
+	matches := type1EncodingEntry.FindAllStringSubmatch(strings.Join(lines, "\n"), -1)
+	if len(matches) == 0 {
+		return
+	}
+	glyphs := make(map[byte]string)
+	for _, match := range matches {
+		code, err := strconv.Atoi(match[1])
+		if err == nil && code >= 0 && code <= 255 {
+			glyphs[byte(code)] = match[2]
+		}
+	}
+	t1.customEncoding = NewCustomEncodingFromGlyphs(GetEncoding(t1.Encoding), glyphs)
 }

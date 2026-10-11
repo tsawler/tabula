@@ -107,7 +107,7 @@ func (gs *GraphicsState) Restore() error {
 
 // Transform applies a transformation matrix to CTM (cm operator)
 func (gs *GraphicsState) Transform(m model.Matrix) {
-	gs.CTM = gs.CTM.Multiply(m)
+	gs.CTM = m.Multiply(gs.CTM)
 }
 
 // SetLineWidth sets the line width (w operator)
@@ -182,7 +182,7 @@ func (gs *GraphicsState) SetTextMatrix(m model.Matrix) {
 func (gs *GraphicsState) TranslateText(tx, ty float64) {
 	// Td is equivalent to: Tm = Tlm * T(tx, ty)
 	translation := model.Translate(tx, ty)
-	gs.Text.TextLineMatrix = gs.Text.TextLineMatrix.Multiply(translation)
+	gs.Text.TextLineMatrix = translation.Multiply(gs.Text.TextLineMatrix)
 	gs.Text.TextMatrix = gs.Text.TextLineMatrix
 }
 
@@ -234,7 +234,8 @@ func (gs *GraphicsState) ShowTextWithWidth(text string, width float64) (dx, dy f
 	totalAdvance += numChars * gs.Text.CharSpacing * scale
 
 	// Update text matrix (E component = tx)
-	gs.Text.TextMatrix[4] += totalAdvance
+	gs.Text.TextMatrix[4] += totalAdvance * gs.Text.TextMatrix[0]
+	gs.Text.TextMatrix[5] += totalAdvance * gs.Text.TextMatrix[1]
 
 	return totalAdvance, 0
 }

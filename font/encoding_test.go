@@ -91,6 +91,53 @@ func TestDecodeUTF16LE(t *testing.T) {
 	}
 }
 
+func TestDecodePDFTextString(t *testing.T) {
+	syntheticTitle := "Alpha-7f3c9b2e Sample Document"
+	utf16BE := []byte{0xFE, 0xFF}
+	for _, r := range syntheticTitle {
+		utf16BE = append(utf16BE, byte(r>>8), byte(r))
+	}
+
+	tests := []struct {
+		name     string
+		input    []byte
+		expected string
+	}{
+		{
+			name:     "UTF-16BE BOM synthetic title",
+			input:    utf16BE,
+			expected: syntheticTitle,
+		},
+		{
+			name: "UTF-16LE BOM",
+			input: []byte{
+				0xFF, 0xFE,
+				0x48, 0x00, 0x69, 0x00,
+			},
+			expected: "Hi",
+		},
+		{
+			name:     "PDFDocEncoding literal ASCII",
+			input:    []byte("Test Document"),
+			expected: "Test Document",
+		},
+		{
+			name:     "empty",
+			input:    []byte{},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := DecodePDFTextString(tt.input)
+			if got != tt.expected {
+				t.Errorf("DecodePDFTextString() = %q, want %q", got, tt.expected)
+			}
+		})
+	}
+}
+
 func TestFontDecodeStringWithUTF16BOM(t *testing.T) {
 	font := NewFont("TestFont", "Helvetica", "Type1")
 

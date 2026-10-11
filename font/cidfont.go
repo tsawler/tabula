@@ -121,6 +121,8 @@ func NewType0Font(fontDict core.Dict, resolver func(core.IndirectRef) (core.Obje
 		return nil, fmt.Errorf("failed to parse descendant font: %w", err)
 	}
 
+	t0.Font.Encoding = t0.Encoding
+	t0.Font.cidWidths = t0.DescendantFont
 	return t0, nil
 }
 

@@ -8,8 +8,8 @@ import (
 )
 
 // TestDecryptEmptyPassword verifies the standard security handler decrypts
-// content for every method qpdf emits with an empty user/owner password.
-// Fixtures are a one-page "Encrypted Hello World" PDF encrypted with qpdf.
+// content for RC4 and AES encryption with an empty user/owner password.
+// Fixtures are a one-page "Encrypted Hello World" PDF encrypted with pypdf.
 func TestDecryptEmptyPassword(t *testing.T) {
 	for _, name := range []string{"rc4_40", "rc4_128", "aesv2", "aesv3"} {
 		t.Run(name, func(t *testing.T) {

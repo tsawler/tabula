@@ -2,6 +2,8 @@ package tabula
 
 import (
 	"archive/zip"
+	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -519,6 +521,73 @@ func TestToMarkdownWithHeaderFooterExclusion(t *testing.T) {
 
 	if md == "" {
 		t.Error("expected non-empty markdown")
+	}
+}
+
+// utf16BEHexPDF builds a hex string payload (with BOM) for a PDF text string.
+func utf16BEHexPDF(s string) string {
+	var h strings.Builder
+	h.WriteString("FEFF")
+	for _, r := range s {
+		fmt.Fprintf(&h, "%04X", r)
+	}
+	return h.String()
+}
+
+// buildMinimalPDFWithUTF16InfoTitle returns a one-page PDF whose /Info /Title is a hex UTF-16BE string.
+func buildMinimalPDFWithUTF16InfoTitle(titleHex string) []byte {
+	bodies := [][]byte{
+		[]byte("<< /Type /Catalog /Pages 2 0 R >>"),
+		[]byte("<< /Type /Pages /Kids [3 0 R] /Count 1 >>"),
+		[]byte("<< /Type /Page /Parent 2 0 R /MediaBox [0 0 100 100] >>"),
+		[]byte(fmt.Sprintf("<< /Title <%s> >>", titleHex)),
+	}
+	var buf bytes.Buffer
+	buf.WriteString("%PDF-1.7\n")
+	offsets := make([]int, len(bodies))
+	for i, body := range bodies {
+		offsets[i] = buf.Len()
+		fmt.Fprintf(&buf, "%d 0 obj\n", i+1)
+		buf.Write(body)
+		buf.WriteString("\nendobj\n")
+	}
+	xref := buf.Len()
+	fmt.Fprintf(&buf, "xref\n0 %d\n0000000000 65535 f \n", len(bodies)+1)
+	for _, off := range offsets {
+		fmt.Fprintf(&buf, "%010d 00000 n \n", off)
+	}
+	fmt.Fprintf(&buf, "trailer\n<< /Size %d /Root 1 0 R /Info 4 0 R >>\nstartxref\n%d\n%%%%EOF", len(bodies)+1, xref)
+	return buf.Bytes()
+}
+
+func TestPDFInfoUTF16TitleMetadataAndMarkdown(t *testing.T) {
+	const wantTitle = "Alpha-7f3c9b2e Sample Document"
+	pdfPath := filepath.Join(t.TempDir(), "utf16-info-title.pdf")
+	if err := os.WriteFile(pdfPath, buildMinimalPDFWithUTF16InfoTitle(utf16BEHexPDF(wantTitle)), 0644); err != nil {
+		t.Fatalf("write test PDF: %v", err)
+	}
+
+	doc, _, err := Open(pdfPath).Document()
+	if err != nil {
+		t.Fatalf("Document() error = %v", err)
+	}
+	if doc.Metadata.Title != wantTitle {
+		t.Errorf("Metadata.Title = %q, want %q", doc.Metadata.Title, wantTitle)
+	}
+
+	md, _, err := Open(pdfPath).ToMarkdown()
+	if err != nil {
+		t.Fatalf("ToMarkdown() error = %v", err)
+	}
+	wantLine := "# " + wantTitle
+	if !strings.HasPrefix(md, wantLine) {
+		t.Errorf("markdown should start with %q, got: %q", wantLine, md)
+	}
+	if strings.Contains(md, "\x00") {
+		t.Errorf("markdown contains NUL bytes: %q", md)
+	}
+	if strings.ContainsRune(md, '\uFFFD') {
+		t.Errorf("markdown contains U+FFFD replacement characters: %q", md)
 	}
 }
 

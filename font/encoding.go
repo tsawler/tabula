@@ -146,13 +146,28 @@ func DecodeWithEncoding(data []byte, encodingName string) string {
 	return NormalizeUnicode(decoded)
 }
 
+// DecodePDFTextString decodes a PDF text string (Info dictionary, outlines, etc.)
+// per ISO 32000: UTF-16 with BOM, otherwise PDFDocEncoding.
+func DecodePDFTextString(data []byte) string {
+	if len(data) >= 2 {
+		if data[0] == 0xFE && data[1] == 0xFF {
+			return NormalizeUnicode(DecodeUTF16BE(data[2:]))
+		}
+		if data[0] == 0xFF && data[1] == 0xFE {
+			return NormalizeUnicode(DecodeUTF16LE(data[2:]))
+		}
+	}
+	return NormalizeUnicode(PDFDocEncoding.DecodeString(data))
+}
+
 // CustomEncoding represents an encoding with custom differences applied to a base encoding
 // This implements the PDF Differences array mechanism where specific character codes
 // are overridden to map to different glyphs
 type CustomEncoding struct {
-	name        string
-	base        Encoding
-	differences map[byte]rune
+	name             string
+	base             Encoding
+	differences      map[byte]rune
+	glyphDifferences map[byte]string
 }
 
 // NewCustomEncoding creates a custom encoding by applying differences to a base encoding
@@ -168,18 +183,33 @@ func NewCustomEncoding(base Encoding, differences map[byte]rune) *CustomEncoding
 // NewCustomEncodingFromGlyphs creates a custom encoding using glyph names instead of runes
 // This matches PDF's Differences array syntax which uses glyph names
 func NewCustomEncodingFromGlyphs(base Encoding, differences map[byte]string) *CustomEncoding {
-	// Convert glyph names to runes
-	runeDiffs := make(map[byte]rune, len(differences))
-	for code, glyphName := range differences {
-		if r, ok := glyphNameToUnicode[glyphName]; ok {
-			runeDiffs[code] = r
-		}
-	}
-	return NewCustomEncoding(base, runeDiffs)
+	return newCustomEncodingFromGlyphs(base, differences, base.Name() == "ZapfDingbatsEncoding")
 }
 
-// Decode converts a byte to a rune, using the difference if present, otherwise the base encoding
+func newCustomEncodingFromGlyphs(base Encoding, differences map[byte]string, zapf bool) *CustomEncoding {
+	e := NewCustomEncoding(base, nil)
+	e.glyphDifferences = make(map[byte]string, len(differences))
+	for code, name := range differences {
+		if value, ok := glyphToUnicode(name, zapf); ok {
+			e.glyphDifferences[code] = value
+		}
+	}
+	return e
+}
+
+// Decode converts a byte to a rune. Multi-character glyphs return utf8.RuneError;
+// use DecodeString to preserve the complete Unicode sequence.
 func (e *CustomEncoding) Decode(b byte) rune {
+	if value, ok := e.glyphDifferences[b]; ok {
+		if value == "" {
+			return 0
+		}
+		if utf8.RuneCountInString(value) != 1 {
+			return utf8.RuneError
+		}
+		r, _ := utf8.DecodeRuneInString(value)
+		return r
+	}
 	if r, ok := e.differences[b]; ok {
 		return r
 	}
@@ -188,14 +218,17 @@ func (e *CustomEncoding) Decode(b byte) rune {
 
 // DecodeString converts a byte sequence to a Unicode string using custom mappings
 func (e *CustomEncoding) DecodeString(data []byte) string {
-	runes := make([]rune, 0, len(data))
+	var sb strings.Builder
 	for _, b := range data {
-		r := e.Decode(b)
-		if r != 0 {
-			runes = append(runes, r)
+		if value, ok := e.glyphDifferences[b]; ok {
+			sb.WriteString(value)
+			continue
+		}
+		if r := e.Decode(b); r != 0 {
+			sb.WriteRune(r)
 		}
 	}
-	return string(runes)
+	return sb.String()
 }
 
 // Name returns the encoding name
@@ -413,197 +446,6 @@ var standardEncodingTableData = [256]rune{
 // This is useful for detecting UTF-16BE strings (which will fail UTF-8 validation)
 func IsValidUTF8(s string) bool {
 	return utf8.ValidString(s)
-}
-
-// glyphNameToUnicode maps PDF glyph names to Unicode code points
-// This is used by NewCustomEncodingFromGlyphs to convert Differences arrays
-// Reference: Adobe Glyph List Specification
-var glyphNameToUnicode = map[string]rune{
-	// Common punctuation and quotes
-	"space":         0x0020,
-	"exclam":        0x0021,
-	"quotedbl":      0x0022,
-	"numbersign":    0x0023,
-	"dollar":        0x0024,
-	"percent":       0x0025,
-	"ampersand":     0x0026,
-	"quotesingle":   0x0027,
-	"quoteright":    0x2019, // '
-	"quoteleft":     0x2018, // '
-	"quotedblleft":  0x201C, // "
-	"quotedblright": 0x201D, // "
-	"parenleft":     0x0028,
-	"parenright":    0x0029,
-	"asterisk":      0x002A,
-	"plus":          0x002B,
-	"comma":         0x002C,
-	"hyphen":        0x002D,
-	"period":        0x002E,
-	"slash":         0x002F,
-
-	// Digits
-	"zero":  0x0030,
-	"one":   0x0031,
-	"two":   0x0032,
-	"three": 0x0033,
-	"four":  0x0034,
-	"five":  0x0035,
-	"six":   0x0036,
-	"seven": 0x0037,
-	"eight": 0x0038,
-	"nine":  0x0039,
-
-	// Common symbols
-	"colon":        0x003A,
-	"semicolon":    0x003B,
-	"less":         0x003C,
-	"equal":        0x003D,
-	"greater":      0x003E,
-	"question":     0x003F,
-	"at":           0x0040,
-	"bracketleft":  0x005B,
-	"backslash":    0x005C,
-	"bracketright": 0x005D,
-	"asciicircum":  0x005E,
-	"underscore":   0x005F,
-	"grave":        0x0060,
-	"braceleft":    0x007B,
-	"bar":          0x007C,
-	"braceright":   0x007D,
-	"asciitilde":   0x007E,
-
-	// Uppercase letters
-	"A": 0x0041, "B": 0x0042, "C": 0x0043, "D": 0x0044,
-	"E": 0x0045, "F": 0x0046, "G": 0x0047, "H": 0x0048,
-	"I": 0x0049, "J": 0x004A, "K": 0x004B, "L": 0x004C,
-	"M": 0x004D, "N": 0x004E, "O": 0x004F, "P": 0x0050,
-	"Q": 0x0051, "R": 0x0052, "S": 0x0053, "T": 0x0054,
-	"U": 0x0055, "V": 0x0056, "W": 0x0057, "X": 0x0058,
-	"Y": 0x0059, "Z": 0x005A,
-
-	// Lowercase letters
-	"a": 0x0061, "b": 0x0062, "c": 0x0063, "d": 0x0064,
-	"e": 0x0065, "f": 0x0066, "g": 0x0067, "h": 0x0068,
-	"i": 0x0069, "j": 0x006A, "k": 0x006B, "l": 0x006C,
-	"m": 0x006D, "n": 0x006E, "o": 0x006F, "p": 0x0070,
-	"q": 0x0071, "r": 0x0072, "s": 0x0073, "t": 0x0074,
-	"u": 0x0075, "v": 0x0076, "w": 0x0077, "x": 0x0078,
-	"y": 0x0079, "z": 0x007A,
-
-	// Currency and special symbols
-	"Euro":           0x20AC, // €
-	"bullet":         0x2022, // •
-	"dagger":         0x2020, // †
-	"daggerdbl":      0x2021, // ‡
-	"ellipsis":       0x2026, // …
-	"emdash":         0x2014, // —
-	"endash":         0x2013, // –
-	"trademark":      0x2122, // ™
-	"copyright":      0x00A9, // ©
-	"registered":     0x00AE, // ®
-	"cent":           0x00A2, // ¢
-	"sterling":       0x00A3, // £
-	"yen":            0x00A5, // ¥
-	"florin":         0x0192, // ƒ
-	"section":        0x00A7, // §
-	"paragraph":      0x00B6, // ¶
-	"degree":         0x00B0, // °
-	"exclamdown":     0x00A1, // ¡
-	"questiondown":   0x00BF, // ¿
-	"guillemotleft":  0x00AB, // «
-	"guillemotright": 0x00BB, // »
-	"guilsinglleft":  0x2039, // ‹
-	"guilsinglright": 0x203A, // ›
-
-	// Accented characters - Latin-1 supplement
-	"Agrave":      0x00C0, // À
-	"Aacute":      0x00C1, // Á
-	"Acircumflex": 0x00C2, // Â
-	"Atilde":      0x00C3, // Ã
-	"Adieresis":   0x00C4, // Ä
-	"Aring":       0x00C5, // Å
-	"AE":          0x00C6, // Æ
-	"Ccedilla":    0x00C7, // Ç
-	"Egrave":      0x00C8, // È
-	"Eacute":      0x00C9, // É
-	"Ecircumflex": 0x00CA, // Ê
-	"Edieresis":   0x00CB, // Ë
-	"Igrave":      0x00CC, // Ì
-	"Iacute":      0x00CD, // Í
-	"Icircumflex": 0x00CE, // Î
-	"Idieresis":   0x00CF, // Ï
-	"Eth":         0x00D0, // Ð
-	"Ntilde":      0x00D1, // Ñ
-	"Ograve":      0x00D2, // Ò
-	"Oacute":      0x00D3, // Ó
-	"Ocircumflex": 0x00D4, // Ô
-	"Otilde":      0x00D5, // Õ
-	"Odieresis":   0x00D6, // Ö
-	"Oslash":      0x00D8, // Ø
-	"Ugrave":      0x00D9, // Ù
-	"Uacute":      0x00DA, // Ú
-	"Ucircumflex": 0x00DB, // Û
-	"Udieresis":   0x00DC, // Ü
-	"Yacute":      0x00DD, // Ý
-	"Thorn":       0x00DE, // Þ
-	"germandbls":  0x00DF, // ß
-
-	"agrave":      0x00E0, // à
-	"aacute":      0x00E1, // á
-	"acircumflex": 0x00E2, // â
-	"atilde":      0x00E3, // ã
-	"adieresis":   0x00E4, // ä
-	"aring":       0x00E5, // å
-	"ae":          0x00E6, // æ
-	"ccedilla":    0x00E7, // ç
-	"egrave":      0x00E8, // è
-	"eacute":      0x00E9, // é
-	"ecircumflex": 0x00EA, // ê
-	"edieresis":   0x00EB, // ë
-	"igrave":      0x00EC, // ì
-	"iacute":      0x00ED, // í
-	"icircumflex": 0x00EE, // î
-	"idieresis":   0x00EF, // ï
-	"eth":         0x00F0, // ð
-	"ntilde":      0x00F1, // ñ
-	"ograve":      0x00F2, // ò
-	"oacute":      0x00F3, // ó
-	"ocircumflex": 0x00F4, // ô
-	"otilde":      0x00F5, // õ
-	"odieresis":   0x00F6, // ö
-	"oslash":      0x00F8, // ø
-	"ugrave":      0x00F9, // ù
-	"uacute":      0x00FA, // ú
-	"ucircumflex": 0x00FB, // û
-	"udieresis":   0x00FC, // ü
-	"yacute":      0x00FD, // ý
-	"thorn":       0x00FE, // þ
-	"ydieresis":   0x00FF, // ÿ
-
-	// Fractions
-	"fraction":      0x2044, // ⁄
-	"onehalf":       0x00BD, // ½
-	"onequarter":    0x00BC, // ¼
-	"threequarters": 0x00BE, // ¾
-
-	// Math and technical
-	"minus":        0x2212, // −
-	"multiply":     0x00D7, // ×
-	"divide":       0x00F7, // ÷
-	"plusminus":    0x00B1, // ±
-	"notequal":     0x2260, // ≠
-	"lessequal":    0x2264, // ≤
-	"greaterequal": 0x2265, // ≥
-	"mu":           0x00B5, // µ
-	"partialdiff":  0x2202, // ∂
-	"summation":    0x2211, // ∑
-	"product":      0x220F, // ∏
-	"pi":           0x03C0, // π
-	"integral":     0x222B, // ∫
-	"Omega":        0x03A9, // Ω
-	"infinity":     0x221E, // ∞
-	"radical":      0x221A, // √
-	"approxequal":  0x2248, // ≈
 }
 
 // symbolEncodingTable - Adobe Symbol font encoding

@@ -593,3 +593,65 @@ func BenchmarkLineDetector_LargeDocument(b *testing.B) {
 		detector.Detect(fragments, 612, 792)
 	}
 }
+
+func TestMixedMathBaselinesStayInReadingOrder(t *testing.T) {
+	fragments := []text.TextFragment{
+		makeLineFragment("In traditional ", 10, 100, 60, 10, 10),
+		makeLineFragment("r", 70, 100.22, 5, 10, 10),
+		makeLineFragment("t", 75, 97.5, 3, 7, 7),
+		makeLineFragment("∈ R", 81, 100.22, 20, 10, 10),
+		makeLineFragment("reinforcement learning", 105, 100, 100, 10, 10),
+		makeLineFragment("next line", 10, 89, 40, 10, 10),
+	}
+	result := NewLineDetector().Detect(fragments, 300, 200)
+	if len(result.Lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(result.Lines))
+	}
+	if got := result.Lines[0].Text; got != "In traditional rₜ ∈ R reinforcement learning" {
+		t.Fatalf("garbled line: %q", got)
+	}
+}
+
+func TestRaisedEquationDelimitersAndIndices(t *testing.T) {
+	fragments := []text.TextFragment{
+		makeLineFragment("((", 10, 108, 6, 10, 10),
+		makeLineFragment("o", 16, 100, 5, 10, 10),
+		makeLineFragment("1", 21, 104, 3, 7, 7),
+		makeLineFragment("0", 21, 97.5, 3, 7, 7),
+		makeLineFragment(",", 24, 100, 3, 10, 10),
+		makeLineFragment("a", 29, 100, 5, 10, 10),
+		makeLineFragment("1", 34, 104, 3, 7, 7),
+		makeLineFragment("0", 34, 97.5, 3, 7, 7),
+		makeLineFragment("))", 37, 108, 6, 10, 10),
+		makeLineFragment("following prose", 10, 80, 70, 10, 10),
+	}
+	result := NewLineDetector().Detect(fragments, 300, 200)
+	if len(result.Lines) != 2 {
+		t.Fatalf("got %d lines, want 2", len(result.Lines))
+	}
+	if got := result.Lines[0].Text; got != "((o¹₀, a¹₀))" {
+		t.Fatalf("garbled equation: %q", got)
+	}
+}
+
+func TestOverprintedWhitespaceDoesNotSplitWord(t *testing.T) {
+	fs := []text.TextFragment{
+		makeLineFragment("maintenan", 10, 20, 50, 10, 10),
+		makeLineFragment(" ", 40, 20, 2, 10, 10),
+		makeLineFragment("ce", 60, 20, 10, 10, 10),
+		makeLineFragment(" ", 70, 20, 3, 10, 10),
+		makeLineFragment("work", 73, 20, 20, 10, 10),
+	}
+	if got := NewLineDetector().assembleLineText(fs); got != "maintenance work" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestScriptConversionRequiresWholeMapping(t *testing.T) {
+	if got := scriptText("drive", false); got != "drive" {
+		t.Fatalf("partial script: %q", got)
+	}
+	if got := scriptText("12", true); got != "¹²" {
+		t.Fatalf("got %q", got)
+	}
+}

@@ -1,11 +1,15 @@
 package font
 
+import "strings"
+
 // Font represents a PDF font
 type Font struct {
-	Name     string
-	BaseFont string
-	Subtype  string
-	Encoding string
+	Name           string
+	BaseFont       string
+	Subtype        string
+	Encoding       string
+	customEncoding Encoding
+	cidWidths      *CIDFont
 
 	// Character width information
 	widths map[rune]float64
@@ -67,7 +71,19 @@ func (f *Font) DecodeString(data []byte) string {
 
 	// Priority 1: ToUnicode CMap (most accurate)
 	if f.ToUnicodeCMap != nil {
-		decoded = f.ToUnicodeCMap.LookupString(data)
+		if f.customEncoding != nil && (f.Subtype == "Type1" || f.Subtype == "TrueType") {
+			var sb strings.Builder
+			for _, code := range data {
+				value := f.ToUnicodeCMap.Lookup(uint32(code))
+				if value == "" {
+					value = f.customEncoding.DecodeString([]byte{code})
+				}
+				sb.WriteString(value)
+			}
+			decoded = sb.String()
+		} else {
+			decoded = f.ToUnicodeCMap.LookupString(data)
+		}
 		return NormalizeUnicode(decoded)
 	}
 
@@ -83,6 +99,13 @@ func (f *Font) DecodeString(data []byte) string {
 			decoded = DecodeUTF16LE(data[2:])
 			return NormalizeUnicode(decoded)
 		}
+	}
+
+	if f.customEncoding != nil {
+		decoded = f.customEncoding.DecodeString(data)
+		// Expand typographic ligatures without compatibility-normalizing other text.
+		decoded = strings.NewReplacer("ﬀ", "ff", "ﬁ", "fi", "ﬂ", "fl", "ﬃ", "ffi", "ﬄ", "ffl").Replace(decoded)
+		return NormalizeUnicode(decoded)
 	}
 
 	// Priority 3: Use font's Encoding property
@@ -447,4 +470,24 @@ func init() {
 		symbolWidths[r] = 500
 		zapfDingbatsWidths[r] = 500
 	}
+}
+
+// GetEncodedWidth measures glyphs by source character code. Simple-font widths
+// are indexed by code, not by the Unicode characters produced by decoding.
+func (f *Font) GetEncodedWidth(data []byte) float64 {
+	if f.cidWidths != nil && (f.Encoding == "Identity-H" || f.Encoding == "Identity-V") {
+		total := 0.0
+		for i := 0; i+1 < len(data); i += 2 {
+			total += f.cidWidths.GetWidthForCID(int(data[i])<<8 | int(data[i+1]))
+		}
+		return total
+	}
+	if f.Subtype != "Type1" && f.Subtype != "TrueType" {
+		return f.GetStringWidth(f.DecodeString(data))
+	}
+	total := 0.0
+	for _, code := range data {
+		total += f.GetWidth(rune(code))
+	}
+	return total
 }

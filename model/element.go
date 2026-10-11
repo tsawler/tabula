@@ -52,13 +52,15 @@ type TextElement interface {
 
 // Paragraph represents a paragraph of text with position, style, and alignment.
 type Paragraph struct {
-	Text      string
-	BBox      BBox
-	FontSize  float64
-	FontName  string
-	Style     TextStyle
-	Alignment TextAlignment
-	ZOrder    int
+	// Preformatted preserves spatial text such as display equations.
+	Preformatted bool
+	Text         string
+	BBox         BBox
+	FontSize     float64
+	FontName     string
+	Style        TextStyle
+	Alignment    TextAlignment
+	ZOrder       int
 }
 
 // Type returns ElementTypeParagraph.

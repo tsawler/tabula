@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/tsawler/tabula/core"
+	"github.com/tsawler/tabula/font"
 	"github.com/tsawler/tabula/text"
 )
 
@@ -23,12 +24,12 @@ func (e *Extractor) checkMessyPDF(fragments []text.TextFragment) {
 
 			if p := info.Get("Producer"); p != nil {
 				if s, ok := p.(core.String); ok {
-					producer = string(s)
+					producer = font.DecodePDFTextString([]byte(s))
 				}
 			}
 			if c := info.Get("Creator"); c != nil {
 				if s, ok := c.(core.String); ok {
-					creator = string(s)
+					creator = font.DecodePDFTextString([]byte(s))
 				}
 			}
 

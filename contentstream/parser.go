@@ -18,9 +18,10 @@ type Operation struct {
 // Parser parses PDF content streams into a sequence of operations.
 // Each operation consists of an operator and its operands.
 type Parser struct {
-	data []byte
-	pos  int
-	ops  []Operation
+	data     []byte
+	pos      int
+	ops      []Operation
+	operands []core.Object // operands seen since the last operator
 }
 
 // NewParser creates a new content stream parser for the given data.
@@ -51,9 +52,6 @@ func (p *Parser) Parse() ([]Operation, error) {
 	return p.ops, nil
 }
 
-// operandStack temporarily holds operands until we hit an operator
-var operandStack []core.Object
-
 // parseNext parses the next token, which is either an operand (pushed onto the
 // stack) or an operator (which consumes the operand stack and creates an Operation).
 func (p *Parser) parseNext() error {
@@ -78,7 +76,7 @@ func (p *Parser) parseNext() error {
 		return fmt.Errorf("at position %d: %w", start, err)
 	}
 
-	operandStack = append(operandStack, operand)
+	p.operands = append(p.operands, operand)
 	return nil
 }
 
@@ -107,14 +105,14 @@ func (p *Parser) parseOperator() error {
 	// Create operation with current operand stack
 	operation := Operation{
 		Operator: operator,
-		Operands: make([]core.Object, len(operandStack)),
+		Operands: make([]core.Object, len(p.operands)),
 	}
-	copy(operation.Operands, operandStack)
+	copy(operation.Operands, p.operands)
 
 	p.ops = append(p.ops, operation)
 
-	// Clear operand stack
-	operandStack = nil
+	// Clear operand stack, keeping its capacity for the next operation
+	p.operands = p.operands[:0]
 
 	return nil
 }

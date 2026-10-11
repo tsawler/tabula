@@ -166,6 +166,21 @@ func (tt *TrueTypeFont) parseEncoding(fontDict core.Dict, resolver func(core.Ind
 		} else {
 			tt.Encoding = "WinAnsiEncoding"
 		}
+		if diffsObj := dict.Get("Differences"); diffsObj != nil {
+			if ref, ok := diffsObj.(core.IndirectRef); ok {
+				obj, err := resolver(ref)
+				if err != nil {
+					return err
+				}
+				diffsObj = obj
+			}
+			if diffs, ok := diffsObj.(core.Array); ok {
+				if err := tt.Font.applyEncodingDifferences(diffs); err != nil {
+					return err
+				}
+			}
+		}
+
 		return nil
 	}
 

@@ -12,6 +12,7 @@ import (
 	"github.com/tsawler/tabula/core"
 	"github.com/tsawler/tabula/docx"
 	"github.com/tsawler/tabula/epubdoc"
+	"github.com/tsawler/tabula/font"
 	"github.com/tsawler/tabula/format"
 	"github.com/tsawler/tabula/htmldoc"
 	"github.com/tsawler/tabula/layout"
@@ -703,7 +704,7 @@ func (e *Extractor) ToMarkdown() (string, []Warning, error) {
 //   - HeadingLevelOffset: adjusts heading levels (e.g., 1 makes H1 -> H2)
 //   - MaxHeadingLevel: caps heading depth (default: 6)
 //
-// PDF-only options (used via RAG chunking):
+// PDF-only options (chunk IDs or separators select RAG chunk export):
 //   - IncludeChunkSeparators: adds horizontal rules between chunks
 //   - IncludePageNumbers: adds page references
 //   - IncludeChunkIDs: adds chunk IDs as HTML comments
@@ -817,7 +818,16 @@ func (e *Extractor) ToMarkdownWithOptions(opts rag.MarkdownOptions) (string, []W
 		return md, nil, nil
 	}
 
-	// For PDF files, use the RAG chunking pipeline
+	// Preserve PDF document elements for normal Markdown exports.
+	if !opts.IncludeChunkIDs && !opts.IncludeChunkSeparators {
+		doc, warnings, err := e.Document()
+		if err != nil {
+			return "", warnings, err
+		}
+		return pdfMarkdown(doc, opts), warnings, nil
+	}
+
+	// For chunk-specific output, use the RAG chunking pipeline
 	chunks, warnings, err := e.Chunks()
 	if err != nil {
 		return "", warnings, err
@@ -1570,32 +1580,32 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 		if info, err := e.reader.GetInfo(); err == nil && info != nil {
 			if title := info.Get("Title"); title != nil {
 				if s, ok := title.(core.String); ok {
-					doc.Metadata.Title = string(s)
+					doc.Metadata.Title = font.DecodePDFTextString([]byte(s))
 				}
 			}
 			if author := info.Get("Author"); author != nil {
 				if s, ok := author.(core.String); ok {
-					doc.Metadata.Author = string(s)
+					doc.Metadata.Author = font.DecodePDFTextString([]byte(s))
 				}
 			}
 			if subject := info.Get("Subject"); subject != nil {
 				if s, ok := subject.(core.String); ok {
-					doc.Metadata.Subject = string(s)
+					doc.Metadata.Subject = font.DecodePDFTextString([]byte(s))
 				}
 			}
 			if creator := info.Get("Creator"); creator != nil {
 				if s, ok := creator.(core.String); ok {
-					doc.Metadata.Creator = string(s)
+					doc.Metadata.Creator = font.DecodePDFTextString([]byte(s))
 				}
 			}
 			if producer := info.Get("Producer"); producer != nil {
 				if s, ok := producer.(core.String); ok {
-					doc.Metadata.Producer = string(s)
+					doc.Metadata.Producer = font.DecodePDFTextString([]byte(s))
 				}
 			}
 			if keywords := info.Get("Keywords"); keywords != nil {
 				if s, ok := keywords.(core.String); ok {
-					doc.Metadata.Keywords = strings.Split(string(s), ",")
+					doc.Metadata.Keywords = strings.Split(font.DecodePDFTextString([]byte(s)), ",")
 					for i, kw := range doc.Metadata.Keywords {
 						doc.Metadata.Keywords[i] = strings.TrimSpace(kw)
 					}
@@ -1612,11 +1622,6 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 			headerFooterResult = e.detectHeaderFooter(allPages)
 		}
 	}
-
-	roDetector := layout.NewReadingOrderDetector()
-	paraDetector := layout.NewParagraphDetector()
-	headingDetector := layout.NewHeadingDetector()
-	listDetector := layout.NewListDetector()
 
 	// OCR is queued during this sequential (reader-bound) pass and run in
 	// parallel afterward; a queued page's content is replaced if OCR yields text.
@@ -1670,98 +1675,8 @@ func (e *Extractor) Document() (*model.Document, []Warning, error) {
 			}
 		}
 
-		// Perform layout analysis
-		roResult := roDetector.Detect(fragments, width, height)
-
-		// Get lines for paragraph detection
-		var lines []layout.Line
-		if roResult != nil && len(roResult.Lines) > 0 {
-			lines = roResult.Lines
-		}
-
-		// Detect paragraphs
-		var paragraphs []model.ParagraphInfo
-		if len(lines) > 0 {
-			paraLayout := paraDetector.Detect(lines, width, height)
-			for _, para := range paraLayout.Paragraphs {
-				paragraphs = append(paragraphs, model.ParagraphInfo{
-					BBox:      model.BBox{X: para.BBox.X, Y: para.BBox.Y, Width: para.BBox.Width, Height: para.BBox.Height},
-					Text:      para.Text,
-					LineCount: len(para.Lines),
-				})
-			}
-		}
-
-		// Detect headings
-		var headings []model.HeadingInfo
-		headingResult := headingDetector.DetectFromFragments(fragments, width, height)
-		if headingResult != nil {
-			for _, h := range headingResult.Headings {
-				headings = append(headings, model.HeadingInfo{
-					Level:      int(h.Level),
-					Text:       h.Text,
-					BBox:       model.BBox{X: h.BBox.X, Y: h.BBox.Y, Width: h.BBox.Width, Height: h.BBox.Height},
-					FontSize:   h.FontSize,
-					Confidence: h.Confidence,
-				})
-			}
-		}
-
-		// Detect lists
-		var lists []model.ListInfo
-		listResult := listDetector.DetectFromFragments(fragments, width, height)
-		if listResult != nil {
-			for _, l := range listResult.Lists {
-				listInfo := model.ListInfo{
-					Type:   convertListType(l.Type),
-					BBox:   model.BBox{X: l.BBox.X, Y: l.BBox.Y, Width: l.BBox.Width, Height: l.BBox.Height},
-					Nested: l.Level > 0, // Consider nested if level > 0
-				}
-				for _, item := range l.Items {
-					listInfo.Items = append(listInfo.Items, model.ListItem{
-						Text:   item.Text,
-						Level:  item.Level,
-						Bullet: item.Prefix,
-					})
-				}
-				lists = append(lists, listInfo)
-			}
-		}
-
-		// Create layout info
-		modelPage.Layout = &model.PageLayout{
-			Paragraphs: paragraphs,
-			Headings:   headings,
-			Lists:      lists,
-			Stats: model.LayoutStats{
-				FragmentCount:  len(fragments),
-				ParagraphCount: len(paragraphs),
-				HeadingCount:   len(headings),
-				ListCount:      len(lists),
-			},
-		}
-
-		// Add elements to page
-		for _, h := range headings {
-			modelPage.AddElement(&model.Heading{
-				Level: h.Level,
-				Text:  h.Text,
-				BBox:  h.BBox,
-			})
-		}
-		for _, p := range paragraphs {
-			modelPage.AddElement(&model.Paragraph{
-				Text: p.Text,
-				BBox: p.BBox,
-			})
-		}
-		for _, l := range lists {
-			modelPage.AddElement(&model.List{
-				Items:   l.Items,
-				Ordered: l.Type == model.ListTypeNumbered || l.Type == model.ListTypeLettered || l.Type == model.ListTypeRoman,
-				BBox:    l.BBox,
-			})
-		}
+		modelPage.Elements = pdfElements(fragments, width, height, e.pdfTables(page, fragments))
+		modelPage.Layout = pdfPageLayout(fragments, modelPage.Elements, width, height)
 
 		doc.AddPage(modelPage)
 	}

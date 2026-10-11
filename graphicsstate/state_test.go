@@ -469,3 +469,21 @@ func TestComplexTextFlow(t *testing.T) {
 		t.Errorf("expected Y position 706, got %f", gs.Text.TextMatrix[5])
 	}
 }
+
+func TestNestedTransformKeepsPageTranslation(t *testing.T) {
+	gs := NewGraphicsState()
+	gs.Transform(model.Matrix{1, 0, 0, 1, 200, 300})
+	gs.Transform(model.Matrix{0.5, 0, 0, 0.5, 0, 0})
+	if gs.CTM[4] != 200 || gs.CTM[5] != 300 {
+		t.Fatalf("translation scaled: %v", gs.CTM)
+	}
+	gs.SetTextMatrix(model.Matrix{0, 1, -1, 0, 10, 20})
+	gs.TranslateText(5, 0)
+	if gs.Text.TextMatrix[4] != 10 || gs.Text.TextMatrix[5] != 25 {
+		t.Fatalf("text translation ignores rotation: %v", gs.Text.TextMatrix)
+	}
+	gs.ShowTextWithWidth("a", 4)
+	if gs.Text.TextMatrix[4] != 10 || gs.Text.TextMatrix[5] != 29 {
+		t.Fatalf("advance ignores rotation: %v", gs.Text.TextMatrix)
+	}
+}

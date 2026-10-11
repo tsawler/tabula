@@ -4,6 +4,7 @@ package layout
 
 import (
 	"sort"
+	"strings"
 
 	"github.com/tsawler/tabula/model"
 	"github.com/tsawler/tabula/text"
@@ -118,6 +119,9 @@ func (d *ColumnDetector) Detect(fragments []text.TextFragment, pageWidth, pageHe
 
 	// Find column boundaries using whitespace gap analysis
 	gaps := d.findVerticalGaps(fragments, pageWidth, pageHeight)
+	if len(gaps) == 0 {
+		gaps = d.findPersistentGutter(fragments, pageWidth, pageHeight)
+	}
 
 	// If no significant gaps, treat as single column
 	if len(gaps) == 0 {
@@ -132,6 +136,9 @@ func (d *ColumnDetector) Detect(fragments []text.TextFragment, pageWidth, pageHe
 
 	// Validate and possibly merge columns
 	columns = d.validateColumns(columns)
+	if len(columns) < 2 {
+		return d.singleColumnLayout(fragments, pageWidth, pageHeight)
+	}
 
 	return &ColumnLayout{
 		Columns:           columns,
@@ -168,7 +175,7 @@ func (d *ColumnDetector) separateSpanningFragments(fragments []text.TextFragment
 	contentWidth := pageRight - pageLeft
 
 	// Check each line to see if it has content in any gap region
-	for _, line := range lines {
+	for lineIndex, line := range lines {
 		if len(line) == 0 {
 			continue
 		}
@@ -215,6 +222,15 @@ func (d *ColumnDetector) separateSpanningFragments(fragments []text.TextFragment
 		// 2. The line width is at least SpanningThreshold of total content width
 		//    This filters out stray fragments that happen to fall in gap regions
 		isSpanning := lineSpansGap && lineWidth > contentWidth*d.config.SpanningThreshold
+		// Centred title/author rows can have whitespace exactly at the gutter.
+		// A distinct header band belongs before both columns, even then.
+		if !isSpanning && lineIndex+1 < len(lines) && lineWidth > contentWidth*0.55 {
+			y, nextY := line[0].Y, lines[lineIndex+1][0].Y
+			both := lineLeft < gaps[0].Left && lineRight > gaps[0].Right
+			if both && y-nextY > line[0].Height*2 {
+				isSpanning = true
+			}
+		}
 
 		if isSpanning {
 			spanning = append(spanning, line...)
@@ -629,7 +645,7 @@ func (d *ColumnDetector) createColumnsFromGaps(fragments []text.TextFragment, ga
 		fragCenter := f.X + f.Width/2
 
 		for i := range columns {
-			if fragCenter >= boundaries[i].left && fragCenter < boundaries[i].right {
+			if fragCenter >= boundaries[i].left && (fragCenter < boundaries[i].right || i == len(columns)-1) {
 				columns[i].Fragments = append(columns[i].Fragments, f)
 				break
 			}
@@ -1013,4 +1029,52 @@ func (l *ColumnLayout) GetFragmentsInReadingOrder() []text.TextFragment {
 	}
 
 	return result
+}
+
+// Count occupied vertical bands instead of fragments: character-level text and
+// plot labels must not outweigh a persistent gutter between two prose columns.
+func (d *ColumnDetector) findPersistentGutter(fs []text.TextFragment, w, h float64) []Gap {
+	if w <= 0 || h <= 0 {
+		return nil
+	}
+	bands := make(map[int][]text.TextFragment)
+	for _, f := range fs {
+		if strings.TrimSpace(f.Text) != "" && !f.Vertical {
+			b := int(f.Y / 10)
+			bands[b] = append(bands[b], f)
+		}
+	}
+	var best Gap
+	bestScore := 0
+	for x := w * 0.35; x < w*0.65; x += 2 {
+		clear, both := 0, 0
+		for _, row := range bands {
+			crosses, left, right := false, false, false
+			for _, f := range row {
+				if f.X < x+5 && f.X+f.Width > x-5 {
+					crosses = true
+				}
+				if f.X+f.Width < x-5 {
+					left = true
+				}
+				if f.X > x+5 {
+					right = true
+				}
+			}
+			if !crosses {
+				clear++
+				if left && right {
+					both++
+				}
+			}
+		}
+		if both >= 6 && both*4 >= len(bands) && clear*3 >= len(bands)*2 && both > bestScore {
+			bestScore = both
+			best = Gap{Left: x - 5, Right: x + 5, Top: h}
+		}
+	}
+	if bestScore > 0 {
+		return []Gap{best}
+	}
+	return nil
 }

@@ -503,3 +503,53 @@ func TestWidthsArrayEdgeCases(t *testing.T) {
 		}
 	})
 }
+
+func TestCustomEncodingLigaturesAndSourceWidths(t *testing.T) {
+	dict := core.Dict{
+		"Subtype": core.Name("Type1"), "BaseFont": core.Name("Custom"),
+		"Encoding":  core.Dict{"Differences": core.Array{core.Int(2), core.Name("fi"), core.Name("fl"), core.Int(65), core.Name("eacute")}},
+		"FirstChar": core.Int(2), "LastChar": core.Int(3),
+		"Widths": core.Array{core.Int(550), core.Int(600)},
+	}
+	f, err := NewType1Font(dict, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Extraction registers the embedded Font, so mappings must survive there.
+	if got := f.Font.DecodeString([]byte{'d', 'e', 2, 'n', 'e', 'd', ' ', 3, 'e', 'x', 65}); got != "defined flexé" {
+		t.Fatalf("decoded %q, want defined flexé", got)
+	}
+	if got := f.Font.GetEncodedWidth([]byte{2, 3}); got != 1150 {
+		t.Fatalf("ligature advance %v, want 1150", got)
+	}
+}
+
+func TestEmbeddedType1Encoding(t *testing.T) {
+	program := &core.Stream{Dict: core.Dict{}, Data: []byte(`/Encoding 256 array
+0 1 255 {1 index exch /.notdef put} for
+% dup 50 /zero put
+ dup 50 /element put
+ dup 27 /sigma put
+ dup 2 /multiply put
+ dup 31 /follows put
+readonly def
+currentfile eexec
+ dup 50 /zero put`)}
+	for _, explicit := range []bool{false, true} {
+		dict := core.Dict{"Subtype": core.Name("Type1"), "BaseFont": core.Name("Math"), "FontDescriptor": core.Dict{"FontFile": core.IndirectRef{Number: 1}}}
+		if explicit {
+			dict["Encoding"] = core.Dict{"Differences": core.Array{core.Int(50), core.Name("zero")}}
+		}
+		f, err := NewType1Font(dict, func(core.IndirectRef) (core.Object, error) { return program, nil })
+		if err != nil {
+			t.Fatal(err)
+		}
+		if explicit {
+			if got := f.DecodeString([]byte{50}); got != "0" {
+				t.Fatalf("explicit encoding lost: %q", got)
+			}
+		} else if got := f.DecodeString([]byte{50, 27, 2, 31}); got != "∈σ×≻" {
+			t.Fatalf("embedded encoding: %q", got)
+		}
+	}
+}

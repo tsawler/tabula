@@ -26,6 +26,8 @@ type TextFragment struct {
 	Width     float64   // Width of the text in page units
 	Height    float64   // Height (typically font size)
 	FontName  string    // Name of the font used
+	BaseFont  string    // Resolved font face, used for style detection.
+	Vertical  bool      // Text runs rotated into a vertical direction.
 	FontSize  float64   // Font size in page units
 	Direction Direction // Text direction (LTR, RTL, Neutral)
 }
@@ -445,6 +447,12 @@ func (e *Extractor) invokeXObject(name string) error {
 		}
 	}
 
+	oldFonts := make(map[string]*font.Font, len(e.fonts))
+	for name, f := range e.fonts {
+		oldFonts[name] = f
+	}
+	defer func() { e.fonts = oldFonts }()
+
 	// Register fonts from XObject's resources
 	if xobjResources != nil {
 		if err := e.RegisterFontsFromResources(xobjResources, e.resolver); err != nil {
@@ -555,10 +563,10 @@ func (e *Extractor) showText(data []byte) {
 	// Calculate text width
 	width := 0.0
 	if f, ok := e.fonts[fontName]; ok {
-		width = f.GetStringWidth(decodedText) * fontSize / 1000.0
+		width = f.GetEncodedWidth(data) * e.gs.GetFontSize() / 1000.0
 	} else {
 		// Estimate width if font not available
-		width = float64(len(decodedText)) * fontSize * 0.5
+		width = float64(len(decodedText)) * e.gs.GetFontSize() * 0.5
 	}
 
 	// Detect text direction based on Unicode properties
@@ -584,20 +592,25 @@ func (e *Extractor) showText(data []byte) {
 		Text:      decodedText,
 		X:         x,
 		Y:         y,
-		Width:     width * ctmScale, // Width should also be scaled? X is already transformed.
+		Width:     width * ctmScale * e.gs.GetTextMatrix()[0], // Width should also be scaled? X is already transformed.
 		Height:    deviceFontSize,
 		FontName:  fontName,
 		FontSize:  deviceFontSize, // Use device font size for layout calculations
 		Direction: direction,
 	}
 
+	if f, ok := e.fonts[fontName]; ok {
+		fragment.BaseFont = f.BaseFont
+	}
+	tm := e.gs.GetTextMatrix()
+	fragment.Vertical = math.Abs(tm[0]*ctm[1]+tm[1]*ctm[3]) > math.Abs(tm[0]*ctm[0]+tm[1]*ctm[2])*2
 	e.fragments = append(e.fragments, fragment)
 
 	// Update text position (use original byte length)
 	// Use the calculated width to update the graphics state
 	// Note: width is already scaled by font size, but we need to check if it includes horizontal scaling
 	// The GetStringWidth returns width in 1000ths of em.
-	// width = f.GetStringWidth(decodedText) * fontSize / 1000.0
+	// width = f.GetEncodedWidth(data) * e.gs.GetFontSize() / 1000.0
 	// Horizontal scaling is applied in ShowTextWithWidth if we pass the raw width?
 	// No, ShowTextWithWidth expects the width in user space.
 	// Our 'width' variable is: GetStringWidth * fontSize / 1000.0
@@ -628,16 +641,18 @@ func (e *Extractor) showTextArray(arr core.Array) {
 			hScale := e.gs.Text.HorizontalScaling / 100.0
 			adjustment := -float64(v) * e.gs.GetFontSize() * hScale / 1000.0
 
-			// Update text matrix
+			// Advance only the text matrix; TJ must preserve the line origin for Td.
 			tm := e.gs.GetTextMatrix()
-			tm[4] += adjustment
-			e.gs.SetTextMatrix(tm)
+			tm[4] += adjustment * tm[0]
+			tm[5] += adjustment * tm[1]
+			e.gs.Text.TextMatrix = tm
 		case core.Real:
 			hScale := e.gs.Text.HorizontalScaling / 100.0
 			adjustment := -float64(v) * e.gs.GetFontSize() * hScale / 1000.0
 			tm := e.gs.GetTextMatrix()
-			tm[4] += adjustment
-			e.gs.SetTextMatrix(tm)
+			tm[4] += adjustment * tm[0]
+			tm[5] += adjustment * tm[1]
+			e.gs.Text.TextMatrix = tm
 		}
 	}
 }

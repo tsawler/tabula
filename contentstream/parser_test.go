@@ -1,7 +1,9 @@
 package contentstream
 
 import (
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/tsawler/tabula/core"
@@ -1142,5 +1144,60 @@ ET`)
 	for i := 0; i < b.N; i++ {
 		parser := NewParser(input)
 		_, _ = parser.Parse()
+	}
+}
+
+// TestParseDoesNotLeakOperandsBetweenParsers checks that operands left over at
+// the end of one content stream (no operator after them) do not show up in the
+// first operation of the next stream parsed.
+func TestParseDoesNotLeakOperandsBetweenParsers(t *testing.T) {
+	if _, err := NewParser([]byte("1 2 3")).Parse(); err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	ops, err := NewParser([]byte("q")).Parse()
+	if err != nil {
+		t.Fatalf("Parse failed: %v", err)
+	}
+
+	if len(ops) != 1 {
+		t.Fatalf("expected 1 operation, got %d", len(ops))
+	}
+
+	if len(ops[0].Operands) != 0 {
+		t.Errorf("expected 0 operands, got %v", ops[0].Operands)
+	}
+}
+
+// TestParseConcurrentParsers runs parsers in several goroutines at once. Each
+// one must see only its own operands. Run with -race to also catch shared state.
+func TestParseConcurrentParsers(t *testing.T) {
+	const workers = 8
+	var wg sync.WaitGroup
+	errs := make(chan error, workers)
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func(n int) {
+			defer wg.Done()
+			input := []byte(fmt.Sprintf("%d Tz", n))
+			for j := 0; j < 500; j++ {
+				ops, err := NewParser(input).Parse()
+				if err != nil {
+					errs <- err
+					return
+				}
+				if len(ops) != 1 || len(ops[0].Operands) != 1 || ops[0].Operands[0] != core.Int(n) {
+					errs <- fmt.Errorf("worker %d: expected one Tz with operand %d, got %v", n, n, ops)
+					return
+				}
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Error(err)
 	}
 }

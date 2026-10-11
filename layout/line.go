@@ -189,65 +189,42 @@ func (d *LineDetector) groupIntoLines(fragments []text.TextFragment) [][]text.Te
 	// This handles PDFs where CTM scaling compresses coordinates
 	adaptiveTolerance := d.calculateAdaptiveTolerance(fragments)
 
-	// Sort fragments by Y (descending, top to bottom in PDF coords) only
-	// Preserve stream order for same-Y fragments - X sorting happens per-line later
-	// (if shouldPreserveStreamOrder returns false for that line)
-	sorted := make([]text.TextFragment, len(fragments))
-	copy(sorted, fragments)
+	// Anchor lines with full-size text before attaching smaller scripts. Sorting
+	// by Y with a tolerance is not transitive and can scramble mixed baselines.
+	sorted := append([]text.TextFragment(nil), fragments...)
 	sort.SliceStable(sorted, func(i, j int) bool {
-		yDiff := sorted[i].Y - sorted[j].Y
-		if absFloat64(yDiff) > adaptiveTolerance {
-			return yDiff > 0 // Higher Y first (top of page)
+		di, dj := isMathDelimiter(sorted[i].Text), isMathDelimiter(sorted[j].Text)
+		if di != dj {
+			return !di
 		}
-		// Same line - preserve stream order (return false means don't swap)
-		return false
+		return sorted[i].Height > sorted[j].Height
 	})
-
 	var lines [][]text.TextFragment
-	var currentLine []text.TextFragment
-
 	for _, frag := range sorted {
-		if len(currentLine) == 0 {
-			currentLine = append(currentLine, frag)
-			continue
-		}
-
-		// Check if fragment is on same line as previous
-		// Use the average Y of the current line for better accuracy
-		avgY := d.averageLineY(currentLine)
-
-		if absFloat64(frag.Y-avgY) <= adaptiveTolerance {
-			// Same line
-			currentLine = append(currentLine, frag)
-		} else {
-			// New line - sort current line by X if stream order shouldn't be preserved
-			// Use stable sort with tolerance to handle overlapping fragments (Word/Quartz issue)
-			if !shouldPreserveStreamOrder(currentLine) {
-				sort.SliceStable(currentLine, func(i, j int) bool {
-					xTol := currentLine[i].FontSize * xTolerance
-					if absFloat64(currentLine[i].X-currentLine[j].X) < xTol {
-						return false // Treat as equal, preserve stream order
-					}
-					return currentLine[i].X < currentLine[j].X
-				})
+		best, distance := -1, 1e100
+		for i, line := range lines {
+			anchor := line[0]
+			tolerance := adaptiveTolerance
+			if frag.Height < anchor.Height*0.85 && adaptiveTolerance >= anchor.Height*0.4 {
+				tolerance = anchor.Height * 0.7
 			}
-			lines = append(lines, currentLine)
-			currentLine = []text.TextFragment{frag}
+			if isMathDelimiter(frag.Text) && adaptiveTolerance >= anchor.Height*0.4 {
+				tolerance = anchor.Height * 0.9
+			}
+			delta := absFloat64(frag.Y - anchor.Y)
+			if delta <= tolerance && delta < distance {
+				best, distance = i, delta
+			}
+		}
+		if best < 0 {
+			lines = append(lines, []text.TextFragment{frag})
+		} else {
+			lines[best] = append(lines[best], frag)
 		}
 	}
-
-	// Don't forget the last line
-	if len(currentLine) > 0 {
-		if !shouldPreserveStreamOrder(currentLine) {
-			sort.SliceStable(currentLine, func(i, j int) bool {
-				xTol := currentLine[i].FontSize * xTolerance
-				if absFloat64(currentLine[i].X-currentLine[j].X) < xTol {
-					return false // Treat as equal, preserve stream order
-				}
-				return currentLine[i].X < currentLine[j].X
-			})
-		}
-		lines = append(lines, currentLine)
+	sort.SliceStable(lines, func(i, j int) bool { return lines[i][0].Y > lines[j][0].Y })
+	for _, line := range lines {
+		sort.SliceStable(line, func(i, j int) bool { return line[i].X < line[j].X })
 	}
 
 	return lines
@@ -316,17 +293,15 @@ func (d *LineDetector) calculateAdaptiveTolerance(fragments []text.TextFragment)
 	}
 	minInterLineGap := gaps[p10Index]
 
-	// If the min inter-line gap is much smaller than the font height,
-	// the coordinates are likely scaled/compressed.
-	// Use a very conservative tolerance to avoid merging separate lines.
-	if minInterLineGap < avgHeight*0.5 && minInterLineGap > 0.1 {
-		// Coordinates are compressed - use gap-based tolerance
-		// Set tolerance to about 20% of the minimum gap to be very conservative
-		adaptiveTolerance := minInterLineGap * 0.2
-		if adaptiveTolerance < 0.15 {
-			adaptiveTolerance = 0.15 // Very small minimum for compressed coordinates
+	// Baseline offsets from inline math and font changes are not line spacing.
+	// Only reduce tolerance when even the largest typical gaps are compressed.
+	p90Gap := gaps[len(gaps)*9/10]
+	if p90Gap < avgHeight*0.5 && minInterLineGap > 0.1 {
+		tolerance := p90Gap * 0.2
+		if tolerance < 0.15 {
+			tolerance = 0.15
 		}
-		return adaptiveTolerance
+		return tolerance
 	}
 
 	// Standard case - use font-height-based tolerance
@@ -428,6 +403,43 @@ func (d *LineDetector) assembleLineText(fragments []text.TextFragment) string {
 		return ""
 	}
 
+	// Some producers paint a separate space over an existing word. It carries
+	// no visible content and must not split that word after geometric sorting.
+	clean := make([]text.TextFragment, 0, len(fragments))
+	for _, f := range fragments {
+		overprinted := false
+		if strings.TrimSpace(f.Text) == "" {
+			for _, word := range fragments {
+				if strings.TrimSpace(word.Text) != "" && f.X > word.X && f.X < word.X+word.Width && absFloat64(f.Y-word.Y) < 1 {
+					overprinted = true
+					break
+				}
+			}
+		}
+		if !overprinted {
+			clean = append(clean, f)
+		}
+	}
+	fragments = clean
+
+	// Use the most common full-size baseline to identify script fragments.
+	bodyHeight := 0.0
+	for _, f := range fragments {
+		if !isMathDelimiter(f.Text) && f.Height > bodyHeight {
+			bodyHeight = f.Height
+		}
+	}
+	baseline, bestWeight := 0.0, 0
+	weights := make(map[int]int)
+	for _, f := range fragments {
+		if !isMathDelimiter(f.Text) && f.Height >= bodyHeight*0.9 && f.Height <= bodyHeight*1.1 {
+			bucket := int(f.Y * 2)
+			weights[bucket] += len([]rune(f.Text))
+			if weights[bucket] > bestWeight {
+				baseline, bestWeight = f.Y, weights[bucket]
+			}
+		}
+	}
 	var sb strings.Builder
 	for i, frag := range fragments {
 		if i > 0 {
@@ -438,7 +450,13 @@ func (d *LineDetector) assembleLineText(fragments []text.TextFragment) string {
 				sb.WriteString(" ")
 			}
 		}
-		sb.WriteString(frag.Text)
+		value := frag.Text
+		if frag.Height < bodyHeight*0.85 && absFloat64(frag.Y-baseline) > 1 {
+			if len([]rune(value)) <= 3 && !strings.ContainsAny(value, " \t\n") {
+				value = scriptText(value, frag.Y > baseline)
+			}
+		}
+		sb.WriteString(value)
 	}
 
 	return sb.String()
@@ -711,4 +729,37 @@ func (line *Line) HasLargerFont(size float64) bool {
 		return false
 	}
 	return line.AverageFontSize > size
+}
+
+// Use Unicode scripts for representable text; keep unsupported glyphs intact.
+func scriptText(value string, superscript bool) string {
+	normal := "0123456789+-=()"
+	scripts := "₀₁₂₃₄₅₆₇₈₉₊₋₌₍₎"
+	if superscript {
+		scripts = "⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁼⁽⁾"
+	}
+	mapping := make(map[rune]rune)
+	source, target := []rune(normal), []rune(scripts)
+	for i, r := range source {
+		mapping[r] = target[i]
+	}
+	if !superscript {
+		source, target = []rune("aeoxhklmnpst"), []rune("ₐₑₒₓₕₖₗₘₙₚₛₜ")
+		for i, r := range source {
+			mapping[r] = target[i]
+		}
+	}
+	var result strings.Builder
+	for _, r := range value {
+		if converted, ok := mapping[r]; ok {
+			result.WriteRune(converted)
+		} else {
+			return value
+		}
+	}
+	return result.String()
+}
+
+func isMathDelimiter(value string) bool {
+	return value != "" && strings.Trim(value, "()[]{}") == ""
 }

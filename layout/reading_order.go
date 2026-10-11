@@ -156,6 +156,24 @@ func (d *ReadingOrderDetector) Detect(fragments []text.TextFragment, pageWidth, 
 		}
 	}
 
+	var vertical, horizontal []text.TextFragment
+	for _, f := range fragments {
+		if f.Vertical {
+			vertical = append(vertical, f)
+		} else {
+			horizontal = append(horizontal, f)
+		}
+	}
+	if len(vertical) > 0 && len(horizontal) > 0 {
+		result := d.Detect(horizontal, pageWidth, pageHeight)
+		for _, f := range vertical {
+			line := Line{Text: f.Text, Fragments: []text.TextFragment{f}, BBox: fragmentsBBox([]text.TextFragment{f})}
+			result.Lines = append(result.Lines, line)
+			result.Fragments = append(result.Fragments, f)
+		}
+		return result
+	}
+
 	// Step 1: Detect columns
 	columnDetector := NewColumnDetectorWithConfig(d.config.ColumnConfig)
 	columnLayout := columnDetector.Detect(fragments, pageWidth, pageHeight)

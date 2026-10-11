@@ -35,6 +35,7 @@ Thumbs.db
 testdata/corpus/
 *.pdf
 !testdata/*.pdf
+!reader/testdata/encrypted/*.pdf
 
 # Temporary files
 tmp/

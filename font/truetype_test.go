@@ -557,3 +557,16 @@ func TestParseFontProgram_NoProgram(t *testing.T) {
 		t.Error("Tables should be empty when no font program")
 	}
 }
+
+func TestTrueTypeCustomEncodingDifferences(t *testing.T) {
+	f, err := NewTrueTypeFont(core.Dict{
+		"Subtype": core.Name("TrueType"), "BaseFont": core.Name("Custom"),
+		"Encoding": core.Dict{"Differences": core.Array{core.Int(2), core.Name("fi"), core.Name("fl")}},
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.Font.DecodeString([]byte{2, 3}); got != "fifl" {
+		t.Fatalf("decoded %q, want fifl", got)
+	}
+}

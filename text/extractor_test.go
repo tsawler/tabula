@@ -1,6 +1,7 @@
 package text
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -1032,5 +1033,29 @@ func TestMaxXObjectDepth(t *testing.T) {
 
 	if ex.maxXObjectDepth != 10 {
 		t.Errorf("expected maxXObjectDepth to be 10, got %d", ex.maxXObjectDepth)
+	}
+}
+
+// A TJ adjustment must not replace the line origin used by the next Td.
+func TestTJPreservesLineOrigin(t *testing.T) {
+	for _, adjustment := range []core.Object{core.Int(18), core.Real(18.5)} {
+		ex := NewExtractor()
+		ex.RegisterFont("/F1", "Helvetica", "Type1")
+		operations := []contentstream.Operation{
+			{Operator: "BT"},
+			{Operator: "Tf", Operands: []core.Object{core.Name("F1"), core.Int(12)}},
+			{Operator: "Td", Operands: []core.Object{core.Int(195), core.Int(679)}},
+			{Operator: "TJ", Operands: []core.Object{core.Array{core.String("Deep"), adjustment, core.String("Learning")}}},
+			{Operator: "Td", Operands: []core.Object{core.Int(18), core.Int(-20)}},
+			{Operator: "Tj", Operands: []core.Object{core.String("Preferences")}},
+		}
+		fragments, err := ex.Extract(operations)
+		if err != nil {
+			t.Fatal(err)
+		}
+		last := fragments[len(fragments)-1]
+		if math.Abs(last.X-213) > 0.001 || math.Abs(last.Y-659) > 0.001 {
+			t.Fatalf("adjustment %v: next line at (%v,%v), want (213,659)", adjustment, last.X, last.Y)
+		}
 	}
 }

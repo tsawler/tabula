@@ -17,6 +17,7 @@ A Go text extraction library with a fluent API, designed for RAG (Retrieval-Augm
 - **HTML Navigation Filtering** - Remove headers, footers, nav, and sidebars from web pages with configurable exclusion modes
 - **RAG-Ready Chunking** - Semantic chunking with metadata: size-bounded chunks (no tiny fragments or over-max chunks) and automatic chapter-heading recovery for documents without explicit heading markup (e.g. scanned/OCR books)
 - **Markdown Export** - Convert extracted content to markdown
+- **Glyph Name Decoding** - Pinned Adobe Glyph List and Zapf Dingbats mappings, Unicode-name and compound-name rules, and retained TeX aliases; regenerate offline with `go generate ./font`
 - **PDF 1.0-1.7 Support** - Including modern XRef streams (PDF 1.5+)
 - **Encrypted PDFs** - Opens RC4 and AES (V2/V3) encrypted files secured with an empty user/owner password
 - **Damaged-PDF Recovery** - Rebuilds a missing/corrupt cross-reference table by scanning, and recovers streams with a missing or wrong `/Length`
@@ -155,6 +156,8 @@ text, warnings, err := tabula.Open("book.epub").Text()
 ```
 
 ### Extract as Markdown
+
+PDF Markdown export preserves reading order, headings, lists, and ruled tables directly from the document. Display equations retain approximate spatial layout in fenced text blocks; this is not a PDF-to-LaTeX converter. Use `Chunks()` for RAG output. Chunk IDs or chunk separators in `ToMarkdownWithOptions` also select the chunk-based export.
 
 ```go
 // PDF with header/footer exclusion
@@ -534,7 +537,7 @@ markdown, _, _ := tabula.Open("presentation.pptx").ToMarkdownWithOptions(opts)
 markdown, _, _ := tabula.Open("page.html").ToMarkdownWithOptions(opts)
 markdown, _, _ := tabula.Open("book.epub").ToMarkdownWithOptions(opts)
 
-// PDF-only options (used via RAG chunking pipeline)
+// PDF-only options (chunk IDs or separators select RAG chunk export)
 pdfOpts := rag.MarkdownOptions{
     IncludeMetadata:        true,
     IncludeChunkSeparators: true,   // --- between chunks (PDF only)

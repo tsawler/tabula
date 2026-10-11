@@ -4,12 +4,12 @@ import (
 	"testing"
 )
 
-// TestImagesCryptozoologyNotFullPage is the key case: every page of
-// crytopzoology.pdf carries one discrete illustration that is NOT a full-page
+// TestImagesIllustrationsNotFullPage is the key case: every page of
+// illustrations.pdf carries one discrete illustration that is NOT a full-page
 // scan. Images() must find them and their Coverage() must stay well below 1.0 so
 // callers do not misclassify them as full-page.
-func TestImagesCryptozoologyNotFullPage(t *testing.T) {
-	images, err := Open("test-pdfs/crytopzoology.pdf").Images()
+func TestImagesIllustrationsNotFullPage(t *testing.T) {
+	images, err := Open("testdata/illustrations.pdf").Images()
 	if err != nil {
 		t.Fatalf("Images() error: %v", err)
 	}
@@ -23,7 +23,7 @@ func TestImagesCryptozoologyNotFullPage(t *testing.T) {
 			t.Errorf("page %d %s: coverage %.3f should be > 0", img.Page, img.Name, cov)
 		}
 		// The illustrations nearly fill the page but leave margins; they must
-		// not read as full-page (measured values cluster around 0.83-0.84).
+		// not read as full-page (the fixture covers 81% of each page).
 		if cov >= 0.85 {
 			t.Errorf("page %d %s: coverage %.3f too high; should not be classified full-page", img.Page, img.Name, cov)
 		}
@@ -33,7 +33,7 @@ func TestImagesCryptozoologyNotFullPage(t *testing.T) {
 // TestImagesFullPageScans confirms full-page scanned PDFs report a single
 // page-filling image per page with Coverage near 1.0.
 func TestImagesFullPageScans(t *testing.T) {
-	for _, f := range []string{"advil.pdf", "3773_eng.pdf"} {
+	for _, f := range []string{"testdata/full_page_images.pdf"} {
 		images, err := Open(f).Images()
 		if err != nil {
 			t.Fatalf("%s: Images() error: %v", f, err)
@@ -53,7 +53,7 @@ func TestImagesFullPageScans(t *testing.T) {
 // TestImagesDiscreteFigures confirms PDFs with small in-page figures report
 // plausible, low-coverage bounding boxes inside the page bounds.
 func TestImagesDiscreteFigures(t *testing.T) {
-	images, err := Open("tylenol.pdf").Images()
+	images, err := Open("testdata/discrete_figures.pdf").Images()
 	if err != nil {
 		t.Fatalf("Images() error: %v", err)
 	}
@@ -61,7 +61,7 @@ func TestImagesDiscreteFigures(t *testing.T) {
 		t.Fatal("expected images, got none")
 	}
 	for _, img := range images {
-		assertPlausibleBBox(t, "tylenol.pdf", img)
+		assertPlausibleBBox(t, "testdata/discrete_figures.pdf", img)
 		if cov := img.Coverage(); cov >= 0.85 {
 			t.Errorf("page %d %s: coverage %.3f, expected a discrete figure", img.Page, img.Name, cov)
 		}
@@ -74,7 +74,7 @@ func TestImagesDiscreteFigures(t *testing.T) {
 // TestImagesNoneForTextPDF confirms a born-digital text PDF with no raster
 // images returns an empty slice (and no error).
 func TestImagesNoneForTextPDF(t *testing.T) {
-	images, err := Open("406_fre.pdf").Images()
+	images, err := Open("testdata/text_only.pdf").Images()
 	if err != nil {
 		t.Fatalf("Images() error: %v", err)
 	}
@@ -86,11 +86,11 @@ func TestImagesNoneForTextPDF(t *testing.T) {
 // TestImagesDeterministicOrdering confirms Images() returns results in a stable
 // order (by page, then draw order) across repeated calls.
 func TestImagesDeterministicOrdering(t *testing.T) {
-	first, err := Open("test-pdfs/crytopzoology.pdf").Images()
+	first, err := Open("testdata/illustrations.pdf").Images()
 	if err != nil {
 		t.Fatalf("Images() error: %v", err)
 	}
-	second, err := Open("test-pdfs/crytopzoology.pdf").Images()
+	second, err := Open("testdata/illustrations.pdf").Images()
 	if err != nil {
 		t.Fatalf("Images() error: %v", err)
 	}
@@ -112,7 +112,7 @@ func TestImagesDeterministicOrdering(t *testing.T) {
 
 // TestImagesPageSelection confirms the Pages(...) chain method scopes Images().
 func TestImagesPageSelection(t *testing.T) {
-	images, err := Open("test-pdfs/crytopzoology.pdf").Pages(1).Images()
+	images, err := Open("testdata/illustrations.pdf").Pages(1).Images()
 	if err != nil {
 		t.Fatalf("Images() error: %v", err)
 	}
